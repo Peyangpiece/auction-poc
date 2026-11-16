@@ -54,7 +54,6 @@
   tr.void td { text-decoration: line-through; color: var(--ink-3); }
   tr.focus td { font-weight: 700; background: var(--ground-alt); }
   td .btn { min-height: 40px; padding: 4px 14px; font-size: 14px; }
-  .empty { color: var(--ink-3); font-size: 14px; padding: 10px 0; }
   .addlot { display: grid; grid-template-columns: minmax(0, 1fr) 130px 170px auto; gap: 8px; align-items: end; margin-top: 16px; }
   @media (max-width: 640px) { .addlot { grid-template-columns: minmax(0, 1fr); } }
 
@@ -71,14 +70,13 @@
   #comments .who { color: var(--ink-3); }
   #comments .btn { min-height: 32px; padding: 2px 10px; font-size: 13px; }
   #log { font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; overscroll-behavior: contain; font-variant-numeric: tabular-nums; color: var(--ink-2); }
-  #log:empty::before { content: attr(data-empty); color: var(--ink-3); }
 
   details summary { cursor: pointer; font-size: 15px; font-weight: 700; letter-spacing: .12em; color: var(--action); min-height: 44px; display: flex; align-items: center; }
   details .stack { display: grid; gap: 8px; justify-items: start; margin-top: 8px; }
 </style>
 </head>
 <body>
-<div class="overlay" id="overlay" role="alert"><div><span id="overlayText">再接続中…</span><small id="overlaySub">サーバーが戻りしだい、自動でつなぎ直します</small></div></div>
+<div class="overlay" id="overlay" role="alert"><div><span id="overlayText">再接続中…</span></div></div>
 
 <header class="brandbar">
   <div>
@@ -107,8 +105,8 @@
         </div>
         <p class="board-result" id="result" role="status"></p>
         <div class="lamps">
-          <div class="lamp" id="urikiri" role="status"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub">最低落札額なし</small></div>
-          <div class="lamp" id="right" role="status"><span class="bulb"></span><b id="rightLabel">最高入札者</b><small class="num" id="rightSub">なし</small></div>
+          <div class="lamp" id="urikiri" role="status"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub"></small></div>
+          <div class="lamp" id="right" role="status"><span class="bulb"></span><b id="rightLabel">最高入札者</b><small class="num" id="rightSub"></small></div>
         </div>
       </div>
       <div class="actions">
@@ -128,19 +126,17 @@
       <div class="tablewrap" id="histWrap" tabindex="0" aria-label="入札の履歴">
         <table><thead><tr><th scope="col">受付連番</th><th scope="col">受付時刻</th><th scope="col">参加番号</th><th scope="col">入札額</th><th scope="col"><span class="sr-only">状態</span></th></tr></thead><tbody id="history"></tbody></table>
       </div>
-      <p class="empty" id="histEmpty">入札はまだありません。</p>
     </section>
 
     <section aria-labelledby="lotsTitle">
       <h2 id="lotsTitle">ロット一覧</h2>
       <div class="tablewrap">
-        <table><thead><tr><th scope="col">番号</th><th scope="col">商品</th><th scope="col">開始価格</th><th scope="col">最低落札額（非表示）</th><th scope="col">状態</th><th scope="col">結果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="lots"></tbody></table>
+        <table><thead><tr><th scope="col">番号</th><th scope="col">商品</th><th scope="col">開始価格</th><th scope="col">最低落札額</th><th scope="col">状態</th><th scope="col">結果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="lots"></tbody></table>
       </div>
-      <p class="empty" id="lotsEmpty">ロットがまだありません。下の欄から追加してください。</p>
       <form class="addlot" id="addLot">
         <label class="field">商品名<input class="input" id="newTitle" name="title" value="テスト品" autocomplete="off" required></label>
         <label class="field">開始価格（税込）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" value="9500" autocomplete="off" required></label>
-        <label class="field">最低落札額（任意、参加者には非表示）<input class="input num" id="newReserve" name="reserve" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="なし"></label>
+        <label class="field">最低落札額（任意・非公開）<input class="input num" id="newReserve" name="reserve" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="なし"></label>
         <button class="btn" id="create" type="submit">ロットを追加</button>
       </form>
     </section>
@@ -152,13 +148,11 @@
       <dl class="kv">
         <dt>配信エージェント</dt><dd><span class="state" id="s_agent">未接続</span></dd>
         <dt>OBS</dt><dd><span class="state" id="s_obs">不明</span></dd>
-        <dt>LIVE の判定</dt><dd id="s_by">未取得</dd>
         <dt>自動停止まで</dt><dd class="num" id="s_auto">未取得</dd>
       </dl>
       <div class="actions">
         <button class="btn" data-cmd="stream_start" type="button">配信を開始</button>
         <button class="btn" data-cmd="stream_stop" type="button">配信を停止</button>
-        <button class="btn" data-cmd="stream_status" type="button">状態を問い合わせる</button>
       </div>
       <form class="inline" id="autoForm">
         <label class="field">自動停止までの待ち時間（秒）<input class="input num" id="autoSec" name="sec" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" required></label>
@@ -169,17 +163,18 @@
     <section aria-labelledby="cmtTitle">
       <h2 id="cmtTitle">参加者のコメント</h2>
       <ul id="comments"></ul>
-      <p class="empty" id="cmtEmpty">コメントはまだありません。</p>
     </section>
 
     <section aria-labelledby="logTitle">
       <h2 id="logTitle">操作の記録</h2>
-      <div id="log" role="log" aria-live="polite" tabindex="0" data-empty="記録はまだありません。"></div>
+      <div id="log" role="log" aria-live="polite" tabindex="0"></div>
     </section>
 
     <details>
       <summary>測定と障害の模擬</summary>
       <p class="note">時刻の差 <span class="num" id="offset">0</span> ms、往復 <span class="num" id="rtt">0</span> ms</p>
+      <p class="note">LIVE の判定: <span id="s_by"></span></p>
+      <div class="stack"><button class="btn" data-cmd="stream_status" type="button">配信の状態を問い合わせる</button></div>
       <form class="inline" id="markForm">
         <label class="field">測定のラベル<input class="input" id="markLabel" name="label" placeholder="例: P1-1" autocomplete="off"></label>
         <button class="btn" data-mark="start" type="button">開始の印</button>
@@ -190,7 +185,7 @@
         <button class="btn btn-danger" data-crash="after_close_record" type="button">次の「締め」の記録直後に強制終了…</button>
         <button class="btn btn-danger" data-crash="before_close_record" type="button">次の「締め」の記録前に強制終了…</button>
       </div>
-      <p class="note" id="crashNote">強制終了の後は、サーバーが自動で起動し直すのを待ちます。</p>
+      <p class="note" id="crashNote"></p>
     </details>
   </div>
 </main>
@@ -225,7 +220,6 @@ function renderComments() {
     li.append(who, body, hide);
     return li;
   })));
-  $('cmtEmpty').style.display = S.comments.length ? 'none' : 'block';
 }
 const log = (text) => { const el = $('log'); follow(el, () => { el.textContent += `${jst(link ? link.serverNow() : Date.now())} ${text}\n`; }); };
 
@@ -234,7 +228,7 @@ function setLamp(id, on, sub) {
   const el = $(id);
   el.className = on ? 'lamp on' : 'lamp';
   $(id + 'Sub').textContent = sub;
-  el.setAttribute('aria-label', `${$(id + 'Label').textContent}、${on ? '点灯' : '消灯'}。${sub}`);
+  el.setAttribute('aria-label', `${$(id + 'Label').textContent}、${on ? '点灯' : '消灯'}${sub ? '。' + sub : ''}`);
 }
 function render() {
   const lot = focusLot();
@@ -247,17 +241,17 @@ function render() {
   $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札価格' : lot.currentPrice === null ? '開始価格' : '現在価格';
   $('price').textContent = lot ? yen(lot.currentPrice ?? lot.startPrice) : '';
   // 落札の条件は、うりきり（最低落札額に届いている）と、最高入札者がいることの両方
-  setLamp('urikiri', !!lot?.urikiri, !lot ? '最低落札額なし' : lot.reservePrice === null ? '最低落札額なし' : `最低落札額 ${yen(lot.reservePrice)}（参加者には非表示）`);
-  setLamp('right', !!lot?.highestPaddle && st !== 'unsold', lot?.highestPaddle ? `${lot.highestPaddle}番` : 'なし');
+  setLamp('urikiri', !!lot?.urikiri, !lot || lot.reservePrice === null ? '' : `最低落札額 ${yen(lot.reservePrice)}`);
+  setLamp('right', !!lot?.highestPaddle && st !== 'unsold', lot?.highestPaddle ? `${lot.highestPaddle}番` : '');
   const ended = st === 'sold' || st === 'unsold' || st === 'not_held';
   const next = [...S.lots.values()].find((l) => l.status === 'waiting'); // 出品順でいちばん先の、待機中のロット
-  $('result').textContent = !lot ? (next ? '「次のロットを開始」を押すと、競りが始まります' : 'ロット一覧に、ロットを追加してください')
+  // 板の案内は、進行役の判断に要ることだけ: 締めたらどうなるか、結果、配信が始まらないとき
+  $('result').textContent = !lot ? (next ? '' : 'ロットを追加してください')
     : st === 'sold' ? `${lot.highestPaddle}番 落札`
-    : st === 'unsold' ? (lot.currentPrice !== null ? '流札（最低落札額に届きませんでした）' : '流札')
-    : st === 'open' ? (lot.currentPrice === null ? '入札はまだありません。いま締めると流札になります' : lot.urikiri ? `いま締めると、${lot.highestPaddle}番が落札します` : 'いま締めると流札になります（最低落札額に届いていません）')
-    : st === 'preparing' ? '配信が始まるのを待っています'
-    : st === 'preparing_warn' ? '配信が始まりません（60秒経過）。映像なしで開始するか、待機に戻してください'
-    : st === 'suspended' ? '中断しています' : '';
+    : st === 'unsold' ? '流札'
+    : st === 'open' ? (lot.urikiri && lot.currentPrice !== null ? `締めると ${lot.highestPaddle}番が落札` : '締めると流札')
+    : st === 'preparing_warn' ? '配信が始まりません（60秒経過）'
+    : '';
   // その状態でできる操作だけを出す
   const show = (id, on) => { $(id).hidden = !on; };
   // 締めた後・最初は、次にやることが1つだけ（次のロットを開始）。板から目を離さずに進められる
@@ -274,12 +268,10 @@ function render() {
     tr.append(cell(h.seq, 'num'), cell(jst(h.received_at), 'num'), cell(`${h.paddle}番`, 'num'), cell(yen(h.amount), 'digits amt'), cell(h.valid ? '' : '無効'));
     return tr;
   })));
-  $('histEmpty').style.display = S.history.length ? 'none' : 'block';
   $('histCount').textContent = `${S.history.filter((h) => h.valid).length}件`;
 
   const busy = [...S.lots.values()].some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status));
   const tb = $('lots'); tb.replaceChildren();
-  $('lotsEmpty').style.display = S.lots.size ? 'none' : 'block';
   for (const l of S.lots.values()) {
     const tr = document.createElement('tr');
     if (l.id === S.focus) tr.className = 'focus';
@@ -314,14 +306,14 @@ setInterval(() => {
   $('clock').textContent = jst(link.serverNow());
   $('offset').textContent = link.offset.toFixed(1); $('rtt').textContent = link.rtt?.toFixed(1) ?? '0';
   const due = S.stream?.autoStopDueAt;
-  $('s_auto').textContent = due ? `あと ${Math.max(0, Math.ceil((due - link.serverNow()) / 1000))} 秒` : '数えていません';
+  $('s_auto').textContent = due ? `あと ${Math.max(0, Math.ceil((due - link.serverNow()) / 1000))} 秒` : 'なし';
 }, 50);
 
 async function cmd(action, extra = {}) {
   const reqId = ++link.reqId, sent = localNow();
   const res = await link.request(reqId, { type: 'cmd', reqId, action, ...extra, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
   // うまくいかなかった操作は、記録の欄だけでなく、操作した場所のすぐ下にも理由を出す
-  $('cmdMsg').textContent = !res ? '応答がありません。接続を確かめて、もう一度操作してください' : res.ok ? '' : res.message;
+  $('cmdMsg').textContent = !res ? '応答がありません' : res.ok ? '' : res.message;
   if (!res) log(`${action}: 応答なし`);
   else if (!res.ok) log(`${action}: 拒否（${res.message}）`);
   else log(`${action}: OK${res.status ? `（${STATE_LABEL[res.status]}${res.reason === 'reserve_not_met' ? '・最低落札額に届かず' : ''} ${res.paddle ?? ''} ${res.amount ? yen(res.amount) : ''}）` : ''} ${Math.round(res.clientRecvAt - sent)}ms`);
@@ -384,7 +376,7 @@ function onMessage(msg, at) {
       if (msg.type === 'welcome') {
         log(`接続しました（${msg.name}）`);
         document.querySelectorAll('[data-crash]').forEach((b) => { b.disabled = !msg.allowCrash; });
-        if (!msg.allowCrash) $('crashNote').textContent = 'この環境では、障害の模擬は無効です（POC_ALLOW_CRASH=1 で有効になります）。';
+        if (!msg.allowCrash) $('crashNote').textContent = '障害の模擬は無効です（POC_ALLOW_CRASH=1 で有効）';
       }
       render(); renderStream(); break;
     case 'lot': {
@@ -419,7 +411,7 @@ function onMessage(msg, at) {
 }
 let link = null;
 const token = params.get('t');
-if (!token) { $('overlay').style.display = 'flex'; $('overlayText').textContent = 'URL が正しくありません'; $('overlaySub').textContent = '進行役用の URL（?t= つき）を開き直してください'; }
+if (!token) { $('overlay').style.display = 'flex'; $('overlayText').textContent = '進行役用の URL を開き直してください'; }
 else link = new Link({ token, label: 'console', onMessage, onStatus: (up, why) => { $('overlay').style.display = up ? 'none' : 'flex'; $('overlayText').textContent = why ?? '再接続中…'; } });
 </script>
 </body>

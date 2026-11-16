@@ -26,7 +26,7 @@
   /* 上回られたら、画面全体の色を変える（FR-UI-004） */
   body.outbid { background: var(--alarm); }
   body.outbid .top h1, body.outbid #lotNo, body.outbid h2, body.outbid main h2, body.outbid .fine, body.outbid .fine summary, body.outbid .hist .count,
-  body.outbid #history .who, body.outbid #history .amt, body.outbid #history .at, body.outbid #comments, body.outbid #comments .who, body.outbid .switch, body.outbid #empty, body.outbid #cmtEmpty { color: #fff; }
+  body.outbid #history .who, body.outbid #history .amt, body.outbid #history .at, body.outbid #comments, body.outbid #comments .who, body.outbid .switch { color: #fff; }
 
   /* 応札／観戦 */
   .seg { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; flex: none; border: 1px solid var(--action); border-radius: var(--r); background: var(--field); overflow: hidden; }
@@ -41,7 +41,6 @@
   #videoBox video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
   #break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: #000; color: #fff; }
   #break strong { font-size: 18px; font-weight: 600; }
-  #break span { font-size: 14px; color: rgba(255, 255, 255, .72); }
 
   /* 表示板（スマホでは下に固定） */
   .board { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; gap: 8px;
@@ -81,7 +80,6 @@
   #history li.void .amt, #history li.void .who { text-decoration: line-through; color: var(--ink-3); }
   #history li.new { animation: rowin .3s var(--ease); }
   @keyframes rowin { from { opacity: 0; transform: translateY(4px); } }
-  #empty, #cmtEmpty { padding: 10px 0; color: var(--ink-3); font-size: 14px; }
 
   .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); cursor: pointer; min-height: 44px; }
   .switch input { appearance: none; width: 44px; height: 26px; border-radius: 13px; background: var(--ink-3); position: relative; cursor: pointer; margin: 0; transition: background-color .15s var(--ease); }
@@ -114,7 +112,6 @@
   #gate .mark { width: 96px; height: 96px; }
   #gate .co { font-weight: 700; letter-spacing: .1em; }
   #gate h1 { font-size: 26px; letter-spacing: .08em; color: var(--action); border-bottom: 1px solid var(--red); padding-bottom: 12px; }
-  #gate ul { padding-left: 1.2em; display: grid; gap: 8px; color: var(--ink-2); font-size: 15px; }
   #gateMsg { color: var(--danger); font-size: 14px; font-weight: 600; }
   #gateMsg:empty { display: none; }
 
@@ -147,7 +144,8 @@
     .board .lamps { padding-top: 16px; }
     #bid { min-height: 60px; }
     .plabel { font-size: 13px; }
-    .price { font-size: 84px; }
+    .price { font-size: 72px; }
+    .board-main { flex-wrap: nowrap; }
     .board-result { font-size: 18px; }
   }
   /* 幅の狭い端末: 社名と「応札／観戦」がぶつからないように詰める */
@@ -169,19 +167,13 @@
     <img class="mark" src="emblem-400.webp" width="96" height="96" alt="NEWS 3R">
     <p class="co">株式会社NEWS</p>
     <h1>ライブオークション</h1>
-    <ul>
-      <li>「うりきり」と「権利」のランプが両方点いている人が落札します。「うりきり」は、出品者が決めた最低落札額に届くと点きます（金額は表示されません）。</li>
-      <li>上回られたときは、音と画面の色でお知らせします。「参加する」を押すと、確認の音が鳴ります。</li>
-      <li>入札額は税込で、参加者全員に公開されます。</li>
-      <li>締めは進行役の操作で確定します。通信や映像の遅れにより、締めの直前の入札が間に合わないことがあります。</li>
-    </ul>
     <button class="btn btn-primary btn-lg" id="enter" type="button">参加する</button>
     <p id="gateMsg" role="alert"></p>
   </div>
 </div>
 
 <p class="sr-only" id="alert" role="alert"></p>
-<div class="overlay" id="overlay" role="alert"><div><span id="overlayText">再接続中…</span><small id="overlaySub">通信が戻りしだい、自動でつなぎ直します</small></div></div>
+<div class="overlay" id="overlay" role="alert"><div><span id="overlayText">再接続中…</span></div></div>
 
 <header class="brandbar">
   <div>
@@ -202,7 +194,7 @@
 <main>
   <div id="videoBox">
     <video id="video" playsinline muted aria-label="会場のライブ映像"></video>
-    <div id="break"><strong id="breakTitle">映像は停止中です</strong><span id="breakSub"></span></div>
+    <div id="break"><strong id="breakTitle">映像は停止中です</strong></div>
   </div>
 
   <div class="side">
@@ -219,8 +211,8 @@
       </div>
       <p class="board-result" id="result" role="status"></p>
       <div class="lamps">
-        <div class="lamp" id="urikiri" role="img"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub">最低落札額に未達</small></div>
-        <div class="lamp" id="right" role="img"><span class="bulb"></span><b id="rightLabel">権利</b><small class="num" id="rightSub">最高入札者なし</small></div>
+        <div class="lamp" id="urikiri" role="img"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub"></small></div>
+        <div class="lamp" id="right" role="img"><span class="bulb"></span><b id="rightLabel">権利</b><small class="num" id="rightSub"></small></div>
       </div>
       <p id="msg" role="status" aria-live="polite"></p>
       <button class="btn btn-lg digits" id="bid" type="button" disabled>入札</button>
@@ -229,11 +221,10 @@
     <section class="hist" aria-labelledby="histTitle">
       <div class="sechead"><h2 id="histTitle">入札の履歴</h2><span class="count num" id="count">0件</span></div>
       <ul id="history" class="rows"></ul>
-      <p id="empty">入札はまだありません。</p>
     </section>
 
     <div class="fine">
-      <p class="note">「うりきり」と「権利」の両方が点いている人が落札します。最低落札額の金額は表示されません。落札価格に送料は含まれません。</p>
+      <p class="note">落札価格に送料は含まれません。締めの直前の入札は、通信の遅れで間に合わないことがあります。</p>
       <p class="note" id="contact"></p>
       <details>
         <summary>検証用の情報</summary>
@@ -259,13 +250,12 @@
     </div>
     <div id="cmtBody">
       <ul id="comments" aria-live="polite"></ul>
-      <p id="cmtEmpty">コメントはまだありません。</p>
       <form id="cmtForm">
-        <label class="sr-only" for="cmtText">コメント（20文字まで）</label>
-        <input class="input" id="cmtText" name="comment" maxlength="20" autocomplete="off" enterkeyhint="send" placeholder="コメント（20文字まで）" aria-describedby="cmtCount">
+        <label class="sr-only" for="cmtText">コメント</label>
+        <input class="input" id="cmtText" name="comment" maxlength="20" autocomplete="off" enterkeyhint="send" placeholder="コメント" aria-describedby="cmtCount">
         <button class="btn" id="cmtSend" type="submit">送信</button>
       </form>
-      <span class="num" id="cmtCount">0／20文字</span>
+      <span class="num" id="cmtCount">0／20</span>
       <p id="cmtMsg" role="alert"></p>
     </div>
   </section>
@@ -330,7 +320,7 @@ function setLamp(id, state, label, sub) {
   el.className = 'lamp' + (state ? ' ' + state : '');
   $(id + 'Label').textContent = label;
   $(id + 'Sub').textContent = sub;
-  el.setAttribute('aria-label', `${label}、${state ? '点灯' : '消灯'}。${sub}`);
+  el.setAttribute('aria-label', `${label}、${state ? '点灯' : '消灯'}${sub ? '。' + sub : ''}`);
 }
 function render() {
   const lot = focusLot();
@@ -338,9 +328,9 @@ function render() {
   if (!lot) {
     $('lotNo').textContent = ''; $('title').textContent = '次のロットをお待ちください';
     $('status').textContent = '待機中'; $('status').dataset.on = '';
-    $('priceLabel').textContent = '現在価格'; $('price').textContent = ''; $('result').textContent = '次のロットの開始をお待ちください';
-    setLamp('urikiri', '', 'うりきり', '最低落札額に未達'); setLamp('right', '', '権利', '最高入札者なし');
-    $('bid').disabled = true; $('bid').textContent = '入札'; S.shownPrice = null; return;
+    $('priceLabel').textContent = '現在価格'; $('price').textContent = ''; $('result').textContent = '';
+    setLamp('urikiri', '', 'うりきり', ''); setLamp('right', '', '権利', '');
+    $('bid').disabled = true; $('bid').textContent = '次のロットをお待ちください'; S.shownPrice = null; return;
   }
   const st = lot.status;
   const mine = lot.highestPaddle !== null && lot.highestPaddle === S.paddle;
@@ -359,17 +349,13 @@ function render() {
 
   // 「うりきり」: 最低落札額（公開）に届いていて、この価格で締めれば売れる。「権利」: 最高入札者。両方が点いた人が落札する
   const urikiri = !!lot.urikiri;
-  // 最低落札額の金額は表示しない（端末にも届かない）。分かるのは、届いたかどうかだけ
-  setLamp('urikiri', urikiri ? 'on' : '', 'うりきり', urikiri ? (ended ? '最低落札額に到達' : 'この価格で売り切り') : '最低落札額に未達');
+  // 最低落札額の金額は表示しない（端末にも届かない）。分かるのは、届いたかどうか（ランプ）だけ
+  setLamp('urikiri', urikiri ? 'on' : '', 'うりきり', '');
   const holds = mine && st !== 'unsold';
   setLamp('right', holds ? (st === 'sold' ? 'won' : 'on') : '', holds && st === 'sold' ? '落札' : '権利',
-    lot.highestPaddle === null ? '最高入札者なし' : mine ? `あなた（${lot.highestPaddle}番）` : `最高入札者 ${lot.highestPaddle}番`);
+    lot.highestPaddle === null ? '' : mine ? 'あなた' : `${lot.highestPaddle}番`);
 
-  $('result').textContent = st === 'sold' ? (mine ? `あなたが落札しました（${lot.highestPaddle}番）` : `${lot.highestPaddle}番 落札`)
-    : st === 'unsold' ? (lot.currentPrice !== null ? '流札（最低落札額に届きませんでした）' : '流札')
-    : st === 'suspended' ? '中断しています。再開をお待ちください'
-    : !ended && !urikiri && lot.currentPrice !== null ? '最低落札額に届くまで、落札にはなりません'
-    : '';
+  $('result').textContent = st === 'sold' ? (mine ? 'あなたが落札しました' : `${lot.highestPaddle}番 落札`) : st === 'unsold' ? '流札' : '';
 
   // 入札ボタン。観戦中は「応札に切り替える」ボタンとして働く（切り替えの場所を探させない）
   const watching = S.mode !== 'bid';
@@ -402,7 +388,6 @@ function renderHistory() {
   })));
   S.rendered = S.history.length;
   $('count').textContent = `${S.history.filter((h) => h.valid).length}件`;
-  $('empty').style.display = S.history.length ? 'none' : 'block';
 }
 function renderStream() {
   const show = $('showVideo').checked && !venue;
@@ -410,7 +395,6 @@ function renderStream() {
   const live = !!S.stream?.live && !!S.stream?.playbackUrl;
   $('break').style.display = live ? 'none' : 'flex';
   $('breakTitle').textContent = S.stream?.live ? '映像を準備しています' : '映像は停止中です';
-  $('breakSub').textContent = S.stream?.live ? '' : '入札の受付が始まると、映像も始まります';
   if (show && live) startPlayer(); else stopPlayer();
 }
 
@@ -437,11 +421,10 @@ function renderComments() {
     li.append(who, body);
     return li;
   })));
-  $('cmtEmpty').style.display = S.comments.length ? 'none' : 'block';
 }
 $('cmtOn').checked = store.get('poc-comments', 'on') === 'on';
 $('cmtOn').addEventListener('change', () => { store.set('poc-comments', $('cmtOn').checked ? 'on' : 'off'); renderComments(); });
-const countComment = () => { $('cmtCount').textContent = `${[...$('cmtText').value].length}／${S.cmtMax}文字`; };
+const countComment = () => { $('cmtCount').textContent = `${[...$('cmtText').value].length}／${S.cmtMax}`; };
 $('cmtText').addEventListener('input', countComment);
 $('cmtForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -580,7 +563,6 @@ $('bid').addEventListener('click', async () => {
   if (!lot) return;
   if ($('bid').dataset.action === 'join') { // 観戦中に押したら、まず応札に切り替えるだけ（この1回では入札しない）
     setMode('bid'); link.event('mode', { mode: 'bid', via: 'bid-button' });
-    say('応札に切り替えました。もう一度押すと入札します');
     return;
   }
   $('bid').disabled = true;
@@ -588,7 +570,7 @@ $('bid').addEventListener('click', async () => {
   const reqId = ++link.reqId, sent = localNow();
   const res = await link.request(reqId, { type: 'bid', reqId, lotId: lot.id, amount: lot.minBid, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
   if (!res) {
-    say(link.up ? '応答がありません。価格の表示を確かめて、必要ならもう一度押してください' : '通信が切れました。入札が届いたかは、つながり直した後の表示で確かめてください', 'ng');
+    say(link.up ? '応答がありません。価格を確かめてください' : '通信が切れました。入札が届いたかは、つながり直した後に確かめてください', 'ng');
     render(); return;
   }
   const shown = localNow();
@@ -633,15 +615,14 @@ $('enter').addEventListener('click', async () => {
   $('audio').textContent = audioCtx ? audioCtx.state : '使えない';
   $('vib').textContent = 'vibrate' in navigator ? '対応' : '非対応';
   $('gate').style.display = 'none';
-  $('result').textContent = '接続しています…';
+  $('bid').textContent = '接続しています…';
   $('showVideo').checked = !venue; $('showVideo').disabled = venue;
   link = new Link({
     token, label: `bidder:${net}:${venue ? 'venue' : 'online'}`, onMessage,
     onStatus: (up, why, reconnected) => {
       $('overlay').style.display = up ? 'none' : 'flex';
       $('overlayText').textContent = why ?? '再接続中…';
-      $('overlaySub').textContent = why ? '受付で受け取った URL を開き直してください' : '通信が戻りしだい、自動でつなぎ直します';
-      if (up && reconnected) say('つながり直しました。最新の状態を表示しています');
+      if (up && reconnected) say('つながり直しました');
     },
   });
   const wake = await requestWake();
