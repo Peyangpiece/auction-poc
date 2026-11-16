@@ -138,3 +138,31 @@ test('配信準備中にサーバーが落ちたら、再起動後は待機に�
   ({ auctioneer: A, members: m } = await connectAll(srv, ctx, 2));
   assert.equal(A.lots.get(lot.id).status, 'waiting');
 });
+
+test('既定では自動停止しない: 落札の後も配信は続き、止まるのは進行役が停止を押したときだけ', async () => {
+  // 既定の設定（POC_AUTO_STOP_MS を指定しない）のサーバーを、別に立てて確かめる
+  const ctx2 = makeEnv({ POC_IVS_MODE: 'mock', POC_IVS_MOCK_DELAY_MS: '200', POC_LIVE_SETTLE_MS: '300' });
+  delete ctx2.env.POC_AUTO_STOP_MS;
+  const srv2 = await startServer(ctx2);
+  const obs2 = startMockObs({ port: 0, startDelayMs: 100, stopDelayMs: 100 });
+  await new Promise((r) => obs2.wss.on('listening', r));
+  const { auctioneer: A2 } = await connectAll(srv2, ctx2, 0);
+  const connected = A2.waitFor((x) => x.type === 'stream' && x.stream.agentConnected);
+  const agent2 = spawn('node', ['src/agent.js'], {
+    cwd: path.join(ROOT, 'agent'), stdio: 'ignore',
+    env: { ...process.env, AGENT_SERVER_URL: srv2.agentUrl, AGENT_TOKEN: ctx2.tokens.agent, OBS_URL: `ws://127.0.0.1:${obs2.wss.address().port}`, AGENT_LOG_DIR: path.join(ctx2.dataDir, 'agent-logs') },
+  });
+  await connected;
+  const lot = await createLot(A2, 1000);
+  const opened = A2.waitFor((x) => x.type === 'lot' && x.lot.id === lot.id && x.lot.status === 'open');
+  await A2.cmd('start', { lotId: lot.id });
+  await opened;
+  await A2.cmd('close', { lotId: lot.id });
+  await sleep(2500); // 以前の試験用の設定（1秒）なら、とうに止まっている長さ
+  assert.equal(obs2.state.active, true, '競りがなくても配信は続く');
+  const stopped = A2.waitFor((x) => x.type === 'stream' && x.stream.obsActive === false);
+  assert.equal((await A2.cmd('stream_stop')).ok, true);
+  await stopped;
+  assert.equal(obs2.state.active, false);
+  agent2.kill(); await obs2.close(); await srv2.stop(); cleanup(ctx2);
+});

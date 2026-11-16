@@ -94,7 +94,7 @@ node tools/aggregate.js --label P2-6
 | `IVS_CHANNEL_ARN` / `IVS_PLAYBACK_URL` / `AWS_REGION` | — | `aws` のときに使う |
 | `POC_EVENTBRIDGE_SECRET` | — | EventBridge からの POST を確かめる合言葉。空なら受け口は閉じる |
 | `POC_INCREMENT_TABLE` | P2-4 の例 | 入札単位の表（本仕様 OQ-14 が決まったら差し替える） |
-| `POC_AUTO_STOP_MS` | 180000 | 無操作で配信を止めるまで（進行コンソールからも変えられる） |
+| `POC_AUTO_STOP_MS` | 0 | 競りがない状態が続いたら配信を自動で止めるまでのミリ秒。0 は止めない（既定） |
 | `POC_LIVE_SETTLE_MS` / `POC_LIVE_TIMEOUT_MS` | 8000 / 60000 | LIVE から受付中までの待ち／警告にするまで |
 | `POC_VENUE_CONTACT` | — | 入札画面の下に出す会場の連絡先。空なら出さない |
 | `POC_COMMENT_MAX_LENGTH` / `POC_COMMENT_INTERVAL_MS` | 20 / 3000 | コメントの長さの上限／続けて書き込めるまでの間隔 |

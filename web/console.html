@@ -148,16 +148,11 @@
       <dl class="kv">
         <dt>配信エージェント</dt><dd><span class="state" id="s_agent">未接続</span></dd>
         <dt>OBS</dt><dd><span class="state" id="s_obs">不明</span></dd>
-        <dt>自動停止まで</dt><dd class="num" id="s_auto">未取得</dd>
       </dl>
       <div class="actions">
         <button class="btn" data-cmd="stream_start" type="button">配信を開始</button>
         <button class="btn" data-cmd="stream_stop" type="button">配信を停止</button>
       </div>
-      <form class="inline" id="autoForm">
-        <label class="field">自動停止までの待ち時間（秒）<input class="input num" id="autoSec" name="sec" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" required></label>
-        <button class="btn" id="autoSet" type="submit">変更</button>
-      </form>
     </section>
 
     <section aria-labelledby="cmtTitle">
@@ -299,14 +294,11 @@ function renderStream() {
   $('s_by').textContent = `問い合わせ ${yn(s.liveBy.poll)}、イベント ${yn(s.liveBy.event)}` + (s.mode === 'mock' ? `、代役 ${yn(s.liveBy.mock)}` : '');
   $('s_agent').textContent = s.agentConnected ? '接続中' : '未接続'; $('s_agent').dataset.on = s.agentConnected ? '1' : '';
   $('s_obs').textContent = s.obsActive === null ? '不明' : s.obsActive ? '配信中' : '停止'; $('s_obs').dataset.on = s.obsActive ? '1' : '';
-  if (document.activeElement !== $('autoSec')) $('autoSec').value = Math.round(s.autoStopMs / 1000);
 }
 setInterval(() => {
   if (!link) return;
   $('clock').textContent = jst(link.serverNow());
   $('offset').textContent = link.offset.toFixed(1); $('rtt').textContent = link.rtt?.toFixed(1) ?? '0';
-  const due = S.stream?.autoStopDueAt;
-  $('s_auto').textContent = due ? `あと ${Math.max(0, Math.ceil((due - link.serverNow()) / 1000))} 秒` : 'なし';
 }, 50);
 
 async function cmd(action, extra = {}) {
@@ -365,7 +357,6 @@ document.querySelectorAll('[data-crash]').forEach((b) => b.addEventListener('cli
 }));
 document.querySelectorAll('[data-mark]').forEach((b) => b.addEventListener('click', () => cmd('mark', { label: $('markLabel').value || 'unnamed', phase: b.dataset.mark })));
 $('markForm').addEventListener('submit', (ev) => ev.preventDefault());
-$('autoForm').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('set_auto_stop', { ms: Number($('autoSec').value) * 1000 }); });
 $('addLot').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('create_lot', { title: $('newTitle').value, startPrice: Number($('newPrice').value), reservePrice: $('newReserve').value === '' ? null : Number($('newReserve').value) }); });
 
 function onMessage(msg, at) {

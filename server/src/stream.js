@@ -110,7 +110,7 @@ export class StreamControl extends EventEmitter {
   }
 
   setAutoStopMs(ms) {
-    if (!Number.isFinite(ms) || ms < 1000) throw new Error('自動停止までの待ち時間は1秒以上にしてください');
+    if (!Number.isFinite(ms) || (ms !== 0 && ms < 1000)) throw new Error('自動停止までの待ち時間は、0（止めない）か1秒以上にしてください');
     this.autoStopMs = ms;
     this.metrics.write('auto_stop_setting', { autoStopMs: ms });
     if (this.autoStopTimer) {
@@ -127,6 +127,7 @@ export class StreamControl extends EventEmitter {
   }
 
   #armAutoStop() {
+    if (this.autoStopMs <= 0) return; // 自動停止なし（既定）
     if (this.autoStopTimer || this.config.ivsMode === 'always-live') return;
     // 配信が動いている（または動かそうとしている）ときだけ数える
     if (!(this.isLive() || this.obsActive || this.desired === 'on')) return;

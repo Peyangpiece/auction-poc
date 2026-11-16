@@ -23,7 +23,10 @@ export function loadConfig(env = process.env) {
     // 配信の制御（本仕様 8.6、FR-STR-003）
     liveSettleMs: num(env.POC_LIVE_SETTLE_MS, 8000), // LIVE になってから受付中までの待ち時間（決定 v0.11: 8秒）
     liveTimeoutMs: num(env.POC_LIVE_TIMEOUT_MS, 60000), // LIVE にならないときに警告にするまで（決定 v0.11: 60秒）
-    autoStopMs: num(env.POC_AUTO_STOP_MS, 180000), // 無操作で配信を止めるまで（OQ-05: 例の3分）
+    // 競りがない状態が続いたときの、配信の自動停止。既定は 0（自動では止めない）。
+    // 発注者の決定: 競りの合間に商品の状態の説明などをするので、配信は止めない。止めるのは進行役の「配信を停止」だけ。
+    // 元の仕様（FR-STR-003 の3分で自動停止）を試すときだけ、ミリ秒で指定する。
+    autoStopMs: num(env.POC_AUTO_STOP_MS, 0),
     agentCmdTimeoutMs: num(env.POC_AGENT_CMD_TIMEOUT_MS, 15000),
 
     // IVS の状態の取得（POC-IVS-001）。
