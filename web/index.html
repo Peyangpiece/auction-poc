@@ -16,15 +16,16 @@
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
+<a class="skip" href="#main">本文へ進む</a>
 <header class="brandbar">
   <div>
-    <a class="brand" href="/">
+    <a class="brand" href="/" translate="no">
       <picture><source srcset="logo-dark.svg" media="(prefers-color-scheme: dark)"><img class="brand__logo" src="logo.svg" width="178" height="48" alt="令和の競り（株式会社レイワ）"></picture>
     </a>
     <nav id="nav" aria-label="メニュー"></nav>
   </div>
 </header>
-<main>
+<main id="main" tabindex="-1">
 <h1 class="sr-only">令和の競り</h1>
 <section class="today" id="today" hidden aria-labelledby="todayTitle">
   <p class="today__tag">本日開催</p>

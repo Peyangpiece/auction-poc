@@ -94,6 +94,10 @@ h2 { font-size: 15px; letter-spacing: .12em; color: var(--action); }
 p { text-wrap: pretty; }
 .num { font-variant-numeric: tabular-nums; }
 .digits { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+/* キーボードで操作する人が、ヘッダーを飛ばして本文へ進むためのリンク。フォーカスが当たったときだけ見える */
+.skip { position: absolute; left: 8px; top: -64px; z-index: 100; padding: 12px 16px; background: var(--ground); color: var(--action); font-weight: 700; border: 2px solid var(--action); border-radius: var(--r); }
+.skip:focus-visible { top: 8px; }
+main:focus { outline: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .note { font-size: 13px; color: var(--ink-3); }
 :focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }

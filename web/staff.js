@@ -160,13 +160,15 @@ const shippingForm = (accountId, eventId, name, now = null) => askForm('送料�
   [field('送料（円・税込）', 'amount', { inputMode: 'numeric', required: true, value: now?.amount ?? '' }), field('内容', 'label', { value: (now?.label ?? '').replace('【送料】', ''), placeholder: 'ヤマト運輸 120サイズ' }, '請求書に「【送料】」に続けて載ります')],
   (d) => api('POST', '/api/billing/shipping', { accountId, eventId, amount: Number(d.amount), label: d.label }), '請求書に反映する');
 // 認証アプリに読み取らせる QR コード（画像として出す）
+// パスワードや鍵は、ブラウザの自動翻訳で書き換えられないようにする
+const noTranslate = (node) => { node.setAttribute('translate', 'no'); return node; };
 const qrImg = (svg) => el('img', { class: 'qr', alt: '認証アプリ用の QR コード', width: 200, height: 200, src: 'data:image/svg+xml;base64,' + btoa(svg) });
 const secretsDialog = (title, res) => openDialog(title,
   el('p', { text: '次の内容は、この画面を閉じると二度と表示できません。本人に、安全な方法で渡してください。' }),
   el('dl', { class: 'facts' },
     el('dt', { text: 'ログイン ID' }), el('dd', { text: res.loginId }),
-    el('dt', { text: '仮のパスワード' }), el('dd', {}, el('div', { class: 'secret', text: res.initialPassword })),
-    el('dt', { text: '認証アプリの鍵' }), el('dd', {}, el('div', { class: 'secret', text: res.totpSecret }))),
+    el('dt', { text: '仮のパスワード' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.initialPassword }))),
+    el('dt', { text: '認証アプリの鍵' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.totpSecret })))),
   qrImg(res.qrSvg),
   el('p', { class: 'note', text: '認証アプリ（Google Authenticator など）で、QR コードを読み取ります。読み取れないときは「セットアップキーを入力」で鍵を入れます（種類は「時間ベース」）。' }),
   el('div', { class: 'actions' }, closeBtn('渡したので閉じる')));

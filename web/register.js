@@ -43,9 +43,14 @@ function syncKind() {
   $('#adultRow').hidden = corp; // 18歳以上の申告は、個人だけ
 }
 forms.profile.addEventListener('change', syncKind);
+// 入力の途中でページを離れようとしたら、確かめる（書いた内容が消えるため）。登録が済んだら外す
+let dirty = false;
+forms.profile.addEventListener('input', () => { dirty = true; });
+window.addEventListener('beforeunload', (ev) => { if (dirty) ev.preventDefault(); });
 onSubmit(forms.profile, async (data) => {
   const res = await api('POST', '/api/register/complete', { ...data, adult: data.adult === '1', agreed: data.agreed === '1' });
   // 入札画面（会場の QR コードなど）から来た人は、登録のあと入札画面の参加手続きへ進める（FR-AUTH-007）
+  if (res.ok) dirty = false;
   if (res.ok) location.href = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/mypage.html?registered=1';
   else if (res.status === 401) { res.message = '時間が空いたため、電話番号の確認からやり直してください'; show('phone'); }
   return res;

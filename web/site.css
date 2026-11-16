@@ -26,7 +26,8 @@ main.narrow { max-width: 520px; }
 .field .err:empty { display: none; }
 .input[aria-invalid="true"] { border-color: var(--danger); border-width: 2px; }
 textarea.input { min-height: 96px; resize: vertical; line-height: 1.6; }
-select.input { appearance: auto; }
+/* 色を決めておく（Windows の暗い表示で、文字と地が同じ色になるのを防ぐ） */
+select.input { appearance: auto; background-color: var(--ground); color: var(--ink); }
 .code { font-family: var(--digits); font-size: 28px; letter-spacing: .3em; text-align: center; font-variant-numeric: tabular-nums; }
 .choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; border: 0; padding: 0; margin: 0; }
 .choice legend { font-size: 13px; font-weight: 700; padding: 0; margin-bottom: 4px; }
