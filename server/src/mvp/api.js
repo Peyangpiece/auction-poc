@@ -119,7 +119,7 @@ export function createApi({ store, config, nowMs }) {
       .run(phone, sha256(phone + ':' + code), now + OTP_TTL);
     db.prepare('INSERT INTO otp_sends (phone, at) VALUES (?, ?)').run(phone, now);
     // 送信の失敗による自動の再送（IF-EXT-003）は、上の回数に数えない（1回の送信として記録済み）
-    await notifier.sms(phone, 'otp', `【NEWS ライブオークション】認証番号は ${code} です。5分以内に入力してください。`);
+    await notifier.sms(phone, 'otp', `【レイワの競り】認証番号は ${code} です。5分以内に入力してください。`);
   }
   function checkOtp(phone, code) {
     const row = db.prepare('SELECT * FROM otp_codes WHERE phone = ?').get(phone);
@@ -619,7 +619,8 @@ export function createApi({ store, config, nowMs }) {
           try { host = new URL(origin).host; } catch { /* 形の崩れた Origin は断る */ }
           if (host !== req.headers.host && !config.allowedOrigins.includes(origin)) throw new HttpError(403, 'このページからは操作できません');
         }
-        const raw = await readBody(req, 64 * 1024);
+        // 印鑑の画像だけは、大きさの上限を広げる（2MB まで）
+        const raw = await readBody(req, url.pathname === '/api/settings/seal' ? 3 * 1024 * 1024 : 64 * 1024);
         if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) throw new HttpError(415, 'JSON で送ってください');
         try { body = raw.length ? JSON.parse(raw.toString('utf8')) : {}; } catch { throw bad('JSON として読めません'); }
         if (body === null || typeof body !== 'object' || Array.isArray(body)) throw bad('JSON のオブジェクトで送ってください');
@@ -627,6 +628,7 @@ export function createApi({ store, config, nowMs }) {
       const result = await hit.r.handler(ctx, body, ...hit.m.slice(1).map(Number));
       if (result?.redirect) { res.writeHead(302, { location: result.redirect }); return res.end(); }
       if (result?.file) { res.writeHead(200, { 'content-type': result.file.type, 'content-disposition': `attachment; filename="${result.file.name}"`, 'cache-control': 'no-store' }); return res.end(result.file.body); }
+      if (result?.image) { res.writeHead(200, { 'content-type': result.image.type, 'cache-control': 'no-store' }); return res.end(result.image.body); }
       if (result?.svg) { res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' }); return res.end(result.svg); }
       sendJson(res, 200, result ?? { ok: true });
     } catch (err) {

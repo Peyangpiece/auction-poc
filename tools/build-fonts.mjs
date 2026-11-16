@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// 画面で使う書体を、News-HP と同じ元ファイル（BIZ UDPゴシック・Inter。どちらも SIL OFL）から切り出す。
-//   node tools/build-fonts.mjs <News-HP の fonts-src のパス>
+// 画面で使う書体を、元のファイル（BIZ UDPゴシック・Inter。どちらも SIL OFL）から切り出す。
+//   node tools/build-fonts.mjs <書体の元ファイルのフォルダ>
 // 日本語は、画面の固定の文言に出てくる文字とかな・記号だけを収める（軽くするため）。
 // 商品名やコメントなど、後から入る文字に無い字があれば、端末の書体で表示される。
 // 実行には subset-font が要る（npm install --no-save subset-font）。画面の文言を変えたら、もう一度実行する。

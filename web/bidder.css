@@ -103,7 +103,7 @@ details dd { overflow-wrap: anywhere; }
 @media (max-height: 520px) { #gate .mark { width: 56px; height: 56px; } #gate > div { gap: 12px; } }
 #gate .mark { width: 96px; height: 96px; }
 #gate .co { font-weight: 700; letter-spacing: .1em; }
-#gate h1 { font-size: 26px; letter-spacing: .08em; color: var(--action); border-bottom: 1px solid var(--red); padding-bottom: 12px; }
+#gate h1 { font-size: 26px; letter-spacing: .08em; color: var(--action); border-bottom: 2px solid var(--gold); padding-bottom: 12px; }
 #gateMsg { color: var(--danger); font-size: 14px; font-weight: 600; }
 #gateMsg:empty { display: none; }
 
@@ -168,5 +168,5 @@ details dd { overflow-wrap: anywhere; }
 #gateWait { font-weight: 700; color: var(--action); }
 #gateWait:empty { display: none; }
 .pick small[hidden] { display: none; }
-#eventNote { border-top: 3px solid var(--red); background: var(--ground-alt); padding: 12px 16px; font-weight: 700; }
+#eventNote { border-top: 3px solid var(--gold); background: var(--ground-alt); padding: 12px 16px; font-weight: 700; }
 #eventNote:empty { display: none; }

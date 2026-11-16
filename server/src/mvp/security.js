@@ -72,7 +72,7 @@ export function verifyTotp(secret, code, at = Date.now()) {
   if (!/^\d{6}$/.test(given)) return false;
   return [-1, 0, 1].some((d) => safeEqual(totp(secret, at + d * 30000), given));
 }
-export const otpauthUrl = (secret, account, issuer = 'NEWS Live Auction') =>
+export const otpauthUrl = (secret, account, issuer = 'Reiwa no Seri') =>
   `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(account)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}`;
 
 // ---- SMS の認証番号（6桁）

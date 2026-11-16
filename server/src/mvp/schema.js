@@ -75,7 +75,7 @@ CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log BEGIN SE
 
 // 既定の文言。法務の確認が済んでいないので、どれも仮のもの（本仕様 FR-LEG-002、OQ-22 は【要確認】）
 export const DEFAULT_SETTINGS = {
-  org_name: '株式会社NEWS',
+  org_name: '株式会社レイワ',
   return_policy: '【仮の文言。弁護士の確認前】中古品のため、現状でのお渡しとなります。落札後の返品・交換はお受けできません。',
   shipping_notice: '落札価格に送料は含まれません。配送の場合、送料は後日、別にご請求します。',
   buyer_premium_rate: '10', // 買歩銭（落札者が、落札額に上乗せして払う手数料）の割合。発注者の決定で 10%

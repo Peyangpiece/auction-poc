@@ -1,22 +1,25 @@
 /*
- * 株式会社NEWS ライブオークション 画面の共通スタイル。
- * 見た目は、NEWS のコーポレートサイト（News-HP）に合わせる:
- *   色   … エンブレムの紺 #242a5e を要所に。赤 #d24040 は細い線だけ。地は白
+ * 株式会社レイワ「レイワの競り」 画面の共通スタイル。
+ * 配色は、会社のシンボル（金の輪・紺の地球・赤い REIWA）から取る:
+ *   紺 #000156 … 要所（ボタン・表示板・見出し）
+ *   金 #d4aa00 … 細い線と、表示板の上のしるし
+ *   赤 #ff0000 … 警告と、選んでいる場所の輪郭だけ。地は白
  *   書体 … 日本語は BIZ UDゴシック、数字と英字は Inter
  *   角丸 … 6px、ボタンは高さ 48px・太字
- * この画面だけのしるしは1つ: 競り場の「表示板」（紺の板・赤い細線・大きな数字・2つのランプ）。それ以外は静かにする。
+ * この画面だけのしるしは1つ: 競り場の「表示板」（紺の板・金の細線・大きな数字・2つのランプ）。それ以外は静かにする。
  */
 @font-face { font-family: "BIZ UDPGothic"; src: local("BIZ UDPGothic"), url("bizudp-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "BIZ UDPGothic"; src: local("BIZ UDPGothic Bold"), url("bizudp-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-/* impeccable-disable overused-font: Inter は News-HP（株式会社NEWS のサイト）で決まっている数字用の書体 */
+/* impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 */
 @font-face { font-family: "Inter"; src: url("inter.woff2") format("woff2"); font-weight: 400 700; font-display: swap; unicode-range: U+0020-007E, U+00A5; }
 
 :root {
   color-scheme: light dark;
-  --navy: #242a5e;         /* エンブレムの紺。白地で 13.4:1 */
-  --navy-dk: #181b40;
-  --red: #d24040;          /* エンブレムの赤。細い線だけに使う */
-  --red-text: #b8302f;     /* 文字に使う赤。白地で 6.0:1 */
+  --navy: #000156;         /* シンボルの紺。白地で 19.5:1 */
+  --navy-dk: #00013a;
+  --red: #ff0000;          /* シンボルの赤。輪郭にだけ使う（白地で 4.0:1） */
+  --gold: #d4aa00;         /* シンボルの金。細い線にだけ使う（文字には使わない。紺の上では 8.5:1） */
+  --red-text: #c40000;     /* 文字に使う赤。白地で 6.3:1 */
 
   --ground: #ffffff;
   --ground-alt: #f4f5f7;
@@ -51,22 +54,22 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: #0e1028;
-    --ground-alt: #151838;
+    --ground: #04052a;
+    --ground-alt: #0c0e3c;
     --ink: #eef0f6;
-    --ink-2: #b4b9c8;
-    --ink-3: #b4b9c8;
+    --ink-2: #bcc0ee;
+    --ink-3: #bcc0ee;
     --line: rgba(255, 255, 255, .16);
     --edge: #7d84a6;
-    --field: #151838;
+    --field: #0c0e3c;
     --action: #c3c9ff;
     --action-hover: #dfe2ff;
-    --action-ink: #181b40;
+    --action-ink: #00013a;
     --danger: #f08a8a;
-    --danger-ink: #181b40;   /* 明るい赤の上の文字。6.6:1 */
-    --alarm: #8f2423;
+    --danger-ink: #00013a;   /* 明るい赤の上の文字。6.6:1 */
+    --alarm: #9c0000;
     --ok: #86d994;
-    --board: #1f2452;
+    --board: #0a0c6e;
   }
 }
 
@@ -121,7 +124,7 @@ p { text-wrap: pretty; }
 .input:focus-visible { outline-offset: 0; border-color: var(--action); }
 
 /* ---- 表示板（この画面のしるし） */
-.board { background: var(--board); color: var(--board-ink); border-top: 3px solid var(--red); padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.board { background: var(--board); color: var(--board-ink); border-top: 3px solid var(--gold); padding: 16px; display: grid; gap: 12px; min-width: 0; }
 .board-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--board-ink-2); }
 .board-top b { color: var(--board-ink); font-weight: 600; }
 .price { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -.02em; font-size: 72px; transition: transform .2s var(--ease); transform-origin: left bottom; }
@@ -159,7 +162,7 @@ p { text-wrap: pretty; }
 /* ---- 再接続中（大きく表示する。FR-UI-001） */
 .overlay {
   position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; text-align: center;
-  padding: 24px; background: rgba(24, 27, 64, .94); color: #fff; font-size: 32px; font-weight: 700; overscroll-behavior: contain;
+  padding: 24px; background: rgba(0, 1, 58, .94); color: #fff; font-size: 32px; font-weight: 700; overscroll-behavior: contain;
 }
 .overlay small { display: block; font-size: 15px; font-weight: 400; color: rgba(255, 255, 255, .78); margin-top: 8px; }
 
@@ -168,7 +171,7 @@ dialog {
   border: 1px solid var(--line); padding: 24px; width: min(440px, calc(100vw - 32px)); border-radius: var(--r);
   background: var(--ground); color: var(--ink); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); overscroll-behavior: contain;
 }
-dialog::backdrop { background: rgba(24, 27, 64, .5); }
+dialog::backdrop { background: rgba(0, 1, 58, .5); }
 dialog h2 { font-size: 18px; margin-bottom: 8px; letter-spacing: .06em; color: var(--ink); }
 dialog p { color: var(--ink-2); font-size: 15px; }
 dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
@@ -184,7 +187,7 @@ details > summary::-webkit-details-marker { display: none; }
 details > summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform .15s var(--ease); flex: none; }
 details[open] > summary::before { transform: rotate(45deg); }
 
-/* ---- NEWS のヘッダー（コーポレートサイトと同じ: 左にエンブレムと社名） */
+/* ---- ヘッダー（左に、会社のシンボルと社名） */
 .brandbar { background: var(--ground); border-bottom: 1px solid var(--line); }
 .brandbar > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; margin: 0 auto; }
 .brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; color: var(--ink); text-decoration: none; }

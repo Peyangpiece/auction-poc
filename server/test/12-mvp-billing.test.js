@@ -154,7 +154,7 @@ test('送付済みの記録と支払期限（送付日の翌日から5日目。�
     assert.equal((await t.admin.post(`/api/billing/invoices/${inv.id}/sent`)).json.dueDate, '2026-12-11');
     await t.admin.post(`/api/billing/invoices/${inv.id}/unsent`);
     // 主催者設定の休業日（12/11）を足すと、さらに前の 12/10
-    assert.equal((await t.admin.post('/api/settings', { orgName: '株式会社NEWS', returnPolicy: '仮', shippingNotice: '仮', bankHolidays: '2026-12-11' })).status, 200);
+    assert.equal((await t.admin.post('/api/settings', { orgName: '株式会社レイワ', returnPolicy: '仮', shippingNotice: '仮', bankHolidays: '2026-12-11' })).status, 200);
     assert.equal((await t.admin.post(`/api/billing/invoices/${inv.id}/sent`)).json.dueDate, '2026-12-10');
 
     assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 2000 })).status, 400, '落札額だけ（買歩銭を除いた金額）では、消し込めない');
@@ -310,7 +310,7 @@ test('手数料の集計: 消し込み済みだけ・消し込みの月で区切
     assert.equal((await t.admin.post('/api/billing/fees/confirm', { month: t.today().slice(0, 7) })).status, 409, '今月は、まだ確認済みにできない');
     assert.equal((await t.admin.post('/api/billing/fees/confirm', { month: '2026-12' })).status, 200);
     assert.equal((await t.admin.get('/api/billing/fees?month=2026-12')).json.confirmedOn, t.today());
-    await t.admin.post('/api/settings', { orgName: '株式会社NEWS', returnPolicy: '仮', shippingNotice: '仮', feeTaxMode: 'inclusive', feeMinimum: '1000' });
+    await t.admin.post('/api/settings', { orgName: '株式会社レイワ', returnPolicy: '仮', shippingNotice: '仮', feeTaxMode: 'inclusive', feeMinimum: '1000' });
     const min = (await t.admin.get('/api/billing/fees?month=2026-12')).json;
     assert.deepEqual([min.charge, min.tax, min.total], [1000, 0, 1000], '手数料と最低保証額の大きいほう。内税なら消費税を足さない');
     const auctioneer = await t.staffLogin('auctioneer', 'shinko');
@@ -341,5 +341,27 @@ test('受け取り方法・支払方法の変更は、開催終了まで本人�
     assert.equal((await t.admin.get('/api/billing/long-unpaid')).json.lines.length, 0, '期限の翌日から30日たつまでは、載らない');
     await t.advance(2);
     assert.deepEqual((await t.admin.get('/api/billing/long-unpaid')).json.lines.map((x) => x.label), ['No.1 飯ごう']);
+  } finally { await t.close(); }
+});
+
+test('印鑑の画像: 主催者管理者だけが登録できる。PNG か JPEG だけ。登録すると、請求書に押される', async () => {
+  const t = await setup();
+  try {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    const reception = await t.staffLogin('reception', 'uketsuke');
+    assert.equal((await reception.post('/api/settings/seal', { image: png.toString('base64') })).status, 403);
+    assert.equal((await t.admin.get('/api/settings/seal')).status, 404);
+    assert.equal((await t.admin.post('/api/settings/seal', { image: Buffer.from('<svg/>').toString('base64') })).status, 400, '画像でなければ断る');
+    const a = await t.member(1, { venue: true });
+    t.sold('飯ごう', [[a, 2000]]);
+    const before = (await t.admin.post('/api/billing/settle', { lineIds: [(await t.line('飯ごう')).id] })).json.invoice;
+    assert.equal((await t.admin.post('/api/settings/seal', { image: png.toString('base64') })).status, 200);
+    assert.equal((await t.admin.get('/api/settings/seal')).type, 'image/png');
+    t.sold('寝袋', [[a, 3000]]);
+    const after = (await t.admin.post('/api/billing/settle', { lineIds: [(await t.line('寝袋')).id] })).json.invoice;
+    const images = async (inv) => (await t.admin.get(`/api/billing/invoices/${inv.id}/pdf`)).buf.toString('latin1').split('/Subtype /Image').length - 1;
+    assert.ok(await images(after) > await images(before), '印鑑を登録したあとの請求書には、画像が増える');
+    assert.equal((await t.admin.post('/api/settings/seal', { image: null })).json.registered, false);
+    assert.equal((await t.admin.get('/api/settings/seal')).status, 404);
   } finally { await t.close(); }
 });

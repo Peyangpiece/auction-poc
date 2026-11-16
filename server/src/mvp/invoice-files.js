@@ -14,10 +14,15 @@ const FONT = path.join(ASSETS, 'BIZUDPGothic-Regular.ttf');
 const LOGO = path.join(ASSETS, 'emblem.png');
 const num = (n) => Number(n).toLocaleString('ja-JP');
 const jpDate = (d) => { const [y, m, day] = d.split('-').map(Number); return `${y}年${m}月${day}日`; };
+// 貼り付けた文字に、書体にない記号（改行しないハイフンなど）が混ざっていても、文字化けさせない
+const clean = (v) => String(v ?? '').replace(/[\u2010-\u2015\u2212\uFE63\uFF0D]/g, '-').replace(/[\u00A0\u2000-\u200B\u3000]/g, ' ').replace(/ {2,}/g, ' ');
 const TITLE = { cash: '請求書 兼 領収書', transfer: '請求書', promote: '請求書', penalty: '請求書' };
 
 /** 請求書に書く内容を、PDF と Excel で共通の形にまとめる */
-function content({ invoice, lines, org, to, issuedOn, paidOn, subject, premium }) {
+function content({ invoice, lines, org: rawOrg, to: rawTo, issuedOn, paidOn, subject: rawSubject, premium, seal }) {
+  const org = Object.fromEntries(Object.entries(rawOrg).map(([k, v]) => [k, clean(v)]));
+  const to = { ...rawTo, name: clean(rawTo.name), address: clean(rawTo.address) };
+  const subject = clean(rawSubject);
   const total = invoice.total;
   // 違約金・遅延損害金は、損害の賠償にあたり、消費税の対象外とした【未検証】。落札代金は税率10%（内税）
   const taxable = invoice.kind === 'penalty' ? 0 : total;
@@ -35,15 +40,16 @@ function content({ invoice, lines, org, to, issuedOn, paidOn, subject, premium }
       : `お支払い期限 : 送付日の翌日から${invoice.due_days}日目${invoice.shift_holiday ? '（金融機関の休業日は前営業日）' : ''}`,
     issuer: { name: org.org_name, lines: [...String(org.org_address ?? '').split('\n').filter(Boolean), org.org_tel && `TEL: ${org.org_tel}`, org.org_email, `登録番号: ${org.invoice_reg_no || '（未設定）'}`].filter(Boolean) },
     // 落札した品を1行ずつ。そのあとに、買歩銭を1行（発注者から示された見本と同じ並び）
-    rows: [...lines.map((l) => [l.label, 1, l.amount, l.amount]), ...(premium?.total ? [['買歩銭', 1, premium.total, premium.total]] : [])],
+    rows: [...lines.map((l) => [clean(l.label), 1, l.amount, l.amount]), ...(premium?.total ? [['買歩銭', 1, premium.total, premium.total]] : [])],
     taxLabel: taxable ? '消費税 (10% 内税)' : '消費税', taxValue: taxable ? `(${num(tax)})` : '対象外',
     bank: invoice.kind === 'cash' ? null : (org.bank_account || '（未設定）'),
+    seal, // 印鑑の画像（主催者設定で登録したもの。なければ押さない）
     notes,
   };
 }
 
 // レイアウトは、発注者から示された見本に合わせた: 右上に日付と請求番号、中央に題、左に宛先・件名・ご請求金額・期限、
-// 右に発行者、罫線つきの表（品番・品名／数量／単価／金額）、右下に小計・消費税・合計、最後に振込先。
+// 右に発行者（会社のシンボル・名称・住所・電話・メール・登録番号・印鑑）、罫線つきの表（品番・品名／数量／単価／金額）、右下に小計・消費税・合計、最後に振込先。
 function writePdf(file, c) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 36, info: { Title: `${c.title} ${c.number}` } });
@@ -77,6 +83,8 @@ function writePdf(file, c) {
     doc.fontSize(9.5);
     let ry = 214;
     for (const line of c.issuer.lines) { doc.text(line, rx, ry, { width: R - rx }); ry = doc.y + 1; }
+    // 印鑑は、発行者の右に重ねる（見本と同じ位置）
+    if (c.seal) doc.image(c.seal, 487, 188, { width: 66 });
 
     // 表
     const col = [L, 350, 418, 487, R]; // 品番・品名 | 数量 | 単価 | 金額
@@ -147,8 +155,8 @@ async function writeXlsx(file, c) {
 }
 
 /** PDF と Excel を作る。ファイルの場所はすぐに返し、書き終わりは done で待てる */
-export function makeInvoiceFiles({ dir, invoice, lines, org, to, issuedOn, paidOn, subject, premium }) {
-  const c = content({ invoice, lines, org, to, issuedOn, paidOn, subject, premium });
+export function makeInvoiceFiles({ dir, invoice, lines, org, to, issuedOn, paidOn, subject, premium, seal = null }) {
+  const c = content({ invoice, lines, org, to, issuedOn, paidOn, subject, premium, seal });
   const pdf = path.join(dir, `${invoice.number}.pdf`);
   const xlsx = path.join(dir, `${invoice.number}.xlsx`);
   return { pdf, xlsx, done: Promise.all([writePdf(pdf, c), writeXlsx(xlsx, c)]) };

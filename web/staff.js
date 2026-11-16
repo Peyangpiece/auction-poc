@@ -312,6 +312,25 @@ function passwordDialog() {
 }
 
 // ------------------------------------------------------------ 設定
+// 印鑑の画像の登録。画像は、サーバーのデータの置き場にだけ保存する
+function sealBox() {
+  const preview = el('img', { class: 'seal', alt: '登録してある印鑑', width: 96, height: 96, hidden: true });
+  const note = el('p', { class: 'note', text: '登録されていません。' });
+  const refresh = () => { preview.onload = () => { preview.hidden = false; note.textContent = '登録済みです。'; }; preview.onerror = () => { preview.hidden = true; note.textContent = '登録されていません。'; }; preview.src = `/api/settings/seal?${Date.now()}`; };
+  const input = el('input', { type: 'file', accept: 'image/png,image/jpeg', class: 'sr-only', id: 'sealInput' });
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { note.textContent = '画像は、2MB までにしてください。'; return; }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    const res = await api('POST', '/api/settings/seal', { image: btoa(bin) });
+    if (res.ok) refresh(); else note.textContent = res.message;
+  });
+  refresh();
+  return el('div', { class: 'sealbox' }, preview, el('div', {}, note, input, el('label', { class: 'btn', htmlFor: 'sealInput', text: '画像を選ぶ' }), ' ',
+    el('button', { class: 'btn', type: 'button', text: '登録を消す', onclick: async () => { await api('POST', '/api/settings/seal', { image: null }); refresh(); } })));
+}
 async function settingsPanel() {
   const s = await api('GET', '/api/settings');
   const form = el('form', { class: 'form', novalidate: true },
@@ -324,6 +343,8 @@ async function settingsPanel() {
     field('適格請求書発行事業者の登録番号', 'invoiceRegNo', { value: s.invoiceRegNo }, 'T から始まる番号'),
     field('振込先の口座', 'bankAccount', { value: s.bankAccount }),
     field('金融機関の休業日', 'bankHolidays', { value: s.bankHolidays, rows: 3 }, '土日のほかの休業日（祝日など）を、2026-12-31 の形で、1行に1つ。支払期限の計算に使います'),
+    el('h2', { class: 'subhead', text: '印鑑（請求書に押す）' }),
+    sealBox(),
     el('h2', { class: 'subhead', text: '買歩銭' }),
     field('買歩銭の割合（%）', 'buyerPremiumRate', { value: s.buyerPremiumRate, inputMode: 'numeric' }, '落札者が、落札額に上乗せして払う手数料。変えても、すでに落札した品の金額は変わりません'),
     el('h2', { class: 'subhead', text: '手数料の集計' }),

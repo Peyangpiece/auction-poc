@@ -1,4 +1,4 @@
-/* 会員登録・ログイン・マイページ・カタログ・スタッフ用の管理画面のスタイル。色と書体は app.css（News-HP に合わせたもの）を使う。 */
+/* 会員登録・ログイン・マイページ・カタログ・スタッフ用の管理画面のスタイル。色と書体は app.css を使う。 */
 .brandbar > div { max-width: 1080px; padding: 0 16px; }
 .brandbar nav { display: flex; align-items: center; gap: 4px; flex: none; }
 .brandbar nav a, .linkbtn { white-space: nowrap; }
@@ -14,7 +14,7 @@ main.narrow { max-width: 520px; }
 .pagehead { margin-bottom: 24px; }
 .pagehead h1 { font-size: 26px; letter-spacing: .08em; }
 .pagehead p { color: var(--ink-2); margin-top: 4px; }
-.rule { width: 40px; height: 3px; background: var(--red); margin: 12px 0 0; border: 0; }
+.rule { width: 40px; height: 3px; background: var(--gold); margin: 12px 0 0; border: 0; }
 
 /* ---- 入力の画面 */
 .form { display: grid; gap: 16px; }
@@ -52,11 +52,11 @@ select.input { appearance: auto; }
 .facts dt { line-height: 1.95; font-size: 13px; font-weight: 700; color: var(--ink-2); }
 .facts dt:first-of-type, .facts dt:first-of-type + dd { border-top: 0; }
 .facts dd { overflow-wrap: anywhere; }
-.banner { border-top: 3px solid var(--red); background: var(--ground-alt); padding: 12px 16px; margin-bottom: 24px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.banner { border-top: 3px solid var(--gold); background: var(--ground-alt); padding: 12px 16px; margin-bottom: 24px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 
 /* ---- トップページ: 当日の案内（表示板と同じ、紺の地に赤い線）とカレンダー */
-.today { background: var(--board); color: var(--board-ink); border-top: 3px solid var(--red); padding: 32px 24px; display: grid; gap: 12px; margin-bottom: 40px; }
-.today__tag { font-size: 14px; font-weight: 700; letter-spacing: .2em; color: var(--board-ink-2); }
+.today { background: var(--board); color: var(--board-ink); border-top: 3px solid var(--gold); padding: 32px 24px; display: grid; gap: 12px; margin-bottom: 40px; }
+.today__tag { font-size: 14px; font-weight: 700; letter-spacing: .2em; color: var(--gold); }
 .today h2 { color: var(--board-ink); font-size: 30px; letter-spacing: .06em; overflow-wrap: anywhere; }
 .today__time { font-size: 44px; line-height: 1.1; }
 .today h3 { font-size: 13px; letter-spacing: .12em; color: var(--board-ink-2); margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--board-line); }
@@ -95,7 +95,7 @@ dialog.wide { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 3
 /* ---- スタッフ用の管理 */
 .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); margin-bottom: 24px; overflow-x: auto; }
 .tabs button { appearance: none; border: 0; background: none; font: 700 15px/1.4 var(--font); letter-spacing: .06em; color: var(--ink-2); padding: 12px 16px; min-height: 48px; cursor: pointer; white-space: nowrap; border-bottom: 3px solid transparent; margin-bottom: -1px; }
-.tabs button[aria-selected="true"] { color: var(--action); border-bottom-color: var(--red); }
+.tabs button[aria-selected="true"] { color: var(--action); border-bottom-color: var(--gold); }
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .tablewrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
@@ -148,3 +148,5 @@ td .note { font-size: 12px; }
 .mylines > li > .note, .mylines > li > a { grid-column: 1 / -1; }
 .mylines a { color: var(--action); font-weight: 700; text-underline-offset: 4px; font-size: 14px; }
 .facts dt { padding-right: 24px; }
+.sealbox { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.seal { width: 96px; height: 96px; object-fit: contain; background: #fff; border: 1px solid var(--line); border-radius: var(--r); }

@@ -75,6 +75,31 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   const account = (id) => db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(id);
   const displayName = (a) => (a.kind === 'b2b' ? `${a.company}　${a.contact_name}` : a.name);
 
+  // ------------------------------------------------------------ 印鑑の画像（請求書に押す。主催者設定で登録する）
+  // 印影は、悪用されると困るものなので、ソースコードには入れない。データの置き場（data/brand）にだけ置く
+  const brandDir = path.join(config.dataDir, 'brand');
+  const sealFile = () => ['seal.png', 'seal.jpg'].map((f) => path.join(brandDir, f)).find((f) => fs.existsSync(f)) ?? null;
+  route('GET', '/api/settings/seal', (ctx) => {
+    needStaff(ctx, 'admin');
+    const file = sealFile();
+    if (!file) throw new HttpError(404, '印鑑の画像は、登録されていません');
+    return { image: { body: fs.readFileSync(file), type: file.endsWith('.png') ? 'image/png' : 'image/jpeg' } };
+  });
+  route('POST', '/api/settings/seal', (ctx, body) => {
+    needStaff(ctx, 'admin');
+    fs.mkdirSync(brandDir, { recursive: true });
+    for (const f of ['seal.png', 'seal.jpg']) fs.rmSync(path.join(brandDir, f), { force: true });
+    if (!body.image) { audit(ctx, 'settings.seal', { target: 'seal', after: { registered: false } }); return { ok: true, registered: false }; }
+    const buf = Buffer.from(String(body.image), 'base64');
+    // 画像の種類は、中身の先頭で確かめる（PNG か JPEG だけ）
+    const png = buf.length > 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const jpg = buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+    if (!png && !jpg) throw bad('印鑑の画像は、PNG か JPEG にしてください');
+    fs.writeFileSync(path.join(brandDir, png ? 'seal.png' : 'seal.jpg'), buf, { mode: 0o600 });
+    audit(ctx, 'settings.seal', { target: 'seal', after: { registered: true, bytes: buf.length } });
+    return { ok: true, registered: true };
+  });
+
   // ------------------------------------------------------------ 買歩銭（発注者の決定: 落札額の 10%）
   /** 買歩銭の割合（%）。主催者設定で変えられる。変えても、すでに作った明細の金額は変わらない */
   const premiumRate = () => { const r = Number(setting('buyer_premium_rate')); return Number.isFinite(r) && r >= 0 && r <= 100 ? r : 10; };
@@ -141,15 +166,16 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const org = Object.fromEntries(['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'].map((k) => [k, setting(k)]));
     const files = makeInvoiceFiles({
       dir: invoiceDir, invoice: inv, lines, org, to: { name: displayName(a), address: a.kind === 'b2b' && a.billing ? a.billing : a.address },
+      seal: sealFile(),
       premium: { total: lines.reduce((s, l) => s + (l.premium ?? 0), 0), rate: premiumRate() },
       issuedOn: jst(inv.issued_at), paidOn: kind === 'cash' ? jst(inv.issued_at) : null,
       // 件名: 開催日と開催の名前
-      subject: (() => { const e = db.prepare('SELECT title, starts_at FROM events WHERE id = ?').get(first.event_id); return e ? `${Number(e.starts_at.slice(5, 7))}.${Number(e.starts_at.slice(8, 10))} ライブオークション ${e.title}` : 'ライブオークション'; })(),
+      subject: (() => { const e = db.prepare('SELECT title, starts_at FROM events WHERE id = ?').get(first.event_id); return e ? `${Number(e.starts_at.slice(5, 7))}.${Number(e.starts_at.slice(8, 10))} レイワの競り ${e.title}` : 'レイワの競り'; })(),
     });
     db.prepare('UPDATE invoices SET pdf_file = ?, xlsx_file = ? WHERE id = ?').run(files.pdf, files.xlsx, inv.id);
     // 送付用のメールの下書き（FR-INV-007）。送信は、利用会社の担当者が自分で行う。当日現金の精算では作らない
     if (draft) {
-      files.done.then(() => notifier.draft(a.email, `【${org.org_name}】ご請求書（${inv.number}）`, `${displayName(a)} 様\n\nライブオークションのご請求書をお送りします。\n請求書番号: ${inv.number}\nご請求額: ${yen(total)}（税込）\n\nお振込の際は、依頼人名に請求書番号を入れてください。振込手数料は、お客様のご負担となります。\n落札価格に送料は含まれません。`, [files.pdf]))
+      files.done.then(() => notifier.draft(a.email, `【${org.org_name}】ご請求書（${inv.number}）`, `${displayName(a)} 様\n\nレイワの競りのご請求書をお送りします。\n請求書番号: ${inv.number}\nご請求額: ${yen(total)}（税込）\n\nお振込の際は、依頼人名に請求書番号を入れてください。振込手数料は、お客様のご負担となります。\n落札価格に送料は含まれません。`, [files.pdf]))
         .then((ok) => db.prepare('UPDATE invoices SET draft_state = ? WHERE id = ?').run(ok ? 'made' : 'failed', inv.id))
         .catch(() => db.prepare("UPDATE invoices SET draft_state = 'failed' WHERE id = ?").run(inv.id));
     }
