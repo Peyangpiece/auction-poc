@@ -402,7 +402,7 @@ function onClient(ws, req) {
 const staffRef = (conn) => (conn.staff.account ? { id: conn.staff.id, role: conn.staff.role } : null);
 const PROXY_REJECT = {
   LOT_NOT_OPEN: 'この品は入札を受け付けていません', AFTER_CLOSE: '締めに間に合いませんでした', BELOW_MINIMUM: '最低入札額より低い金額です',
-  OFF_LADDER: '入札できる金額ではありません', ALREADY_HIGHEST: 'この参加者が、すでに最高入札者です', SUSPENDED: 'この参加者は、参加が停止されています', NOT_JOINED: 'この参加者は、いまの開催の参加者ではありません',
+  OFF_LADDER: '入札できる金額ではありません', ALREADY_HIGHEST: 'この参加者が、すでに最高入札者です', NOT_CHECKED_IN: '受付で、来場の確認を受けてください', SUSPENDED: 'この参加者は、参加が停止されています', NOT_JOINED: 'この参加者は、いまの開催の参加者ではありません',
 };
 function onAuctioneer(conn, msg, send) {
   const sendSold = () => send({ type: 'sold', sold: auction.soldList() });

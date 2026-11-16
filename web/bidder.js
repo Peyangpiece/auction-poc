@@ -24,6 +24,7 @@ const REJECT = {
   SUSPENDED: () => (S.unpaid ? 'お支払いの確認が取れていない請求があるため、参加が停止されています' : '参加が停止されています'),
   NOT_JOINED: () => '参加手続きを済ませてください',
   OVER_LIMIT: () => '上限額を超えるため入札できません',
+  NOT_CHECKED_IN: () => '受付で、来場の確認を受けてください',
 };
 function say(text, kind = '') { $('msg').textContent = text; $('msg').dataset.kind = kind; }
 
@@ -479,12 +480,22 @@ if (!token) (async () => {
   });
 })();
 
+// オンライン参加の人が、入札の画面から、会場参加に切り替える（確かめのダイアログを通す）
+$('toVenue').addEventListener('click', () => { $('venueDlgMsg').textContent = ''; $('venueDlg').showModal(); });
+$('venueNo').addEventListener('click', () => $('venueDlg').close());
+$('venueYes').addEventListener('click', async () => {
+  const res = await getJson('/api/my/participation/venue', {});
+  if (res.status !== 200) { $('venueDlgMsg').textContent = res.message ?? 'うまくいきませんでした。やり直してください'; return; }
+  location.reload(); // 来場の確認を待つ画面に戻る（そこから、オンライン参加に戻すこともできる）
+});
+
 $('enter').addEventListener('click', async () => {
   if (!ready) return;
   try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); await audioCtx.resume(); beep(); } catch {}
   $('audio').textContent = audioCtx ? audioCtx.state : '使えない';
   $('vib').textContent = 'vibrate' in navigator ? '対応' : '非対応';
   $('gate').style.display = 'none';
+  $('modeLine').hidden = !!token || venue; // 会員で、オンライン参加の人にだけ、会場参加への切り替えを出す
   $('bid').textContent = '接続しています…';
   $('showVideo').checked = !venue; $('showVideo').disabled = venue;
   link = new Link({

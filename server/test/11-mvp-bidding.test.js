@@ -409,5 +409,11 @@ test('画面で「会場で参加」を選んだ人は、会場参加になる�
     const wa = await t.ws(a);
     wa.close();
     assert.equal((await a.post('/api/my/participation/online', {})).status, 200, 'もう一度送っても、そのまま');
+    // オンライン参加の人が、つないだまま会場参加に切り替えると、来場確認まで入札できない
+    const wb = await t.ws(a);
+    const back = await a.post('/api/my/participation/venue', {});
+    assert.deepEqual([back.status, back.json.mode, back.json.checkedIn, back.json.paddle], [200, 'venue', false, 1]);
+    await assert.rejects(t.ws(a), /来場の確認/);
+    wb.close();
   } finally { await t.end(); }
 });

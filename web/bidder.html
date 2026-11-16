@@ -51,6 +51,12 @@
 </div>
 
 <p class="sr-only" id="alert" role="alert"></p>
+<dialog id="venueDlg">
+  <h2>会場参加に切り替えますか？</h2>
+  <p>切り替えると、会場の受付で来場の確認を受けるまで、入札できなくなります。会場にいない場合は、切り替えないでください。</p>
+  <p class="error" id="venueDlgMsg" role="alert"></p>
+  <div class="actions"><button class="btn" type="button" id="venueNo">やめる</button><button class="btn btn-primary" type="button" id="venueYes">切り替える</button></div>
+</dialog>
 <div class="overlay" id="overlay" role="alert"><div><span id="overlayText">再接続中…</span></div></div>
 
 <header class="brandbar">
@@ -106,6 +112,7 @@
       <p class="note">落札価格に送料は含まれません。締めの直前の入札は、通信の遅れで間に合わないことがあります。</p>
       <p class="note" id="premiumNote"></p>
       <p class="note" id="contact"></p>
+      <p class="note" id="modeLine" hidden>参加のしかた: オンライン参加　<button class="textbtn" type="button" id="toVenue">会場参加に切り替える</button></p>
       <details>
         <summary>検証用の情報</summary>
         <label class="check"><input type="checkbox" id="showVideo"> 映像を表示する</label>

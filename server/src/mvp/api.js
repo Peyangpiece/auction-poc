@@ -635,6 +635,17 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     audit(ctx, 'participation.change', { target: `participant:${p.id}`, before: { mode: 'venue', payment: p.payment }, after: { mode: 'online', payment } });
     return { ok: true, paddle: p.paddle_no, mode: 'online', checkedIn: true, payment, paymentChanged: payment !== p.payment };
   });
+  // オンライン参加の人が、自分で会場参加に切り替える（発注者の指示）。受付係の来場確認が済むまでは、入札できなくなる
+  route('POST', '/api/my/participation/venue', (ctx) => {
+    const member = needMember(ctx);
+    const event = activeEvent();
+    const p = event ? participant(member.id, event.id) : null;
+    if (!p) throw new HttpError(409, '参加手続きが済んでいません');
+    if (p.mode === 'venue') return { ok: true, paddle: p.paddle_no, mode: 'venue', checkedIn: !!p.checked_in_at };
+    db.prepare("UPDATE members SET mode = 'venue', checked_in_at = NULL WHERE id = ?").run(p.id);
+    audit(ctx, 'participation.change', { target: `participant:${p.id}`, before: { mode: 'online' }, after: { mode: 'venue', checkedIn: false } });
+    return { ok: true, paddle: p.paddle_no, mode: 'venue', checkedIn: false };
+  });
   route('POST', '/api/my/participation', (ctx, body) => {
     const member = needMember(ctx);
     const event = activeEvent();
@@ -771,6 +782,9 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (m.event_id !== (activeEvent()?.id ?? null)) return 'NOT_JOINED';
     // 手動の停止か、未払いによる自動の停止（FR-AUTH-009・015）。どちらか一方でもかかっていれば、入札できない
     if (billing.suspension(m.account_id)) return 'SUSPENDED';
+    // つないだあとで会場参加に切り替えた人は、来場確認が済むまで入札できない（別のタブを開いたままでも）
+    const now = db.prepare('SELECT mode, checked_in_at FROM members WHERE id = ?').get(m.id);
+    if (now?.mode === 'venue' && !now.checked_in_at) return 'NOT_CHECKED_IN';
     const limit = Number(setting('b2c_limit'));
     if (bid && limit > 0 && limitStmts.kind.get(m.account_id)?.kind === 'b2c') {
       // すでに落札した額 ＋ ほかの品で最高入札者になっている額 ＋ これから入れる額（同じ品の自分の入札は、二重に数えない）
