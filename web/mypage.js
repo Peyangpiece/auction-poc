@@ -47,9 +47,10 @@ async function loadBilling() {
       el('button', { class: 'btn btn-primary', type: 'button', text: '承諾する', onclick: async () => { await api('POST', `/api/my/offers/${o.id}`, { answer: 'accept' }); loadBilling(); } }), ' ',
       el('button', { class: 'btn', type: 'button', text: '辞退する', onclick: async () => { await api('POST', `/api/my/offers/${o.id}`, { answer: 'decline' }); loadBilling(); } })))));
   $('#myLines').replaceChildren(...res.lines.map((l) => el('li', {},
-    el('b', { text: l.label }), el('span', { class: 'digits', text: yen(l.amount) }),
+    el('b', { text: l.label }), el('span', { class: 'digits', text: yen(l.payable) }),
     el('span', { class: l.state === 'unpaid' ? 'warn' : '', text: STATE_TEXT[l.state] }),
     el('span', { class: 'note', text: [
+      l.premium ? `落札額 ${yen(l.amount)}＋買歩銭 ${yen(l.premium)}` : '',
       l.receive && l.kind !== 'penalty' && l.kind !== 'late' ? `受け取り: ${RECEIVE_TEXT[l.receive]}` : '',
       l.invoice?.dueDate && l.state !== 'cleared' && l.state !== 'delivered' ? `お支払期限 ${l.invoice.dueDate}` : '',
       l.pickupBy && l.state === 'cleared' ? `受け取り期限 ${l.pickupBy}` : '',

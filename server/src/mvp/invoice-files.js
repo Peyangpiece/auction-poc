@@ -17,7 +17,7 @@ const jpDate = (d) => { const [y, m, day] = d.split('-').map(Number); return `${
 const TITLE = { cash: '請求書 兼 領収書', transfer: '請求書', promote: '請求書', penalty: '請求書' };
 
 /** 請求書に書く内容を、PDF と Excel で共通の形にまとめる */
-function content({ invoice, lines, org, to, issuedOn, paidOn, subject }) {
+function content({ invoice, lines, org, to, issuedOn, paidOn, subject, premium }) {
   const total = invoice.total;
   // 違約金・遅延損害金は、損害の賠償にあたり、消費税の対象外とした【未検証】。落札代金は税率10%（内税）
   const taxable = invoice.kind === 'penalty' ? 0 : total;
@@ -34,7 +34,8 @@ function content({ invoice, lines, org, to, issuedOn, paidOn, subject }) {
     due: invoice.kind === 'cash' ? `領収日 : ${jpDate(paidOn)}（現金にて領収しました）`
       : `お支払い期限 : 送付日の翌日から${invoice.due_days}日目${invoice.shift_holiday ? '（金融機関の休業日は前営業日）' : ''}`,
     issuer: { name: org.org_name, lines: [...String(org.org_address ?? '').split('\n').filter(Boolean), org.org_tel && `TEL: ${org.org_tel}`, org.org_email, `登録番号: ${org.invoice_reg_no || '（未設定）'}`].filter(Boolean) },
-    rows: lines.map((l) => [l.label, 1, l.amount, l.amount]),
+    // 落札した品を1行ずつ。そのあとに、買歩銭を1行（発注者から示された見本と同じ並び）
+    rows: [...lines.map((l) => [l.label, 1, l.amount, l.amount]), ...(premium?.total ? [['買歩銭', 1, premium.total, premium.total]] : [])],
     taxLabel: taxable ? '消費税 (10% 内税)' : '消費税', taxValue: taxable ? `(${num(tax)})` : '対象外',
     bank: invoice.kind === 'cash' ? null : (org.bank_account || '（未設定）'),
     notes,
@@ -146,8 +147,8 @@ async function writeXlsx(file, c) {
 }
 
 /** PDF と Excel を作る。ファイルの場所はすぐに返し、書き終わりは done で待てる */
-export function makeInvoiceFiles({ dir, invoice, lines, org, to, issuedOn, paidOn, subject }) {
-  const c = content({ invoice, lines, org, to, issuedOn, paidOn, subject });
+export function makeInvoiceFiles({ dir, invoice, lines, org, to, issuedOn, paidOn, subject, premium }) {
+  const c = content({ invoice, lines, org, to, issuedOn, paidOn, subject, premium });
   const pdf = path.join(dir, `${invoice.number}.pdf`);
   const xlsx = path.join(dir, `${invoice.number}.xlsx`);
   return { pdf, xlsx, done: Promise.all([writePdf(pdf, c), writeXlsx(xlsx, c)]) };

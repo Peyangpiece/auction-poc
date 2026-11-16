@@ -550,11 +550,11 @@ export function createApi({ store, config, nowMs }) {
   // ------------------------------------------------------------ 表示する文言
   // 商品は、競りの最中に進行コンソールからその場で登録する（発注者の決定）。事前の登録・審査・カタログは持たない。
   // 送料が含まれないことの表示（FR-SHIP-003）と、返品特約の表示（FR-LEG-002）。だれでも見られる
-  route('GET', '/api/terms', () => ({ orgName: setting('org_name'), shippingNotice: setting('shipping_notice'), returnPolicy: setting('return_policy') }));
+  route('GET', '/api/terms', () => ({ orgName: setting('org_name'), shippingNotice: setting('shipping_notice'), returnPolicy: setting('return_policy'), premiumRate: billing.premiumRate() }));
 
   // ------------------------------------------------------------ 主催者設定（FR-ORG-001 の一部）・監査ログ・知らせ
   // 請求書・手数料に使う設定（FR-ORG-001 の一部）。未入力でも動くが、請求書には「（未設定）」と出る
-  const BILLING_KEYS = { orgAddress: ['org_address', 200], orgTel: ['org_tel', 40], orgEmail: ['org_email', 254], invoiceRegNo: ['invoice_reg_no', 20], bankAccount: ['bank_account', 200], bankHolidays: ['bank_holidays', 4000], feeMinimum: ['fee_minimum', 12], feeTaxMode: ['fee_tax_mode', 12] };
+  const BILLING_KEYS = { orgAddress: ['org_address', 200], orgTel: ['org_tel', 40], orgEmail: ['org_email', 254], invoiceRegNo: ['invoice_reg_no', 20], bankAccount: ['bank_account', 200], bankHolidays: ['bank_holidays', 4000], feeMinimum: ['fee_minimum', 12], feeTaxMode: ['fee_tax_mode', 12], buyerPremiumRate: ['buyer_premium_rate', 5] };
   route('GET', '/api/settings', (ctx) => {
     needStaff(ctx, 'admin');
     return { orgName: setting('org_name'), returnPolicy: setting('return_policy'), shippingNotice: setting('shipping_notice'), ...Object.fromEntries(Object.entries(BILLING_KEYS).map(([k, [key]]) => [k, setting(key)])) };

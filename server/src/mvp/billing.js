@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS bill_lines (
   kind TEXT NOT NULL CHECK (kind IN ('lot','promote','penalty','late')),
   event_id INTEGER NOT NULL, lot_id INTEGER, participant_id INTEGER, account_id INTEGER NOT NULL,
   label TEXT NOT NULL,                     -- 請求書に載せる名前（No. と品名）
-  amount INTEGER NOT NULL CHECK (amount > 0),   -- 税込
+  amount INTEGER NOT NULL CHECK (amount > 0),   -- 税込。落札の明細では、落札額
+  premium INTEGER NOT NULL DEFAULT 0,      -- 買歩銭（落札額に対する割合で、落札者が払う手数料。発注者の決定で 10%）
   receive TEXT,                            -- 受け取り方法（いまの値。開催終了の後は、主催者管理者が明細ごとに変えられる）
   invoice_id INTEGER,                      -- 載っている請求書。まだ精算も請求もしていなければ NULL
   cleared_at REAL, cleared_method TEXT, cleared_by INTEGER, clear_memo TEXT,   -- 消し込み
@@ -63,6 +64,7 @@ export const addDays = (date, n) => new Date(Date.parse(date + 'T00:00:00Z') + n
 
 export function createBilling({ db, config, nowMs, audit, notifier, setting, route, needStaff, needMember, HttpError, bad }) {
   db.exec(BILLING_SCHEMA);
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('bill_lines') WHERE name = 'premium'").get()) db.exec('ALTER TABLE bill_lines ADD COLUMN premium INTEGER NOT NULL DEFAULT 0');
   const invoiceDir = path.join(config.dataDir, 'invoices');
   fs.mkdirSync(invoiceDir, { recursive: true });
   const jst = (ms) => new Date(ms + 9 * 3600000).toISOString().slice(0, 10); // 日本時間の日付（DATA-006）
@@ -72,6 +74,14 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   const getLine = (id) => { const l = db.prepare('SELECT * FROM bill_lines WHERE id = ?').get(id); if (!l) throw new HttpError(404, '明細が見つかりません'); return l; };
   const account = (id) => db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(id);
   const displayName = (a) => (a.kind === 'b2b' ? `${a.company}　${a.contact_name}` : a.name);
+
+  // ------------------------------------------------------------ 買歩銭（発注者の決定: 落札額の 10%）
+  /** 買歩銭の割合（%）。主催者設定で変えられる。変えても、すでに作った明細の金額は変わらない */
+  const premiumRate = () => { const r = Number(setting('buyer_premium_rate')); return Number.isFinite(r) && r >= 0 && r <= 100 ? r : 10; };
+  /** 1つの落札についての買歩銭。1円未満は切り捨てる【前提】 */
+  const premiumOf = (amount) => Math.floor(amount * premiumRate() / 100);
+  /** 落札者が払う金額（落札額＋買歩銭） */
+  const payable = (l) => l.amount + (l.premium ?? 0);
 
   // ------------------------------------------------------------ 期限の計算
   /** 金融機関の休業日: 土日と、主催者設定のカレンダー（FR-ORG-001） */
@@ -96,11 +106,12 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       WHERE l.status = 'sold' AND l.event_id IS NOT NULL AND m.account_id IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM bill_lines x WHERE x.lot_id = l.id AND x.kind = 'lot')`).all();
     for (const r of rows) {
-      db.prepare('INSERT INTO bill_lines (kind, event_id, lot_id, participant_id, account_id, label, amount, receive, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-        .run('lot', r.event_id, r.lot_id, r.participant_id, r.account_id, `No.${r.lot_no} ${r.title}`, r.amount, r.receive, nowMs());
+      const premium = premiumOf(r.amount);
+      db.prepare('INSERT INTO bill_lines (kind, event_id, lot_id, participant_id, account_id, label, amount, premium, receive, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+        .run('lot', r.event_id, r.lot_id, r.participant_id, r.account_id, `No.${r.lot_no} ${r.title}`, r.amount, premium, r.receive, nowMs());
       const a = account(r.account_id);
       // 落札者に、メールでも知らせる（画面には、締めの時点で出ている）
-      notifier.email(a.email, 'won', '落札のお知らせ', `No.${r.lot_no} ${r.title} を、${yen(r.amount)}（税込）で落札しました。\nお支払いと受け取りについては、マイページをご覧ください。\n落札価格に送料は含まれません。`);
+      notifier.email(a.email, 'won', '落札のお知らせ', `No.${r.lot_no} ${r.title} を、${yen(r.amount)}（税込）で落札しました。\n買歩銭 ${yen(premium)}（落札額の${premiumRate()}%）を合わせた、お支払いの金額は ${yen(r.amount + premium)} です。\nお支払いと受け取りについては、マイページをご覧ください。\n落札価格に送料は含まれません。`);
     }
     return rows.length;
   }
@@ -115,7 +126,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   function issueInvoice(kind, lineIds, { dueDays = null, shiftHoliday = false, draft = false } = {}) {
     const lines = lineIds.map(getLine);
     const first = lines[0];
-    const total = lines.reduce((s, l) => s + l.amount, 0);
+    const total = lines.reduce((s, l) => s + payable(l), 0); // 落札額＋買歩銭
     const receiveNote = [...new Set(lines.map((l) => RECV[l.receive]).filter(Boolean))].join('・');
     const info = db.transaction(() => {
       const number = nextNumber();
@@ -130,6 +141,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const org = Object.fromEntries(['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'].map((k) => [k, setting(k)]));
     const files = makeInvoiceFiles({
       dir: invoiceDir, invoice: inv, lines, org, to: { name: displayName(a), address: a.kind === 'b2b' && a.billing ? a.billing : a.address },
+      premium: { total: lines.reduce((s, l) => s + (l.premium ?? 0), 0), rate: premiumRate() },
       issuedOn: jst(inv.issued_at), paidOn: kind === 'cash' ? jst(inv.issued_at) : null,
       // 件名: 開催日と開催の名前
       subject: (() => { const e = db.prepare('SELECT title, starts_at FROM events WHERE id = ?').get(first.event_id); return e ? `${Number(e.starts_at.slice(5, 7))}.${Number(e.starts_at.slice(8, 10))} ライブオークション ${e.title}` : 'ライブオークション'; })(),
@@ -160,7 +172,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     // 現地受け取りの期限: 消し込みの日の翌日から数えて7日目まで（FR-PAY-008）
     const pickupBy = l.receive === 'pickup' && l.cleared_at && l.kind !== 'penalty' && l.kind !== 'late' ? addDays(jst(l.cleared_at), 7) : null;
     return {
-      id: l.id, kind: l.kind, label: l.label, amount: l.amount, receive: l.receive, eventId: l.event_id,
+      id: l.id, kind: l.kind, label: l.label, amount: l.amount, premium: l.premium ?? 0, payable: payable(l), receive: l.receive, eventId: l.event_id,
       invoice: inv ? { id: inv.id, number: inv.number, kind: inv.kind, sentOn: inv.sent_at ? jst(inv.sent_at) : null, dueDate: inv.due_date } : null,
       state: l.cancelled_at ? 'cancelled' : l.delivered_at ? 'delivered' : l.cleared_at ? 'cleared' : overdue ? 'unpaid' : inv ? 'billed' : 'unsettled',
       clearedOn: l.cleared_at ? jst(l.cleared_at) : null, clearedMethod: l.cleared_method, deliveredOn: l.delivered_at ? jst(l.delivered_at) : null,
@@ -220,13 +232,13 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     if (l.cleared_at) throw new HttpError(409, 'この明細は、消し込み済みです');
     if (!l.invoice_id) throw new HttpError(409, 'まだ請求書を発行していない明細です。当日現金は「精算」で、振込は開催終了の後に消し込みます');
     // 明細の金額と入金の金額が一致するときだけ、消し込める（一部だけ・多すぎる入金の扱いは未決。OQ-26）
-    if (Number(body.amount) !== l.amount) throw bad(`入金の金額が、明細の金額（${yen(l.amount)}）と一致しません。一致しない入金は、システムの外で対応し、理由をメモに残してください`);
+    if (Number(body.amount) !== payable(l)) throw bad(`入金の金額が、明細の金額（${yen(payable(l))}）と一致しません。一致しない入金は、システムの外で対応し、理由をメモに残してください`);
     const now = nowMs();
     db.transaction(() => {
       db.prepare("UPDATE bill_lines SET cleared_at = ?, cleared_method = 'transfer', cleared_by = ?, clear_memo = ? WHERE id = ?").run(now, me.id, text(body.memo) || null, id);
       db.prepare("INSERT INTO clearings (line_id, amount, method, cleared_at) VALUES (?,?,'transfer',?)").run(id, l.amount, now);
     })();
-    audit(ctx, 'billing.clear', { target: `line:${id}`, before: { cleared: false }, after: { cleared: true, amount: l.amount, method: 'transfer' } });
+    audit(ctx, 'billing.clear', { target: `line:${id}`, before: { cleared: false }, after: { cleared: true, amount: payable(l), method: 'transfer' } });
     return { ok: true };
   });
   route('POST', '/api/billing/lines/:id/unclear', (ctx, body, id) => {
@@ -396,7 +408,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const deadline = addDays(today(), 3);
     db.prepare('INSERT INTO offers (line_id, participant_id, account_id, amount, offered_at, deadline) VALUES (?,?,?,?,?,?)').run(id, next.participant_id, next.account_id, next.amount, nowMs(), deadline);
     const a = account(next.account_id);
-    notifier.email(a.email, 'offer', '繰り上げ落札のご案内', `${l.label} について、落札者の解除があったため、次点のお客様に繰り上げをご案内します。\n価格: ${yen(next.amount)}（税込）\n回答期限: ${deadline}\nマイページで、承諾か辞退をお選びください。期限までにご回答がなければ、辞退とさせていただきます。`);
+    notifier.email(a.email, 'offer', '繰り上げ落札のご案内', `${l.label} について、落札者の解除があったため、次点のお客様に繰り上げをご案内します。\n価格: ${yen(next.amount)}（税込）。このほかに、買歩銭（落札額の${premiumRate()}%）がかかります\n回答期限: ${deadline}\nマイページで、承諾か辞退をお選びください。期限までにご回答がなければ、辞退とさせていただきます。`);
     audit(ctx, 'billing.offer', { target: `line:${id}`, after: { amount: next.amount, deadline } });
     return { ok: true, amount: next.amount, deadline };
   });
@@ -456,7 +468,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const reversed = all.filter((c) => c.reversed_at && monthOf(c.reversed_at) === month && monthOf(c.cleared_at) < month);
     const refunded = db.prepare("SELECT r.*, l.label, l.amount AS line_amount FROM refunds r JOIN bill_lines l ON l.id = r.line_id WHERE substr(r.refunded_on, 1, 7) = ? AND l.kind IN ('lot','promote')").all(month);
     const deduction = reversed.reduce((s, c) => s + ceilFee(c.amount), 0) + refunded.reduce((s, r) => s + ceilFee(r.line_amount), 0);
-    // 手数料 = 合計 × 5%（1円未満は切り捨て。合計に対して1回だけ丸める）
+    // 手数料 = 落札額の合計 × 5%（1円未満は切り捨て。合計に対して1回だけ丸める）。買歩銭は、対象に含めていない【前提】
     const fee = Math.max(0, Math.floor(base * FEE_RATE / 100) - deduction);
     const minimum = Number(setting('fee_minimum')) || 0;         // 最低保証額（未決。OQ-19）
     const charge = Math.max(fee, minimum);
@@ -522,8 +534,8 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     // 承諾: 繰り上げの請求書を、別に1通発行する。受け取り方法は、その人がその開催で選んだもの
     const src = getLine(o.line_id);
     const p = db.prepare('SELECT receive FROM members WHERE id = ?').get(o.participant_id);
-    const r = db.prepare("INSERT INTO bill_lines (kind, event_id, lot_id, participant_id, account_id, label, amount, receive, parent_line_id, created_at) VALUES ('promote',?,?,?,?,?,?,?,?,?)")
-      .run(src.event_id, src.lot_id, o.participant_id, o.account_id, `${src.label}（繰り上げ）`, o.amount, p?.receive ?? null, src.id, nowMs());
+    const r = db.prepare("INSERT INTO bill_lines (kind, event_id, lot_id, participant_id, account_id, label, amount, premium, receive, parent_line_id, created_at) VALUES ('promote',?,?,?,?,?,?,?,?,?,?)")
+      .run(src.event_id, src.lot_id, o.participant_id, o.account_id, `${src.label}（繰り上げ）`, o.amount, premiumOf(o.amount), p?.receive ?? null, src.id, nowMs());
     db.prepare("UPDATE offers SET state = 'accepted', answered_at = ?, new_line_id = ? WHERE id = ?").run(nowMs(), r.lastInsertRowid, id);
     const inv = issueInvoice('promote', [Number(r.lastInsertRowid)], { dueDays: 5, shiftHoliday: true, draft: true });
     await inv.done;
@@ -562,5 +574,5 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     return { overdue: overdue.length, pickup };
   }
 
-  return { syncLines, onEventEnd, suspension, sweep, feeSummary };
+  return { syncLines, onEventEnd, suspension, sweep, feeSummary, premiumRate };
 }

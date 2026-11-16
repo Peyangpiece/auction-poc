@@ -80,6 +80,8 @@ $('#calNext').addEventListener('click', () => move(1));
   drawCalendar();
   $('#lead').hidden = !!(me.member || me.staff);
   if (terms.ok) {
+    // 落札額のほかにかかる費用は、入札の前に分かるように出す
+    if (terms.premiumRate > 0) { $('#premium').textContent = `落札額のほかに、買歩銭（落札額の${terms.premiumRate}%）がかかります。`; $('#premiumBox').hidden = false; }
     $('#shipping').textContent = terms.shippingNotice;
     $('#returns').textContent = terms.returnPolicy;
     $('#terms').hidden = false;

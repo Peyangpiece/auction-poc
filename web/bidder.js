@@ -399,6 +399,9 @@ try {
 } catch { /* 保存できない設定でも、そのまま進む */ }
 if (params.has('venue')) history.replaceState(null, '', location.pathname);
 
+// 買歩銭（落札額のほかにかかる手数料）は、入札の前と、入札画面の中の両方に出す
+const premiumText = (t) => (t.premiumRate > 0 ? `落札額のほかに、買歩銭（落札額の${t.premiumRate}%）がかかります。\n` : '');
+getJson('/api/terms').then((t) => { if (t.status === 200) $('premiumNote').textContent = premiumText(t).trim(); });
 const showPaddle = (title, p) => {
   venue = p.mode === 'venue';
   const lines = [title, document.createElement('br'), venue ? '会場参加　参加番号' : '参加番号', Object.assign(document.createElement('b'), { textContent: String(p.paddle) })];
@@ -437,7 +440,7 @@ if (!token) (async () => {
   cash.closest('label').classList.toggle('off', !asVenue);
   $('cashNote').hidden = asVenue;
   $('join').hidden = false;
-  getJson('/api/terms').then((t) => { if (t.status === 200) $('joinTerms').textContent = `${t.shippingNotice}\n${t.returnPolicy}`; });
+  getJson('/api/terms').then((t) => { if (t.status === 200) $('joinTerms').textContent = `${premiumText(t)}${t.shippingNotice}\n${t.returnPolicy}`; });
   $('join').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const data = new FormData($('join'));

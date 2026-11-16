@@ -102,6 +102,8 @@ test('当日現金の精算と、開催終了の請求書（AC-FR-PAY-010-1、AC
     t.sold('飯ごう', [[b, 1000], [a, 2000]]);          // 11時: a が落札
     const first = await t.line('飯ごう');
     assert.deepEqual([first.state, first.amount, first.paddle, first.payment], ['unsettled', 2000, 1, 'cash']);
+    assert.deepEqual([first.premium, first.payable], [200, 2200], '買歩銭は、落札額の10%。払う金額は、落札額＋買歩銭');
+    assert.match(t.outbox().find((m) => m.kind === 'won' && m.to === a.email).body, /買歩銭 ¥200（落札額の10%）.*¥2,200/s, '落札の知らせに、買歩銭と払う金額を書く');
     assert.ok(t.outbox().some((m) => m.kind === 'won' && m.to === a.email), '落札者に、メールでも知らせる');
 
     assert.equal((await auctioneer.post('/api/billing/settle', { lineIds: [first.id] })).status, 403, '進行役は、精算できない');
@@ -109,6 +111,7 @@ test('当日現金の精算と、開催終了の請求書（AC-FR-PAY-010-1、AC
     const settled = await reception.post('/api/billing/settle', { lineIds: [first.id] });
     assert.equal(settled.status, 200);
     assert.match(settled.json.invoice.number, /^20261207-0001$/, '請求書番号は「年月日-連番」');
+    assert.equal(settled.json.invoice.total, 2200, '請求書の合計は、落札額＋買歩銭');
     const after = await t.line('飯ごう');
     assert.deepEqual([after.state, after.clearedMethod, after.invoice.kind], ['cleared', 'cash', 'cash']);
     assert.equal((await reception.post('/api/billing/settle', { lineIds: [first.id] })).status, 409, '2度は精算できない');
@@ -129,7 +132,7 @@ test('当日現金の精算と、開催終了の請求書（AC-FR-PAY-010-1、AC
     const made = await t.endEvent();
     assert.equal(made.length, 2, '落札者ごとに1通');
     const invA = made.find((i) => i.account_id === 1);
-    assert.deepEqual([invA.kind, invA.total], ['transfer', 3000], '15時の明細だけが載る（11時の明細は載らない）。当日現金を選んでいても、振込の請求書になる');
+    assert.deepEqual([invA.kind, invA.total], ['transfer', 3300], '15時の明細だけが載る（11時の明細は載らない）。当日現金を選んでいても、振込の請求書になる');
     const drafts = t.outbox().filter((m) => m.channel === 'draft');
     assert.deepEqual(drafts.map((d) => d.to).sort(), [a.email, b.email], '送付用のメールの下書きを作る（送信はしない）');
     assert.ok(fs.existsSync(drafts[0].attachments[0]), '下書きには、PDF を添付する');
@@ -145,7 +148,7 @@ test('送付済みの記録と支払期限（送付日の翌日から5日目。�
     t.sold('飯ごう', [[a, 2000]]);
     const [inv] = await t.endEvent();
     const l = await t.line('飯ごう');
-    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 2000 })).status, 200, '送付の前でも、入金があれば消し込める');
+    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 2200 })).status, 200, '送付の前でも、入金があれば消し込める');
     await t.admin.post(`/api/billing/lines/${l.id}/unclear`, { reason: '検証のため' });
     // 12/7（月）に送付 → 5日目は 12/12（土）→ 前の営業日の 12/11（金）
     assert.equal((await t.admin.post(`/api/billing/invoices/${inv.id}/sent`)).json.dueDate, '2026-12-11');
@@ -154,11 +157,11 @@ test('送付済みの記録と支払期限（送付日の翌日から5日目。�
     assert.equal((await t.admin.post('/api/settings', { orgName: '株式会社NEWS', returnPolicy: '仮', shippingNotice: '仮', bankHolidays: '2026-12-11' })).status, 200);
     assert.equal((await t.admin.post(`/api/billing/invoices/${inv.id}/sent`)).json.dueDate, '2026-12-10');
 
-    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 1999 })).status, 400, '一部だけの入金では、消し込めない');
-    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 2001 })).status, 400, '多すぎる入金でも、消し込めない');
+    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 2000 })).status, 400, '落札額だけ（買歩銭を除いた金額）では、消し込めない');
+    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 2201 })).status, 400, '多すぎる入金でも、消し込めない');
     const reception = await t.staffLogin('reception', 'uketsuke');
-    assert.equal((await reception.post(`/api/billing/lines/${l.id}/clear`, { amount: 2000 })).status, 403, '受付係は、振込を消し込めない');
-    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 2000 })).status, 200);
+    assert.equal((await reception.post(`/api/billing/lines/${l.id}/clear`, { amount: 2200 })).status, 403, '受付係は、振込を消し込めない');
+    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 2200 })).status, 200);
     assert.equal((await reception.post(`/api/billing/lines/${l.id}/deliver`)).status, 200);
     assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/unclear`, { reason: '誤り' })).status, 409, '引き渡し済みの明細は、消し込みを取り消せない');
     assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/undeliver`, {})).status, 400, '引き渡しの取り消しには、理由が要る');
@@ -195,14 +198,14 @@ test('未払いによる自動の停止と解除（AC-FR-AUTH-015-1・2・3）�
     assert.equal((await t.admin.post(`/api/billing/lines/${l1.id}/dun`, { method: '電話', body: '不在。折り返しを依頼' })).status, 200);
     assert.equal((await t.line('飯ごう')).dunning.length, 1);
     // 片方だけ消し込んでも、もう片方が残っていれば、停止のまま
-    await t.admin.post(`/api/billing/lines/${l1.id}/clear`, { amount: 2000 });
+    assert.equal((await t.admin.post(`/api/billing/lines/${l1.id}/clear`, { amount: 2200 })).status, 200);
     assert.equal((await a.get('/api/me')).json.member.suspended, true);
     // 残りを解除すると、ほかに期限を過ぎた請求がないので、自動の停止は解ける（AC-FR-AUTH-015-3）
     assert.equal((await t.admin.post(`/api/billing/lines/${l2.id}/cancel`, {})).status, 400, '解除には理由が要る');
     assert.equal((await t.admin.post(`/api/billing/lines/${l2.id}/cancel`, { reason: '期限を過ぎても入金がない' })).status, 200);
     assert.ok(t.outbox().some((m) => m.kind === 'cancelled' && m.to === a.email), '元の落札者に、メールで知らせる');
     assert.equal((await a.get('/api/me')).json.member.suspended, false);
-    assert.equal((await t.admin.post(`/api/billing/lines/${l2.id}/clear`, { amount: 3000 })).status, 409, '解除した明細は、消し込めない');
+    assert.equal((await t.admin.post(`/api/billing/lines/${l2.id}/clear`, { amount: 3300 })).status, 409, '解除した明細は、消し込めない');
     assert.equal((await t.admin.post(`/api/billing/lines/${l2.id}/deliver`)).status, 409, '解除した明細は、引き渡せない');
     // 手動の停止もかかっていれば、未払いが解けても停止のまま（AC-FR-AUTH-015-2）
     await t.admin.post('/api/members/1/suspend', { reason: '検証' });
@@ -285,17 +288,17 @@ test('手数料の集計: 消し込み済みだけ・消し込みの月で区切
     const [inv] = await t.endEvent();
     await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);
     const c = await t.line('C'), d = await t.line('D');
-    await t.admin.post(`/api/billing/lines/${d.id}/clear`, { amount: 990 });     // 12月: 振込 990円。C は未払いのまま
+    assert.equal((await t.admin.post(`/api/billing/lines/${d.id}/clear`, { amount: 1089 })).status, 200); // 12月: 振込（落札額 990円＋買歩銭 99円）。C は未払いのまま
     const dec = (await t.admin.get('/api/billing/fees?month=2026-12')).json;
     // 対象は 3,010円。5% = 150.5 → 150円（合計に1回だけ丸める。1件ごとなら 50+50+49=149 になる）
-    assert.deepEqual([dec.base, dec.fee, dec.tax, dec.total], [3010, 150, 15, 165], '未払いの C（5,000円）は数えない。外税で消費税を足す');
+    assert.deepEqual([dec.base, dec.fee, dec.tax, dec.total], [3010, 150, 15, 165], '未払いの C（5,000円）は数えない。買歩銭は対象に含めない。外税で消費税を足す');
     assert.equal(dec.details.length, 3);
     // 違約金は、手数料の対象に含めない
     await t.advance(30);                                                              // 1月
     await t.admin.post(`/api/billing/lines/${c.id}/cancel`, { reason: '未払い' });
     const pen = await t.admin.post(`/api/billing/lines/${c.id}/penalty`, { amount: 500 });
     const penLine = (await t.lines()).find((l) => l.kind === 'penalty');
-    await t.admin.post(`/api/billing/lines/${penLine.id}/clear`, { amount: 500 });
+    assert.equal((await t.admin.post(`/api/billing/lines/${penLine.id}/clear`, { amount: 500 })).status, 200, '違約金には、買歩銭はかからない');
     assert.ok(pen.json.invoice);
     // 1月に、12月の消し込み（D）を取り消し、A を返金した → 1月の手数料から差し引く（1件ごとに切り上げ）
     await t.admin.post(`/api/billing/lines/${d.id}/unclear`, { reason: '別の人の入金だった' });

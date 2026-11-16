@@ -141,6 +141,7 @@ try {
   const phone = await open('/', devices['iPhone 13']);
   await phone.waitForSelector('#terms:not([hidden])');
   check((await phone.textContent('main')).includes('送料は含まれません'), '送料が含まれないことと、返品特約を表示する');
+  check((await phone.textContent('main')).includes('買歩銭（落札額の10%）がかかります'), 'トップページに、買歩銭がかかることを表示する');
   check(await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'スマホの幅で、横にはみ出さない');
   await shot(phone, 'mvp-04-top-phone', { fullPage: true });
 
@@ -198,6 +199,8 @@ try {
   await phone.waitForSelector('#join:not([hidden])');
   check((await phone.locator('#join input:checked').count()) === 0, '受け取り方法と支払方法は、どちらも選ばれていない状態で聞く');
   check(await phone.isHidden('#enter'), '答えるまで、入札画面に進むボタンは出ない');
+  await phone.waitForFunction(() => document.getElementById('joinTerms').textContent.includes('買歩銭'));
+  check(true, '参加手続きの画面に、買歩銭がかかることを表示する');
   await phone.check('#join [name=receive][value=ship]');
   await phone.click('#join button[type=submit]');
   await phone.waitForFunction(() => document.getElementById('gateMsg').textContent.includes('両方'));
@@ -216,6 +219,7 @@ try {
   await phone.waitForFunction(() => document.getElementById('bid').textContent.includes('で入札'));
   await phone.click('#bid');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('9,500'));
+  check((await phone.textContent('#premiumNote')).includes('買歩銭（落札額の10%）'), '入札画面の中にも、買歩銭がかかることを表示する');
   check(true, '登録した会員が、参加番号で入札できる');
   await shot(phone, 'mvp-15-bid');
 
@@ -310,7 +314,7 @@ try {
   // 当日現金の精算（受付）→ 請求書（領収書を兼ねる）→ 引き渡し
   await admin.click('#tabs [data-key=billing]');
   await admin.waitForFunction(() => { const t = document.querySelector('#panel table')?.textContent ?? ''; return t.includes('未精算') && t.includes('当日現金'); });
-  check(true, '落札すると、請求の画面に「未精算」の明細が出る');
+  check((await admin.textContent('#panel table')).includes('¥11,000') && (await admin.textContent('#panel table')).includes('落札 ¥10,000＋買歩銭 ¥1,000'), '落札すると、請求の画面に「未精算」の明細が出る。金額は、落札額＋買歩銭10%');
   await admin.check('#panel table input[type=checkbox]');
   await shot(admin, 'mvp-24-billing-settle');
   await admin.click('#panel >> text=選んだ明細を、当日現金で精算');
@@ -328,6 +332,7 @@ try {
   await guest.goto(sys.base + '/mypage.html');
   await guest.waitForSelector('#billing:not([hidden])');
   const mine = await guest.textContent('#myLines');
+  check(mine.includes('¥11,000') && mine.includes('買歩銭 ¥1,000'), 'マイページに、買歩銭を含めた金額と内訳が出る');
   check(mine.includes('防水シート') && mine.includes('お渡し済み') && mine.includes('（PDF）'), '落札者のマイページに、品・状態・請求書が出る');
   await shot(guest, 'mvp-26-mypage-billing', { fullPage: true });
   await guest.goto(sys.base + '/bidder.html');
