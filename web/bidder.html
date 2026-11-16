@@ -41,6 +41,10 @@
   #videoBox video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
   #break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: #000; color: #fff; }
   #break strong { font-size: 18px; font-weight: 600; }
+  /* 音声の切り替え。映像の右下に置く。音は、押してから出す（ブラウザは、操作なしに音を出させない） */
+  #sound { position: absolute; right: 8px; bottom: 8px; z-index: 2; min-height: 44px; padding: 6px 14px; font-size: 14px; background: rgba(0, 0, 0, .72); border-color: rgba(255, 255, 255, .6); color: #fff; }
+  #sound:hover:not(:disabled) { background: #000; color: #fff; }
+  #sound[hidden] { display: none; }
 
   /* 表示板（スマホでは下に固定） */
   .board { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; gap: 8px;
@@ -195,6 +199,7 @@
   <div id="videoBox">
     <video id="video" playsinline muted aria-label="会場のライブ映像"></video>
     <div id="break"><strong id="breakTitle">映像は停止中です</strong></div>
+    <button class="btn" id="sound" type="button" aria-pressed="false" hidden>音声を出す</button>
   </div>
 
   <div class="side">
@@ -271,7 +276,7 @@ $('net').textContent = net;
 const store = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
 // 応札／観戦: 観戦の間は入札ボタンを押せない（誤って入札しないため）。最初は観戦にしておく
 const S = { lots: new Map(), focus: null, paddle: null, history: [], stream: null, wasHighest: false, playerUrl: null, shownPrice: null, rendered: 0,
-  mode: store.get('poc-mode', 'watch'), comments: [], cmtMax: 20, lockUntil: 0, connected: false };
+  mode: store.get('poc-mode', 'watch'), comments: [], cmtMax: 20, lockUntil: 0, connected: false, sound: false };
 // 一覧は、いちばん下を見ているときだけ新しい行に追従する（読み返している途中で勝手に動かさない）
 function follow(el, update) { const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24; update(); if (atEnd) el.scrollTop = el.scrollHeight; }
 let link, audioCtx = null, wakeLock = null, player = null, playerLoading = false;
@@ -395,6 +400,7 @@ function renderStream() {
   const live = !!S.stream?.live && !!S.stream?.playbackUrl;
   $('break').style.display = live ? 'none' : 'flex';
   $('breakTitle').textContent = S.stream?.live ? '映像を準備しています' : '映像は停止中です';
+  renderSound();
   if (show && live) startPlayer(); else stopPlayer();
 }
 
@@ -450,16 +456,31 @@ async function startPlayer() {
     if (!IVSPlayer.isPlayerSupported) throw new Error('IVS プレーヤーに対応していないブラウザ');
     player = IVSPlayer.create();
     player.attachHTMLVideoElement($('video'));
-    player.setMuted(true); // 会場で音が回り込まないよう、PoC では消音で再生する
+    // 最初は消音で再生する（ブラウザは、操作なしに音つきの再生を始めさせない）。音は「音声を出す」を押してから出す
+    player.setMuted(!S.sound);
+    $('video').muted = !S.sound;
     player.addEventListener(IVSPlayer.PlayerEventType.ERROR, (e) => link.event('player_error', { type: e?.type, message: e?.message }));
     player.load(S.stream.playbackUrl);
-    player.play();
-    link.event('player_start', {});
+    // 音つきの再生を断られたら、消音に戻して再生し直す（次に「音声を出す」を押せば出る）
+    Promise.resolve(player.play()).catch(() => { S.sound = false; player.setMuted(true); $('video').muted = true; renderSound(); try { player.play(); } catch {} });
+    link.event('player_start', { sound: S.sound });
   } catch (err) {
     $('latency').textContent = '再生できない: ' + err.message;
     link.event('player_error', { message: err.message });
   } finally { playerLoading = false; }
 }
+function renderSound() {
+  const live = !!S.stream?.live && !!S.stream?.playbackUrl;
+  $('sound').hidden = !(live && $('showVideo').checked && !venue);
+  $('sound').textContent = S.sound ? '音声を消す' : '音声を出す';
+  $('sound').setAttribute('aria-pressed', String(S.sound));
+}
+$('sound').addEventListener('click', () => {
+  S.sound = !S.sound;
+  if (player) { player.setMuted(!S.sound); $('video').muted = !S.sound; if (S.sound) { try { player.play(); } catch {} } }
+  renderSound();
+  link?.event('sound', { on: S.sound });
+});
 function stopPlayer() {
   if (!player) return;
   try { player.pause(); player.delete(); } catch {}

@@ -40,6 +40,8 @@
   #b_close, #b_next { min-width: 220px; }
   #cmdMsg { margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--danger); }
   #cmdMsg:empty { display: none; }
+  #idleWarn { margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--danger); }
+  #idleWarn:empty { display: none; }
   .actions .push { margin-left: auto; }
 
   /* 表 */
@@ -149,6 +151,7 @@
         <dt>配信エージェント</dt><dd><span class="state" id="s_agent">未接続</span></dd>
         <dt>OBS</dt><dd><span class="state" id="s_obs">不明</span></dd>
       </dl>
+      <p id="idleWarn" role="status"></p>
       <div class="actions">
         <button class="btn" data-cmd="stream_start" type="button">配信を開始</button>
         <button class="btn" data-cmd="stream_stop" type="button">配信を停止</button>
@@ -298,6 +301,10 @@ function renderStream() {
 setInterval(() => {
   if (!link) return;
   $('clock').textContent = jst(link.serverNow());
+  // 配信の止め忘れ: 競りがないまま配信が続いた時間が長くなったら知らせる（自動では止めない）
+  const st = S.stream;
+  const idleMs = st && st.idleSince && (st.obsActive || st.live) && st.mode !== 'always-live' ? link.serverNow() - st.idleSince : 0;
+  $('idleWarn').textContent = st && idleMs >= st.idleWarnMs ? `競りがないまま ${Math.floor(idleMs / 60000)} 分、配信が続いています` : '';
   $('offset').textContent = link.offset.toFixed(1); $('rtt').textContent = link.rtt?.toFixed(1) ?? '0';
 }, 50);
 

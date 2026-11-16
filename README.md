@@ -68,6 +68,20 @@ node tools/mock-obs.js --port 4455
 
 トークン（合言葉）は `data/tokens.json` にだけあります。このファイルは共有・コミットしないでください。
 
+## 画面の自動確認
+
+Playwright と Chromium が入っている環境で実行します（このリポジトリの依存には入れていません）。
+
+```bash
+npm run test:e2e
+```
+
+```bash
+npm run test:ux
+```
+
+`test:e2e` は、進行コンソールと入札画面を実際に操作する通し確認です。`test:ux` は、端末の幅ごとに横あふれ・押せる範囲・文字の大きさを測ります。
+
 ## 負荷と集計
 
 ```bash
@@ -98,6 +112,10 @@ node tools/aggregate.js --label P2-6
 | `POC_LIVE_SETTLE_MS` / `POC_LIVE_TIMEOUT_MS` | 8000 / 60000 | LIVE から受付中までの待ち／警告にするまで |
 | `POC_VENUE_CONTACT` | — | 入札画面の下に出す会場の連絡先。空なら出さない |
 | `POC_COMMENT_MAX_LENGTH` / `POC_COMMENT_INTERVAL_MS` | 20 / 3000 | コメントの長さの上限／続けて書き込めるまでの間隔 |
+| `POC_METRICS` | full | 測定の記録の量。full／basic（端末ごとの送り返しを除く）／off |
+| `POC_METRICS_MAX_MB` | 1024 | 測定の記録の全体の上限。超えたら古いファイルから消す |
+| `POC_STREAM_IDLE_WARN_MS` | 600000 | 競りがないまま配信が続いたときに、進行コンソールに注意を出すまで |
+| `POC_HEARTBEAT_MS` | 10000 | サーバーが端末の生存を確かめる間隔 |
 | `POC_ALLOW_CRASH` | 0 | 1 で障害の模擬（強制終了）を許す。本番では必ず 0 |
 
 秘密情報（IVS のストリームキー、obs-websocket のパスワード、AWS の認証情報、各トークン）は、ソースコードにもこのリポジトリにも書いていません。

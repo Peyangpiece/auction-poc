@@ -31,6 +31,16 @@ class Link {
     this.onlineAt = null;
     this.everConnected = false;
     window.addEventListener('online', () => { this.onlineAt = localNow(); });
+    // 生存確認: 回線が黙って切れると、ブラウザは切断になかなか気づかない。
+    // 3秒ごとにサーバーへ問い合わせ、最後に何かを受け取ってから7秒たっていたら、切れたものとして扱う。
+    this.lastHeardAt = localNow();
+    setInterval(() => {
+      if (this.downAt !== null || this.ws.readyState !== 1) return;
+      // 裏に回ったタブでは、ブラウザがタイマーを間引くので判定しない（表に戻ったときに数え直す）
+      if (document.hidden) { this.lastHeardAt = localNow(); return; }
+      if (localNow() - this.lastHeardAt > 7000) return this.dropped('heartbeat');
+      this.send({ type: 'time', t0: 0 });
+    }, 3000);
     setInterval(() => this.syncClock(), 30000); // 30秒ごとに時刻を合わせ直す【提案値】
     this.connect();
   }
@@ -41,9 +51,11 @@ class Link {
   connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = (this.ws = new WebSocket(`${proto}//${location.host}/ws`));
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', token: this.token, label: this.label }));
+    ws.onopen = () => { this.lastHeardAt = localNow(); ws.send(JSON.stringify({ type: 'hello', token: this.token, label: this.label })); };
     ws.onmessage = (ev) => {
+      if (ws !== this.ws) return; // 見切りをつけた古い接続からの遅れた受信は捨てる
       const at = localNow();
+      this.lastHeardAt = at;
       const msg = JSON.parse(ev.data);
       if (msg.type === 'time' || msg.type === 'bid_result' || msg.type === 'cmd_result' || msg.type === 'comment_result') {
         const key = msg.type === 'time' ? 't' + msg.t0 : msg.reqId;
@@ -60,7 +72,7 @@ class Link {
           if (wasDown && this.everConnected) {
             // 再接続にかかった時間（P3-5）: 切れてから／回線が戻ってから
             this.event('reconnect', {
-              downMs: Math.round(at - wasDown),
+              downMs: Math.round(at - wasDown), cause: this.lastDropCause,
               sinceOnlineMs: this.onlineAt && this.onlineAt > wasDown ? Math.round(at - this.onlineAt) : null,
             });
           }
@@ -70,15 +82,25 @@ class Link {
       this.onMessage(msg, at);
     };
     ws.onclose = (ev) => {
+      if (ws !== this.ws) return; // すでに見切りをつけて、つなぎ直しに入っている
       if (ev.code === 4401) return this.onStatus(false, '合言葉（トークン）が正しくありません');
-      if (this.downAt === null) this.downAt = localNow();
-      // 応答を待っている操作（入札など）を、時間切れまで待たせない。届いたかどうかは、再接続後の表示で分かる
-      for (const [key, w] of this.waiters) { this.waiters.delete(key); w(null); }
-      this.onStatus(false);
-      // 切れてから1秒後に1回目を試し、その後は2秒ごとに試す（FR-UI-001）
-      setTimeout(() => this.connect(), this.attempt++ === 0 ? 1000 : 2000);
+      this.dropped('close');
     };
     ws.onerror = () => {};
+  }
+
+  /** 切れたときの処理。ブラウザが切断を知らせてきた場合も、生存確認で見切りをつけた場合も、ここを通る */
+  dropped(cause) {
+    const old = this.ws;
+    this.ws = { readyState: 3, send() {}, close() {} }; // つなぎ直すまでの間の、何もしない代わり
+    try { old.close(); } catch {}
+    if (this.downAt === null) this.downAt = localNow();
+    this.lastDropCause = cause;
+    // 応答を待っている操作（入札など）を、時間切れまで待たせない。届いたかどうかは、再接続後の表示で分かる
+    for (const [key, w] of this.waiters) { this.waiters.delete(key); w(null); }
+    this.onStatus(false);
+    // 切れてから1秒後に1回目を試し、その後は2秒ごとに試す（FR-UI-001）
+    setTimeout(() => this.connect(), this.attempt++ === 0 ? 1000 : 2000);
   }
 
   send(obj) {

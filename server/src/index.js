@@ -14,7 +14,7 @@ import { nowMs } from './clock.js';
 
 const config = loadConfig();
 const store = openDb(config.dbPath);
-const metrics = new Metrics(config.metricsDir);
+const metrics = new Metrics(config.metricsDir, { level: config.metricsLevel, fileMb: config.metricsFileMb, maxMb: config.metricsMaxMb });
 
 // ---------------------------------------------------------------- 接続の管理
 const clients = new Set(); // { ws, role: 'member'|'auctioneer', member?, staff?, id }
@@ -155,7 +155,20 @@ server.on('upgrade', (req, socket, head) => {
   }
 });
 
+// 生存確認: 一定の間隔で ping を送り、次の回までに応答（pong）がなかった接続は切る。
+// 回線が黙って切れた端末の接続を残さない（参加者の数が正しく出る。送信の滞留もたまらない）。
+const heartbeat = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    ws.ping();
+  }
+}, config.heartbeatMs);
+heartbeat.unref();
+
 function onClient(ws, req) {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   const conn = { ws, role: null, member: null, staff: null, id: ++connSeq, ip: req.socket.remoteAddress };
   const send = (msg) => ws.readyState === 1 && ws.send(JSON.stringify(msg));
 
@@ -287,7 +300,7 @@ sysTimer.unref();
 
 server.listen(config.port, config.host, () => {
   console.log(`[server] listening on ${config.host}:${server.address().port} ivsMode=${config.ivsMode} db=${config.dbPath}`);
-  console.log(`[server] metrics -> ${metrics.file}`);
+  console.log(`[server] metrics -> ${metrics.file ?? '（記録しない）'}`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

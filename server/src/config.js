@@ -55,6 +55,15 @@ export function loadConfig(env = process.env) {
     // 入札画面の下に出す会場の連絡先（主催者設定 FR-ORG-001 に当たる。PoC では環境変数で渡す）
     venueContact: env.POC_VENUE_CONTACT || '',
 
+    // 生存確認: この間隔で端末に ping を送り、次の回までに応答がなければ接続を切る（回線が黙って切れた接続を残さない）
+    heartbeatMs: num(env.POC_HEARTBEAT_MS, 10000),
+    // 測定の記録（NDJSON）。full = すべて／basic = 端末ごとの送り返し（件数が多い）を除く／off = 記録しない
+    metricsLevel: env.POC_METRICS || 'full',
+    metricsFileMb: num(env.POC_METRICS_FILE_MB, 64),   // 1ファイルの大きさ。超えたら次のファイルへ
+    metricsMaxMb: num(env.POC_METRICS_MAX_MB, 1024),   // 全体の上限。超えたら古いファイルから消す
+    // 配信の止め忘れの注意: 競りがないまま配信が続いた時間がこれを超えたら、進行コンソールに注意を出す（止めはしない）
+    streamIdleWarnMs: num(env.POC_STREAM_IDLE_WARN_MS, 600000),
+
     sysSampleMs: num(env.POC_SYS_SAMPLE_MS, 10000),
   };
 }

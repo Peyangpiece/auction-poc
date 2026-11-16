@@ -11,7 +11,9 @@
     "start": "node server/src/index.js",
     "test": "node --test --test-concurrency=1 \"server/test/*.test.js\"",
     "load": "node tools/load.js",
-    "aggregate": "node tools/aggregate.js"
+    "aggregate": "node tools/aggregate.js",
+    "test:e2e": "node tools/e2e/walkthrough.mjs",
+    "test:ux": "node tools/e2e/measure.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.2.0",

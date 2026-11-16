@@ -166,3 +166,18 @@ test('既定では自動停止しない: 落札の後も配信は続き、止ま
   assert.equal(obs2.state.active, false);
   agent2.kill(); await obs2.close(); await srv2.stop(); cleanup(ctx2);
 });
+
+test('競りがない状態が始まった時刻を進行コンソールに伝える（配信の止め忘れの注意に使う）', async () => {
+  const lot = await createLot(A, 1000);
+  A.send({ type: 'sync' });
+  const idle = await A.waitFor((x) => x.type === 'snapshot');
+  assert.equal(typeof idle.stream.idleSince, 'number'); // 競りがない
+  assert.ok(idle.stream.idleWarnMs > 0);
+  const busy = A.waitFor((x) => x.type === 'stream' && x.stream.idleSince === null);
+  await A.cmd('start', { lotId: lot.id });
+  await busy; // 競りが始まったら、数えるのをやめる
+  await A.cmd('back_to_waiting', { lotId: lot.id });
+  A.send({ type: 'sync' });
+  const again = await A.waitFor((x) => x.type === 'snapshot');
+  assert.ok(again.stream.idleSince >= idle.stream.idleSince);
+});

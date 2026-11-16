@@ -1,0 +1,29 @@
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 依存を入れる
+        run: |
+          npm ci
+          (cd agent && npm ci)
+      - name: サーバーの自動テスト（入札・締め・復旧・配信の制御）
+        run: npm test
+      - name: ブラウザを入れる
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: 画面の通し確認
+        run: npm run test:e2e
+      - name: 画面の実測（幅ごとのあふれ・押せる範囲・文字の大きさ）
+        run: npm run test:ux
