@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// 「令和の競り」のロゴを作る。毛筆の書体（Yuji Mai。SIL OFL）の文字を図形に変換し、会社のシンボルの色で組む。
+// 「令和の競り」のロゴを作る。毛筆の楷書の書体（Yuji Syuku。SIL OFL）の文字を図形に変換し、会社のシンボルの色で組む。
 //   node tools/build-logo.mjs docs/brand
-// 実行には、書体と変換の部品が要る（npm install --no-save opentype.js @fontsource/yuji-mai）。
+// 実行には、書体と変換の部品が要る（npm install --no-save opentype.js @fontsource/yuji-syuku）。
 // できあがるロゴは図形だけなので、使う側に書体は要らない。
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -11,17 +11,18 @@ const { chromium } = require('playwright');
 const ROOT = new URL('..', import.meta.url).pathname;
 const OUT = process.argv[2];
 if (!OUT) { console.error('使い方: node tools/build-logo.mjs <出力先のフォルダ>'); process.exit(1); }
-const buf = fs.readFileSync(require.resolve('@fontsource/yuji-mai/files/yuji-mai-japanese-400-normal.woff'));
+const buf = fs.readFileSync(require.resolve('@fontsource/yuji-syuku/files/yuji-syuku-japanese-400-normal.woff'));
 const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
 const NAVY = '#000156', GOLD = '#d4aa00', RED = '#ff0000', WHITE = '#ffffff';
 
 // 文字ごとに、大きさ・上下の位置・詰め具合を決める（「の」を小さく赤に、「競り」を大きく。「令和」は、会社の名前の読みを漢字にしたもの）
+// 楷書らしく、字の大きさと下の線をそろえ、間を均等にとる。「の」だけ少し小さくして赤に
 const glyphs = [
-  { ch: '令', size: 172, dy: 4, gap: -14, role: 'main' },
-  { ch: '和', size: 172, dy: 4, gap: -8, role: 'main' },
-  { ch: 'の', size: 96, dy: -6, gap: -2, role: 'accent' },
-  { ch: '競', size: 188, dy: 10, gap: -20, role: 'main' },
-  { ch: 'り', size: 160, dy: 4, gap: 0, role: 'main' },
+  { ch: '令', size: 176, dy: 0, gap: -10, role: 'main' },
+  { ch: '和', size: 176, dy: 0, gap: -4, role: 'main' },
+  { ch: 'の', size: 118, dy: -8, gap: 0, role: 'accent' },
+  { ch: '競', size: 176, dy: 0, gap: -10, role: 'main' },
+  { ch: 'り', size: 166, dy: -2, gap: 0, role: 'main' },
 ];
 function wordmark(x0, base) {
   let x = x0; const parts = [];
@@ -63,7 +64,7 @@ function build({ dark = false, withEmblem = false }) {
   const W = Math.ceil(pad * 2 + ex + wm.width + 58), H = 300;
   const main = dark ? WHITE : NAVY, accent = dark ? GOLD : RED;
   // 文字は、同じ色の細い縁を足して、筆の太さを少し出す
-  const letters = wm.parts.map((g) => { const c = g.role === 'accent' ? accent : main; return `<path d="${g.d}" fill="${c}" stroke="${c}" stroke-width="2.4" stroke-linejoin="round"/>`; }).join('');
+  const letters = wm.parts.map((g) => { const c = g.role === 'accent' ? accent : main; return `<path d="${g.d}" fill="${c}" stroke="${c}" stroke-width="1.6" stroke-linejoin="round"/>`; }).join('');
   const line = brushLine(pad + ex + 2, base + 34, wm.width + 14, `kasure${dark ? 'd' : ''}${withEmblem ? 's' : ''}`);
   const bg = dark ? `<rect width="${W}" height="${H}" rx="14" fill="${NAVY}"/>` : '';
   const mark = withEmblem ? `<image href="${emblem}" x="${pad}" y="${(H - 190) / 2 - 2}" width="190" height="190"/>` : '';
