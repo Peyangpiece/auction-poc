@@ -32,13 +32,8 @@ function content({ invoice, lines, shipping = [], org: rawOrg, to: rawTo, issued
   // 違約金・遅延損害金は、損害の賠償にあたり、消費税の対象外とした【未検証】。落札代金は税率10%（内税）
   const taxable = invoice.kind === 'penalty' ? 0 : total;
   const tax = Math.floor(taxable * 10 / 110);
+  // 原本にない注記（依頼人名に請求番号を入れること・振込手数料・受け取り方法・送料の説明）は、載せない（発注者の指示）
   const notes = [];
-  if (invoice.kind !== 'cash') {
-    notes.push(`お振込の際は、依頼人名に請求番号（${invoice.number}）を入れてください。振込手数料は、お客様のご負担となります。`);
-  }
-  if (invoice.receive_note) notes.push(`受け取り方法: ${invoice.receive_note}`);
-  // 送料の行がない請求書にだけ、送料は別に請求することを書く
-  if (invoice.kind !== 'penalty' && !shipping.length && lines.length) notes.push('落札価格に送料は含まれません。配送の場合、送料は後日、別にご請求します。');
   return {
     title: TITLE[invoice.kind], number: invoice.number, date: jpDate(issuedOn), to, subject, total,
     // 支払期限は、発行日の5日後（違約金などは7日後）の日付だけを書く（発注者の指示）
@@ -56,8 +51,8 @@ function content({ invoice, lines, shipping = [], org: rawOrg, to: rawTo, issued
   };
 }
 
-// 文字の縦の位置: 原本から読み取った「文字の上端」に、そろえて置く（書体の上の余白の分を、大きさに比例して引く）
-const TOP_ADJUST = 0;
+// 文字の縦の位置: 原本と画像で比べて、文字そのものの位置がそろうように、書体の上の余白の分（大きさの2割）を引く
+const TOP_ADJUST = 0.2;
 function writePdf(file, c) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 0, info: { Title: `${c.title} ${c.number}` } });
@@ -72,7 +67,8 @@ function writePdf(file, c) {
     const T = (str, x, top, size, { font = 'M', align = 'left', width = null, underline = false } = {}) => {
       doc.font(font).fontSize(size);
       const w = width ?? doc.widthOfString(str);
-      doc.text(str, x, top - size * TOP_ADJUST, { width: width ?? w + 2, align, lineBreak: width !== null, underline });
+      // 太字は、書体の上の余白が少し大きいので、その分も引く
+      doc.text(str, x, top - size * (font === 'B' ? TOP_ADJUST + 0.045 : TOP_ADJUST), { width: width ?? w + 2, align, lineBreak: width !== null, underline });
       return w;
     };
     const right = (str, edge, top, size, opt = {}) => { doc.font(opt.font ?? 'M').fontSize(size); return T(str, edge - doc.widthOfString(str), top, size, opt); };
@@ -83,22 +79,23 @@ function writePdf(file, c) {
     T(c.title, (595.28 - doc.widthOfString(c.title)) / 2, 81.6, 24);
 
     // 左: 宛先（下線つき）・件名・ご請求金額（下線つき）・期限
-    const nameW = T(`${c.to.name} 様`, L + 0.3, 125.6, 14);
-    doc.moveTo(L, 139.29).lineTo(L + nameW + 0.6, 139.29).stroke();
-    T(`件名 : ${c.subject}`, L + 0.3, 158, 9.5, { width: 270 });
-    T('下記のとおりご請求申し上げます。', L + 0.3, 180, 9.5);
-    T('ご請求金額', L + 0.3, 205.1, 12);
+    const nameW = T(`${c.to.name} 様`, L, 125.6, 14);
+    // 宛名の下線: 原本と同じ高さ（139.29）で、宛名の文字の幅ちょうど
+    doc.moveTo(L, 139.29).lineTo(L + nameW, 139.29).stroke();
+    T(`件名 : ${c.subject}`, L, 158, 9.5, { width: 270 });
+    T('下記のとおりご請求申し上げます。', L, 180, 9.5);
+    T('ご請求金額', L, 205.1, 12);
     right(`¥ ${num(c.total)} -`, 264, 205.1, 12);
     doc.moveTo(L, 220.31).lineTo(265.1, 220.31).stroke();
-    T(c.due, L + 0.3, 233.3, 9.5, { width: 270 });
+    T(c.due, L, 233.3, 9.5, { width: 270 });
 
     // 右: 発行者（会社のシンボル、名称、住所、電話・メール・登録番号、印鑑）
     const rx = 320;
     doc.image(LOGO, 320.5, 125.8, { width: 60 });
     T(c.issuer.name, rx, 193.1, 10.5);
-    let ry = 218.5;
-    for (const line of c.issuer.address) { T(line, rx, ry, 9); ry += 11.6; }
-    ry += 10.4; // 住所と連絡先のあいだを、1行あける
+    let ry = 218.4;
+    for (const line of c.issuer.address) { T(line, rx, ry, 9); ry += 11.5; }
+    ry += 10.8; // 住所と連絡先のあいだを、1行あける
     for (const line of c.issuer.contact) { T(line, rx, ry, 9); ry += 11.4; }
     if (c.seal) doc.image(c.seal, 500.5, 194, { width: 59 });
 
@@ -137,12 +134,11 @@ function writePdf(file, c) {
     y += 14.3;
     if (y > 770) { doc.addPage(); y = 40; }
     if (c.bank) {
-      T('お振込先：', L + 0.3, y, 10, { font: 'B' });
-      T(c.bank, L + 0.3, y + 12.6, 10, { width: R - L });
+      T('お振込先：', L, y, 10, { font: 'B' });
+      T(c.bank, L, y + 12.6, 10, { width: R - L });
       y += 34;
     }
-    // 原本にはない、決まりごとの注記（依頼人名に請求番号を入れること、振込手数料、受け取り方法）。小さめの字で、最後に置く
-    for (const note of c.notes) { T(note, L + 0.3, y, 9, { width: R - L }); y = doc.y + 3; }
+    for (const note of c.notes) { T(note, L, y, 9, { width: R - L }); y = doc.y + 3; }
     doc.end();
   });
 }
