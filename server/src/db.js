@@ -1,0 +1,123 @@
+// データベース（SQLite）。入札は、ここへの書き込み（fsync つきのコミット）が終わってから「受理」と返す（NFR-REL-001）。
+// better-sqlite3 は同期 API なので、1件の処理の途中に別の入札の処理が割り込むことがない（FR-BID-004 の直列処理をそのまま保証できる）。
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import Database from 'better-sqlite3';
+
+export const hashToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS members (
+  id INTEGER PRIMARY KEY,
+  paddle_no INTEGER NOT NULL UNIQUE,      -- 参加番号（画面にはこの番号だけを出す。FR-BID-008）
+  name TEXT NOT NULL,                     -- 架空の名前（本物の個人データは使わない）
+  token_hash TEXT NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS staff (
+  id INTEGER PRIMARY KEY,
+  role TEXT NOT NULL CHECK (role IN ('auctioneer','agent')),
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS lots (
+  id INTEGER PRIMARY KEY,
+  lot_no INTEGER NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  start_price INTEGER NOT NULL CHECK (start_price > 0),   -- 税込（FR-BID-010）
+  unit_override INTEGER,                                    -- 商品ごとの入札単位の上書き（FR-BID-005）
+  status TEXT NOT NULL DEFAULT 'waiting'
+    CHECK (status IN ('waiting','preparing','preparing_warn','open','suspended','sold','unsold','not_held')),
+  prep_from TEXT,                 -- 配信準備中に入る前の状態（waiting / suspended）
+  no_video INTEGER NOT NULL DEFAULT 0,
+  current_bid_seq INTEGER,        -- 現在の最高入札（受理された有効な入札）の受付連番。なければ NULL
+  close_seq INTEGER,              -- 「締め」の受付連番
+  winner_bid_seq INTEGER,
+  updated_at REAL NOT NULL
+);
+-- すべての入札（受理も拒否も）。受付連番 seq が順番の唯一の根拠（FR-BID-004）。
+CREATE TABLE IF NOT EXISTS bids (
+  seq INTEGER PRIMARY KEY,
+  lot_id INTEGER NOT NULL REFERENCES lots(id),
+  member_id INTEGER NOT NULL REFERENCES members(id),
+  amount INTEGER NOT NULL,
+  received_at REAL NOT NULL,      -- サーバーが受け付けた時刻（UTC エポックミリ秒）
+  result TEXT NOT NULL,           -- 'ACCEPTED' または FR-BID-012 の理由コード
+  valid INTEGER NOT NULL DEFAULT 1,  -- 取りやめで無効になったら 0（記録は消さない。FR-BID-007）
+  void_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS bids_lot ON bids(lot_id, seq);
+-- ロットの出来事（締め・状態の変化）。追記だけ（DATA-001）。入札と同じ受付連番の系列を使う。
+CREATE TABLE IF NOT EXISTS lot_events (
+  seq INTEGER PRIMARY KEY,
+  lot_id INTEGER NOT NULL REFERENCES lots(id),
+  type TEXT NOT NULL,
+  at REAL NOT NULL,
+  actor TEXT NOT NULL,
+  data TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS lot_events_lot ON lot_events(lot_id, seq);
+CREATE TRIGGER IF NOT EXISTS lot_events_no_update BEFORE UPDATE ON lot_events
+  BEGIN SELECT RAISE(ABORT, 'lot_events は追記だけ'); END;
+CREATE TRIGGER IF NOT EXISTS lot_events_no_delete BEFORE DELETE ON lot_events
+  BEGIN SELECT RAISE(ABORT, 'lot_events は追記だけ'); END;
+CREATE TRIGGER IF NOT EXISTS bids_no_delete BEFORE DELETE ON bids
+  BEGIN SELECT RAISE(ABORT, 'bids は削除できない'); END;
+`;
+
+export function openDb(dbPath) {
+  if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = FULL'); // コミットごとに fsync する。電源断でも受理済みの入札を失わない
+  db.pragma('foreign_keys = ON');
+  db.exec(SCHEMA);
+
+  const q = {
+    lot: db.prepare(`
+      SELECT l.*, b.amount AS current_price, b.member_id AS highest_member_id, m.paddle_no AS highest_paddle
+      FROM lots l
+      LEFT JOIN bids b ON b.seq = l.current_bid_seq
+      LEFT JOIN members m ON m.id = b.member_id
+      WHERE l.id = ?`),
+    lots: db.prepare(`
+      SELECT l.*, b.amount AS current_price, b.member_id AS highest_member_id, m.paddle_no AS highest_paddle
+      FROM lots l
+      LEFT JOIN bids b ON b.seq = l.current_bid_seq
+      LEFT JOIN members m ON m.id = b.member_id
+      ORDER BY l.lot_no`),
+    busyLot: db.prepare(
+      `SELECT id FROM lots WHERE status IN ('preparing','preparing_warn','open','suspended') AND id <> ? LIMIT 1`),
+    activeLots: db.prepare(`SELECT id, status FROM lots WHERE status IN ('preparing','preparing_warn','open','suspended')`),
+    insertBid: db.prepare(
+      `INSERT INTO bids (seq, lot_id, member_id, amount, received_at, result) VALUES (?, ?, ?, ?, ?, ?)`),
+    setCurrentBid: db.prepare(`UPDATE lots SET current_bid_seq = ?, updated_at = ? WHERE id = ?`),
+    insertEvent: db.prepare(
+      `INSERT INTO lot_events (seq, lot_id, type, at, actor, data) VALUES (?, ?, ?, ?, ?, ?)`),
+    setStatus: db.prepare(`UPDATE lots SET status = ?, prep_from = ?, no_video = ?, updated_at = ? WHERE id = ?`),
+    finalize: db.prepare(
+      `UPDATE lots SET status = ?, close_seq = ?, winner_bid_seq = ?, updated_at = ? WHERE id = ?`),
+    voidBids: db.prepare(`UPDATE bids SET valid = 0, void_reason = ? WHERE lot_id = ? AND valid = 1`),
+    clearCurrentBid: db.prepare(`UPDATE lots SET current_bid_seq = NULL WHERE id = ?`),
+    // 画面に出す履歴は、受理された入札の全件（無効になったものは取り消し線用に valid=0 で返す）。受付連番の順。
+    history: db.prepare(`
+      SELECT b.seq, b.amount, b.received_at, b.valid, m.paddle_no AS paddle
+      FROM bids b JOIN members m ON m.id = b.member_id
+      WHERE b.lot_id = ? AND b.result = 'ACCEPTED' ORDER BY b.seq`),
+    allBids: db.prepare(`
+      SELECT b.seq, b.amount, b.received_at, b.result, b.valid, m.paddle_no AS paddle
+      FROM bids b JOIN members m ON m.id = b.member_id WHERE b.lot_id = ? ORDER BY b.seq`),
+    events: db.prepare(`SELECT seq, type, at, actor, data FROM lot_events WHERE lot_id = ? ORDER BY seq`),
+    lastEvent: db.prepare(`SELECT seq, type FROM lot_events WHERE lot_id = ? ORDER BY seq DESC LIMIT 1`),
+    maxSeq: db.prepare(
+      `SELECT MAX(s) AS s FROM (SELECT MAX(seq) AS s FROM bids UNION ALL SELECT MAX(seq) AS s FROM lot_events)`),
+    memberByToken: db.prepare(`SELECT id, paddle_no, name FROM members WHERE token_hash = ?`),
+    staffByToken: db.prepare(`SELECT id, role, name FROM staff WHERE token_hash = ?`),
+    insertLot: db.prepare(
+      `INSERT INTO lots (lot_no, title, start_price, unit_override, updated_at)
+       VALUES ((SELECT COALESCE(MAX(lot_no), 0) + 1 FROM lots), ?, ?, ?, ?)`),
+    insertMember: db.prepare(`INSERT INTO members (paddle_no, name, token_hash) VALUES (?, ?, ?)`),
+    insertStaff: db.prepare(`INSERT INTO staff (role, name, token_hash) VALUES (?, ?, ?)`),
+  };
+  return { db, q, tx: (fn) => db.transaction(fn)() };
+}

@@ -1,0 +1,16 @@
+{
+  "name": "auction-poc-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/agent.js"
+  },
+  "dependencies": {
+    "obs-websocket-js": "^5.0.8",
+    "ws": "^8.23.0"
+  }
+}

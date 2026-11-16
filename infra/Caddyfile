@@ -1,0 +1,5 @@
+# HTTPS の終端（証明書は Caddy が自動で取る）。WebSocket もそのまま中継される。
+# 画面を消さない機能（Screen Wake Lock）や音は、https のページでないと試せないため、PoC でもドメインと証明書が要る。
+<PoC サーバーのドメイン> {
+	reverse_proxy 127.0.0.1:8080
+}

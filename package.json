@@ -1,0 +1,23 @@
+{
+  "name": "auction-poc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "seed": "node tools/seed.js",
+    "start": "node server/src/index.js",
+    "test": "node --test --test-concurrency=1 \"server/test/*.test.js\"",
+    "load": "node tools/load.js",
+    "aggregate": "node tools/aggregate.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.2.0",
+    "ws": "^8.23.0"
+  },
+  "optionalDependencies": {
+    "@aws-sdk/client-ivs": "^3.1169.0"
+  }
+}

@@ -1,0 +1,17 @@
+# /etc/systemd/system/auction-poc.service
+# 強制終了しても自動で起動し直す（P2-3・P2-5、進行コンソールの「サーバーの再起動」で使う）
+[Unit]
+Description=Auction PoC bid server
+After=network-online.target
+
+[Service]
+User=auction
+WorkingDirectory=/opt/auction-poc
+# 秘密情報はこのファイルだけに置く（root だけが読めるようにする: chmod 600）
+EnvironmentFile=/etc/auction-poc.env
+ExecStart=/usr/bin/node server/src/index.js
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

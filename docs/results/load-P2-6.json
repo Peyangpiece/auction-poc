@@ -1,0 +1,302 @@
+{
+  "label": "P2-6",
+  "options": {
+    "url": "ws://127.0.0.1:8080/ws",
+    "tokens": "data/tokens.json",
+    "clients": 100,
+    "lots": 30,
+    "burst": 10,
+    "rate": 20,
+    "tail": 1,
+    "idle": 1,
+    "interval": 0,
+    "label": "P2-6",
+    "out": "data/load-P2-6.json",
+    "net": "load"
+  },
+  "bids": 6600,
+  "bidRoundTripMs": {
+    "p50": 1.2,
+    "p95": 2,
+    "p99": 3.6,
+    "max": 14.2
+  },
+  "closeRoundTripMs": {
+    "p50": 3.2,
+    "p95": 4.7,
+    "max": 8
+  },
+  "reconnects": 0,
+  "lots": [
+    {
+      "lotId": 3,
+      "sent": 220,
+      "accepted": 192,
+      "afterClose": 20,
+      "belowMin": 8,
+      "result": "sold",
+      "amount": 183000
+    },
+    {
+      "lotId": 4,
+      "sent": 220,
+      "accepted": 189,
+      "afterClose": 20,
+      "belowMin": 11,
+      "result": "sold",
+      "amount": 180000
+    },
+    {
+      "lotId": 5,
+      "sent": 220,
+      "accepted": 190,
+      "afterClose": 20,
+      "belowMin": 10,
+      "result": "sold",
+      "amount": 181000
+    },
+    {
+      "lotId": 6,
+      "sent": 220,
+      "accepted": 191,
+      "afterClose": 20,
+      "belowMin": 9,
+      "result": "sold",
+      "amount": 182000
+    },
+    {
+      "lotId": 7,
+      "sent": 220,
+      "accepted": 189,
+      "afterClose": 20,
+      "belowMin": 11,
+      "result": "sold",
+      "amount": 180000
+    },
+    {
+      "lotId": 8,
+      "sent": 220,
+      "accepted": 190,
+      "afterClose": 20,
+      "belowMin": 10,
+      "result": "sold",
+      "amount": 181000
+    },
+    {
+      "lotId": 9,
+      "sent": 220,
+      "accepted": 188,
+      "afterClose": 20,
+      "belowMin": 12,
+      "result": "sold",
+      "amount": 179000
+    },
+    {
+      "lotId": 10,
+      "sent": 220,
+      "accepted": 193,
+      "afterClose": 20,
+      "belowMin": 7,
+      "result": "sold",
+      "amount": 184000
+    },
+    {
+      "lotId": 11,
+      "sent": 220,
+      "accepted": 188,
+      "afterClose": 20,
+      "belowMin": 12,
+      "result": "sold",
+      "amount": 179000
+    },
+    {
+      "lotId": 12,
+      "sent": 220,
+      "accepted": 189,
+      "afterClose": 20,
+      "belowMin": 11,
+      "result": "sold",
+      "amount": 180000
+    },
+    {
+      "lotId": 13,
+      "sent": 220,
+      "accepted": 187,
+      "afterClose": 20,
+      "belowMin": 12,
+      "result": "sold",
+      "amount": 178000
+    },
+    {
+      "lotId": 14,
+      "sent": 220,
+      "accepted": 190,
+      "afterClose": 20,
+      "belowMin": 10,
+      "result": "sold",
+      "amount": 181000
+    },
+    {
+      "lotId": 15,
+      "sent": 220,
+      "accepted": 189,
+      "afterClose": 20,
+      "belowMin": 11,
+      "result": "sold",
+      "amount": 180000
+    },
+    {
+      "lotId": 16,
+      "sent": 220,
+      "accepted": 191,
+      "afterClose": 20,
+      "belowMin": 9,
+      "result": "sold",
+      "amount": 182000
+    },
+    {
+      "lotId": 17,
+      "sent": 220,
+      "accepted": 189,
+      "afterClose": 20,
+      "belowMin": 11,
+      "result": "sold",
+      "amount": 180000
+    },
+    {
+      "lotId": 18,
+      "sent": 220,
+      "accepted": 190,
+      "afterClose": 20,
+      "belowMin": 10,
+      "result": "sold",
+      "amount": 181000
+    },
+    {
+      "lotId": 19,
+      "sent": 220,
+      "accepted": 189,
+      "afterClose": 20,
+      "belowMin": 11,
+      "result": "sold",
+      "amount": 180000
+    },
+    {
+      "lotId": 20,
+      "sent": 220,
+      "accepted": 191,
+      "afterClose": 20,
+      "belowMin": 9,
+      "result": "sold",
+      "amount": 182000
+    },
+    {
+      "lotId": 21,
+      "sent": 220,
+      "accepted": 192,
+      "afterClose": 20,
+      "belowMin": 8,
+      "result": "sold",
+      "amount": 183000
+    },
+    {
+      "lotId": 22,
+      "sent": 220,
+      "accepted": 196,
+      "afterClose": 20,
+      "belowMin": 4,
+      "result": "sold",
+      "amount": 187000
+    },
+    {
+      "lotId": 23,
+      "sent": 220,
+      "accepted": 192,
+      "afterClose": 20,
+      "belowMin": 8,
+      "result": "sold",
+      "amount": 183000
+    },
+    {
+      "lotId": 24,
+      "sent": 220,
+      "accepted": 196,
+      "afterClose": 20,
+      "belowMin": 4,
+      "result": "sold",
+      "amount": 187000
+    },
+    {
+      "lotId": 25,
+      "sent": 220,
+      "accepted": 191,
+      "afterClose": 20,
+      "belowMin": 9,
+      "result": "sold",
+      "amount": 182000
+    },
+    {
+      "lotId": 26,
+      "sent": 220,
+      "accepted": 192,
+      "afterClose": 20,
+      "belowMin": 8,
+      "result": "sold",
+      "amount": 183000
+    },
+    {
+      "lotId": 27,
+      "sent": 220,
+      "accepted": 195,
+      "afterClose": 20,
+      "belowMin": 5,
+      "result": "sold",
+      "amount": 186000
+    },
+    {
+      "lotId": 28,
+      "sent": 220,
+      "accepted": 190,
+      "afterClose": 20,
+      "belowMin": 10,
+      "result": "sold",
+      "amount": 181000
+    },
+    {
+      "lotId": 29,
+      "sent": 220,
+      "accepted": 189,
+      "afterClose": 20,
+      "belowMin": 11,
+      "result": "sold",
+      "amount": 180000
+    },
+    {
+      "lotId": 30,
+      "sent": 220,
+      "accepted": 188,
+      "afterClose": 20,
+      "belowMin": 12,
+      "result": "sold",
+      "amount": 179000
+    },
+    {
+      "lotId": 31,
+      "sent": 220,
+      "accepted": 194,
+      "afterClose": 20,
+      "belowMin": 6,
+      "result": "sold",
+      "amount": 185000
+    },
+    {
+      "lotId": 32,
+      "sent": 220,
+      "accepted": 191,
+      "afterClose": 20,
+      "belowMin": 9,
+      "result": "sold",
+      "amount": 182000
+    }
+  ]
+}

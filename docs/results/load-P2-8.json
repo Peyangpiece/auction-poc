@@ -1,0 +1,122 @@
+{
+  "label": "P2-8",
+  "options": {
+    "url": "ws://127.0.0.1:8080/ws",
+    "tokens": "data/tokens.json",
+    "clients": 300,
+    "lots": 10,
+    "burst": 10,
+    "rate": 20,
+    "tail": 1,
+    "idle": 1,
+    "interval": 0,
+    "label": "P2-8",
+    "out": "data/load-P2-8.json",
+    "net": "load"
+  },
+  "bids": 2200,
+  "bidRoundTripMs": {
+    "p50": 1.3,
+    "p95": 3.8,
+    "p99": 6.3,
+    "max": 19.9
+  },
+  "closeRoundTripMs": {
+    "p50": 6.1,
+    "p95": 7.6,
+    "max": 7.6
+  },
+  "reconnects": 0,
+  "lots": [
+    {
+      "lotId": 33,
+      "sent": 220,
+      "accepted": 194,
+      "afterClose": 20,
+      "belowMin": 6,
+      "result": "sold",
+      "amount": 185000
+    },
+    {
+      "lotId": 34,
+      "sent": 220,
+      "accepted": 192,
+      "afterClose": 20,
+      "belowMin": 7,
+      "result": "sold",
+      "amount": 183000
+    },
+    {
+      "lotId": 35,
+      "sent": 220,
+      "accepted": 190,
+      "afterClose": 20,
+      "belowMin": 9,
+      "result": "sold",
+      "amount": 181000
+    },
+    {
+      "lotId": 36,
+      "sent": 220,
+      "accepted": 188,
+      "afterClose": 20,
+      "belowMin": 12,
+      "result": "sold",
+      "amount": 179000
+    },
+    {
+      "lotId": 37,
+      "sent": 220,
+      "accepted": 185,
+      "afterClose": 20,
+      "belowMin": 15,
+      "result": "sold",
+      "amount": 176000
+    },
+    {
+      "lotId": 38,
+      "sent": 220,
+      "accepted": 184,
+      "afterClose": 20,
+      "belowMin": 16,
+      "result": "sold",
+      "amount": 175000
+    },
+    {
+      "lotId": 39,
+      "sent": 220,
+      "accepted": 184,
+      "afterClose": 20,
+      "belowMin": 16,
+      "result": "sold",
+      "amount": 175000
+    },
+    {
+      "lotId": 40,
+      "sent": 220,
+      "accepted": 178,
+      "afterClose": 20,
+      "belowMin": 21,
+      "result": "sold",
+      "amount": 169000
+    },
+    {
+      "lotId": 41,
+      "sent": 220,
+      "accepted": 183,
+      "afterClose": 20,
+      "belowMin": 17,
+      "result": "sold",
+      "amount": 174000
+    },
+    {
+      "lotId": 42,
+      "sent": 220,
+      "accepted": 179,
+      "afterClose": 20,
+      "belowMin": 21,
+      "result": "sold",
+      "amount": 170000
+    }
+  ]
+}

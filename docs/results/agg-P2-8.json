@@ -1,0 +1,207 @@
+{
+  "label": "P2-8",
+  "from": 1794829500586.279,
+  "to": 1794829626109.536,
+  "records": 564272,
+  "bids": {
+    "count": 2200,
+    "results": {
+      "ACCEPTED": 1857,
+      "BELOW_MINIMUM": 140,
+      "AFTER_CLOSE": 200,
+      "ALREADY_HIGHEST": 3
+    },
+    "acceptResponseMs": {
+      "n": 2200,
+      "min": 0.3,
+      "p50": 0.8,
+      "p95": 1.2,
+      "p99": 2.2,
+      "max": 19.4,
+      "mean": 0.9
+    },
+    "dbCommitMs": {
+      "n": 2200,
+      "min": 0.3,
+      "p50": 0.8,
+      "p95": 1.1,
+      "p99": 2.2,
+      "max": 19.3,
+      "mean": 0.8
+    },
+    "priceArrivalMs": {
+      "n": 558957,
+      "min": -0.8,
+      "p50": 3.5,
+      "p95": 6.8,
+      "p99": 8.9,
+      "max": 25.8,
+      "mean": 3.6
+    },
+    "priceArrivalWorstDeviceMs": {
+      "n": 1857,
+      "min": 3.3,
+      "p50": 5.8,
+      "p95": 9.6,
+      "p99": 11.7,
+      "max": 25.8,
+      "mean": 6.4
+    },
+    "priceArrivalByNet": {
+      "load": {
+        "n": 558957,
+        "min": -0.8,
+        "p50": 3.5,
+        "p95": 6.8,
+        "p99": 8.9,
+        "max": 25.8,
+        "mean": 3.6
+      }
+    },
+    "uplinkMs": {
+      "n": 2200,
+      "min": -2.3,
+      "p50": 0.3,
+      "p95": 1.6,
+      "p99": 3.1,
+      "max": 11.3,
+      "mean": 0.3
+    },
+    "judge": {
+      "NFR-PERF-001 受理応答 p95 ≤ 200ms": "基準内",
+      "NFR-PERF-002 価格更新の到達 p95 ≤ 1000ms": "基準内"
+    }
+  },
+  "close": {
+    "count": 10,
+    "finalizeMs": {
+      "n": 10,
+      "min": 2.3,
+      "p50": 3.5,
+      "p95": 4.9,
+      "p99": 4.9,
+      "max": 4.9,
+      "mean": 3.5
+    },
+    "pressToResultMs": {
+      "n": 3010,
+      "min": 1,
+      "p50": 4.2,
+      "p95": 7.4,
+      "p99": 9.5,
+      "max": 11.2,
+      "mean": 4.4
+    },
+    "pressToResultByNet": {
+      "load": {
+        "n": 3010,
+        "min": 1,
+        "p50": 4.2,
+        "p95": 7.4,
+        "p99": 9.5,
+        "max": 11.2,
+        "mean": 4.4
+      }
+    },
+    "serverToResultMs": {
+      "n": 3010,
+      "min": -0.3,
+      "p50": 3.6,
+      "p95": 6.2,
+      "p99": 7.9,
+      "max": 9.6,
+      "mean": 3.7
+    },
+    "afterCloseTotal": 200,
+    "sentBeforeCloseButLate": {
+      "count": 0,
+      "sendToRejectMs": {
+        "n": 0
+      },
+      "sentBeforeCloseMs": {
+        "n": 0
+      }
+    },
+    "judge": {
+      "P2-10 締めの操作から結果の表示まで p95 ≤ 1000ms": "基準内"
+    }
+  },
+  "streamStarts": [],
+  "streamStartSummary": {
+    "count": 0,
+    "toObsStreamingMs": {
+      "n": 0
+    },
+    "toLivePollMs": {
+      "n": 0
+    },
+    "toLiveEventMs": {
+      "n": 0
+    },
+    "toFirstLiveMs": {
+      "n": 0
+    },
+    "toOpenMs": {
+      "n": 0
+    },
+    "judge": {
+      "P1-1 すべての回で 60秒以内に LIVE": "記録なし"
+    }
+  },
+  "autoStops": [],
+  "autoStopSummary": {
+    "count": 0,
+    "overshootMs": {
+      "n": 0
+    },
+    "judge": {
+      "P1-2 すべての回で、待ち時間から10秒以内に停止": "記録なし"
+    }
+  },
+  "agent": {
+    "connects": 0,
+    "disconnects": 0,
+    "obsStateChanges": 0,
+    "ivsEvents": 0,
+    "ivsPollErrors": 0
+  },
+  "devices": [],
+  "videoLatencyMsByNet": {},
+  "bidButtonToResultMsByNet": {},
+  "reconnects": [],
+  "outbidNotifies": [],
+  "playerErrors": 0,
+  "sys": {
+    "samples": 63,
+    "hours": 0,
+    "rssMb": {
+      "first": 91.6,
+      "last": 82.6,
+      "min": 78.7,
+      "max": 92.5
+    },
+    "rssSlopeMbPerHour": -276.3,
+    "rssFirstHalfMb": 92.3,
+    "rssSecondHalfMb": 88.4,
+    "cpuPct": {
+      "n": 63,
+      "min": 0.7,
+      "p50": 11.9,
+      "p95": 15.4,
+      "p99": 17.6,
+      "max": 17.6,
+      "mean": 10.5
+    },
+    "connections": {
+      "n": 63,
+      "min": 301,
+      "p50": 301,
+      "p95": 301,
+      "p99": 301,
+      "max": 301,
+      "mean": 301
+    }
+  },
+  "serverStarts": 0,
+  "recoveries": []
+}

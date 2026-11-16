@@ -1,0 +1,219 @@
+{
+  "label": "P2-6",
+  "from": 1794829125262.655,
+  "to": 1794829500153.244,
+  "records": 587760,
+  "bids": {
+    "count": 6600,
+    "results": {
+      "ACCEPTED": 5721,
+      "BELOW_MINIMUM": 278,
+      "AFTER_CLOSE": 600,
+      "ALREADY_HIGHEST": 1
+    },
+    "acceptResponseMs": {
+      "n": 6600,
+      "min": 0.3,
+      "p50": 0.9,
+      "p95": 1.4,
+      "p99": 2.7,
+      "max": 13.9,
+      "mean": 0.9
+    },
+    "dbCommitMs": {
+      "n": 6600,
+      "min": 0.3,
+      "p50": 0.8,
+      "p95": 1.2,
+      "p99": 2.6,
+      "max": 13.8,
+      "mean": 0.8
+    },
+    "priceArrivalMs": {
+      "n": 577821,
+      "min": -0.2,
+      "p50": 1.7,
+      "p95": 3.2,
+      "p99": 5.3,
+      "max": 23.4,
+      "mean": 1.8
+    },
+    "priceArrivalWorstDeviceMs": {
+      "n": 5721,
+      "min": 1.1,
+      "p50": 2.6,
+      "p95": 4.2,
+      "p99": 6.9,
+      "max": 23.4,
+      "mean": 2.8
+    },
+    "priceArrivalByNet": {
+      "load": {
+        "n": 577821,
+        "min": -0.2,
+        "p50": 1.7,
+        "p95": 3.2,
+        "p99": 5.3,
+        "max": 23.4,
+        "mean": 1.8
+      }
+    },
+    "uplinkMs": {
+      "n": 6600,
+      "min": -0.5,
+      "p50": 0.4,
+      "p95": 1,
+      "p99": 1.4,
+      "max": 4.9,
+      "mean": 0.4
+    },
+    "judge": {
+      "NFR-PERF-001 受理応答 p95 ≤ 200ms": "基準内",
+      "NFR-PERF-002 価格更新の到達 p95 ≤ 1000ms": "基準内"
+    }
+  },
+  "close": {
+    "count": 30,
+    "finalizeMs": {
+      "n": 30,
+      "min": 1.2,
+      "p50": 1.9,
+      "p95": 2.8,
+      "p99": 3.7,
+      "max": 3.7,
+      "mean": 2
+    },
+    "pressToResultMs": {
+      "n": 3030,
+      "min": 0.8,
+      "p50": 2.6,
+      "p95": 4.4,
+      "p99": 6.8,
+      "max": 7.3,
+      "mean": 2.7
+    },
+    "pressToResultByNet": {
+      "load": {
+        "n": 3030,
+        "min": 0.8,
+        "p50": 2.6,
+        "p95": 4.4,
+        "p99": 6.8,
+        "max": 7.3,
+        "mean": 2.7
+      }
+    },
+    "serverToResultMs": {
+      "n": 3030,
+      "min": 0.3,
+      "p50": 2.2,
+      "p95": 3.5,
+      "p99": 4.8,
+      "max": 5.2,
+      "mean": 2.2
+    },
+    "afterCloseTotal": 600,
+    "sentBeforeCloseButLate": {
+      "count": 1,
+      "sendToRejectMs": {
+        "n": 1,
+        "min": 4.4,
+        "p50": 4.4,
+        "p95": 4.4,
+        "p99": 4.4,
+        "max": 4.4,
+        "mean": 4.4
+      },
+      "sentBeforeCloseMs": {
+        "n": 1,
+        "min": 0.4,
+        "p50": 0.4,
+        "p95": 0.4,
+        "p99": 0.4,
+        "max": 0.4,
+        "mean": 0.4
+      }
+    },
+    "judge": {
+      "P2-10 締めの操作から結果の表示まで p95 ≤ 1000ms": "基準内"
+    }
+  },
+  "streamStarts": [],
+  "streamStartSummary": {
+    "count": 0,
+    "toObsStreamingMs": {
+      "n": 0
+    },
+    "toLivePollMs": {
+      "n": 0
+    },
+    "toLiveEventMs": {
+      "n": 0
+    },
+    "toFirstLiveMs": {
+      "n": 0
+    },
+    "toOpenMs": {
+      "n": 0
+    },
+    "judge": {
+      "P1-1 すべての回で 60秒以内に LIVE": "記録なし"
+    }
+  },
+  "autoStops": [],
+  "autoStopSummary": {
+    "count": 0,
+    "overshootMs": {
+      "n": 0
+    },
+    "judge": {
+      "P1-2 すべての回で、待ち時間から10秒以内に停止": "記録なし"
+    }
+  },
+  "agent": {
+    "connects": 0,
+    "disconnects": 0,
+    "obsStateChanges": 0,
+    "ivsEvents": 0,
+    "ivsPollErrors": 0
+  },
+  "devices": [],
+  "videoLatencyMsByNet": {},
+  "bidButtonToResultMsByNet": {},
+  "reconnects": [],
+  "outbidNotifies": [],
+  "playerErrors": 0,
+  "sys": {
+    "samples": 187,
+    "hours": 0.1,
+    "rssMb": {
+      "first": 80.6,
+      "last": 83.9,
+      "min": 80.6,
+      "max": 84
+    },
+    "rssSlopeMbPerHour": 37,
+    "rssFirstHalfMb": 81.8,
+    "rssSecondHalfMb": 83.6,
+    "cpuPct": {
+      "n": 187,
+      "min": 0.5,
+      "p50": 5,
+      "p95": 6.8,
+      "p99": 8.6,
+      "max": 8.9,
+      "mean": 4.7
+    },
+    "connections": {
+      "n": 187,
+      "min": 101,
+      "p50": 101,
+      "p95": 101,
+      "p99": 101,
+      "max": 101,
+      "mean": 101
+    }
+  },
+  "serverStarts": 0,
+  "recoveries": []
+}
