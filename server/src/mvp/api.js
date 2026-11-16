@@ -56,6 +56,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     })();
   }
   db.exec(MVP_SCHEMA);
+  // 電話番号が本人のものと確かめてあるか（メールで登録した人は、まだ確かめていない）。前からの会員は、SMS で確かめてある
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = 'phone_verified'").get()) db.exec('ALTER TABLE member_accounts ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 1');
   for (const [col, type] of [['withdrawn_at', 'REAL'], ['withdrawn_phone', 'TEXT'], ['agreed_at', 'REAL'], ['name_kana', 'TEXT'], ['postal_code', 'TEXT'], ['prefecture', 'TEXT'], ['address1', 'TEXT'], ['address2', 'TEXT']]) {
     if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = ?").get(col)) db.exec(`ALTER TABLE member_accounts ADD COLUMN ${col} ${type}`);
   }
@@ -167,6 +169,17 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return phone;
   };
 
+  // 登録の宛先: 携帯電話の番号か、メールアドレス
+  const registerKey = (body) => {
+    const raw = String(body.id ?? body.phone ?? '').trim();
+    if (raw.includes('@')) {
+      if (!isEmail(raw)) throw bad('メールアドレスを正しく入力してください');
+      return 'email:' + raw.toLowerCase();
+    }
+    const phone = normalizePhone(raw);
+    if (!phone) throw bad('携帯電話の番号（例: 090-1234-5678）か、メールアドレスを入力してください');
+    return phone;
+  };
   // ログインの宛先: 携帯電話の番号か、確認済みのメールアドレス（発注者の指示。メールは、確認が済んだアドレスだけ）
   const loginTarget = (body) => {
     const raw = String(body.id ?? body.phone ?? '').trim();
@@ -179,7 +192,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     }
     const phone = normalizePhone(raw);
     if (!phone) throw bad('携帯電話の番号（例: 090-1234-5678）か、メールアドレスを入力してください');
-    return { key: phone, member: db.prepare('SELECT * FROM member_accounts WHERE phone = ?').get(phone) ?? null };
+    // メールで登録した人の電話番号は、本人のものと確かめていないので、SMS でのログインには使わせない
+    return { key: phone, member: db.prepare('SELECT * FROM member_accounts WHERE phone = ? AND phone_verified = 1').get(phone) ?? null };
   };
   // 氏名・フリガナ・住所を、入力から組み立てて確かめる（会員登録と、登録内容の変更で使う）。
   // 姓名・郵便番号を分けた形（画面の入力）と、1つにまとめた形（name・address）の両方を受ける。
@@ -210,7 +224,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
 
   // ------------------------------------------------------------ 会員
   const memberView = (m) => ({
-    kind: m.kind, name: m.name, nameKana: m.name_kana, phone: m.phone, email: m.email, emailVerified: !!m.email_verified, address: m.address,
+    kind: m.kind, name: m.name, nameKana: m.name_kana, phone: m.phone, phoneVerified: !!m.phone_verified, email: m.email, emailVerified: !!m.email_verified, address: m.address,
     postalCode: m.postal_code, prefecture: m.prefecture, address1: m.address1, address2: m.address2,
     shipTo: m.ship_to, company: m.company, contactName: m.contact_name, billing: m.billing, suspended: !!billing.suspension(m.id), suspendedBy: billing.suspension(m.id),
   });
@@ -232,6 +246,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     member: ctx.member ? memberView(ctx.member) : null,
     staff: ctx.staff ? { loginId: ctx.staff.login_id, name: ctx.staff.name, role: ctx.staff.role, roleLabel: ROLE_LABEL[ctx.staff.role] } : null,
     registering: !!ctx.registerPhone,
+    // 登録の途中の人: どちらで確かめたか（メールなら、そのアドレス）
+    ...(ctx.registerPhone ? { registerVia: ctx.registerPhone.startsWith('email:') ? 'email' : 'sms', registerId: ctx.registerPhone.replace(/^email:/, '') } : {}),
     // 外の保存先への保存が、30秒より長く失敗し続けているか（スタッフにだけ知らせる。画面に警告を出す）
     ...(ctx.staff ? { storageFailing: (() => { const st = persistStatus(); return !!(st && st.failingSince && nowMs() - st.failingSince > 30000); })() } : {}),
   }));
@@ -239,31 +255,42 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   // 登録: 電話番号 → SMS 認証 → 入力
   route('POST', '/api/register/start', async (ctx, body) => {
     throttle(ctx);
-    const phone = phoneOf(body);
-    // スタッフとして登録された番号では、会員登録できない（FR-AUTH-013）
-    if (db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号では登録できません');
-    if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号は登録済みです。ログインしてください', { login: true });
+    const phone = registerKey(body);
+    if (phone.startsWith('email:')) {
+      // メールアドレスで登録を始める（発注者の指示）。確認済みの会員がいるアドレスは、ログインへ案内する
+      if (db.prepare('SELECT 1 FROM member_accounts WHERE lower(email) = ? AND email_verified = 1 AND withdrawn_at IS NULL').get(phone.slice(6))) throw new HttpError(409, 'このメールアドレスは登録済みです。ログインしてください', { login: true });
+    } else {
+      // スタッフとして登録された番号では、会員登録できない（FR-AUTH-013）
+      if (db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号では登録できません');
+      if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号は登録済みです。ログインしてください', { login: true });
+    }
     const code = await sendOtp(phone);
     // お試し用の設定のときだけ、認証番号を画面に出せるように返す（本番では返さない）
-    return { ok: true, ...(config.devShowCodes ? { devCode: code } : {}) };
+    return { ok: true, via: phone.startsWith('email:') ? 'email' : 'sms', ...(config.devShowCodes ? { devCode: code } : {}) };
   });
   route('POST', '/api/register/verify', (ctx, body) => {
     throttle(ctx);
-    const phone = phoneOf(body);
+    const phone = registerKey(body);
     checkOtp(phone, body.code);
     startSession(ctx, 'register', null, REGISTER_LIFETIME, phone);
-    return { ok: true };
+    return { ok: true, via: phone.startsWith('email:') ? 'email' : 'sms' };
   });
   route('POST', '/api/register/complete', async (ctx, body) => {
-    const phone = ctx.registerPhone;
-    if (!phone) throw new HttpError(401, '先に、電話番号の確認を済ませてください');
+    const verified = ctx.registerPhone; // 認証番号で確かめた宛先（電話番号か「email:アドレス」）
+    if (!verified) throw new HttpError(401, '先に、電話番号かメールアドレスの確認を済ませてください');
+    const byEmail = verified.startsWith('email:');
+    const phone = byEmail ? normalizePhone(body.phone) : verified;
     const text = (v, max = 200) => String(v ?? '').trim().slice(0, max);
     const kind = body.kind === 'b2b' ? 'b2b' : body.kind === 'b2c' ? 'b2c' : null;
     const errors = {};
     if (!kind) errors.kind = '法人か個人かを選んでください';
     const person = personFrom(body, errors);
     const { name, address } = person;
-    const email = text(body.email, 254); if (!isEmail(email)) errors.email = 'メールアドレスを正しく入力してください';
+    const email = byEmail ? verified.slice(6) : text(body.email, 254);
+    if (!isEmail(email)) errors.email = 'メールアドレスを正しく入力してください';
+    // メールで登録する人は、電話番号をここで入れる（本人のものかは、まだ確かめない）
+    if (byEmail && !phone) errors.phone = '電話番号を、国内の番号（例: 090-1234-5678）で入力してください';
+    else if (byEmail && (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone) || db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone))) errors.phone = 'この電話番号では登録できません。会場の受付にお申し出ください';
     const company = text(body.company), contactName = text(body.contactName), billing = text(body.billing, 300);
     if (kind === 'b2b') {
       if (!company) errors.company = '会社名を入力してください';
@@ -285,11 +312,13 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (body.agreed === true) db.prepare('UPDATE member_accounts SET agreed_at = ? WHERE id = ?').run(now, info.lastInsertRowid);
     db.prepare('UPDATE member_accounts SET name_kana = ?, postal_code = ?, prefecture = ?, address1 = ?, address2 = ? WHERE id = ?')
       .run(person.nameKana, person.postalCode, person.prefecture, person.address1, person.address2, info.lastInsertRowid);
+    if (byEmail) db.prepare('UPDATE member_accounts SET email_verified = 1, phone_verified = 0 WHERE id = ?').run(info.lastInsertRowid);
     const member = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(info.lastInsertRowid);
     endSession(ctx);
     startSession(ctx, 'member', member.id, MEMBER_IDLE);
     audit({ ...ctx, member }, 'member.register', { target: `member:${member.id}`, after: { kind } });
-    const verifyUrl = await sendEmailVerification(ctx, member); // 確認が済んでいなくても入札はできる（FR-AUTH-011）
+    // メールで登録した人は、アドレスの確認が済んでいるので、確認のメールは送らない
+    const verifyUrl = byEmail ? null : await sendEmailVerification(ctx, member); // 確認が済んでいなくても入札はできる（FR-AUTH-011）
     return { ok: true, member: memberView(member), ...(config.devShowCodes ? { devVerifyUrl: verifyUrl } : {}) };
   });
 
@@ -337,7 +366,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const phone = phoneOf(body), reason = String(body.reason ?? '').trim().slice(0, 500);
     if (!reason) throw bad('本人を確かめた方法を、入力してください');
     if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ? AND id <> ?').get(phone, id) || db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号は、すでに使われています');
-    db.prepare('UPDATE member_accounts SET phone = ?, updated_at = ? WHERE id = ?').run(phone, nowMs(), id);
+    db.prepare('UPDATE member_accounts SET phone = ?, phone_verified = 1, updated_at = ? WHERE id = ?').run(phone, nowMs(), id); // 受付で本人を確かめた番号
     db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ?").run(id); // 古い番号でのログインを切る
     audit(ctx, 'member.phone_change', { target: `member:${id}`, reason });
     return { ok: true };

@@ -358,3 +358,37 @@ test('会員登録: 姓名・フリガナ・郵便番号つきの住所を分け
     assert.deepEqual([m.name, m.nameKana, m.postalCode, m.address], ['山田 太郎', 'ヤマダ タロウ', '1000001', '〒100-0001 東京都千代田区千代田1-1 ○○ビル 3階']);
   } finally { await t.close(); }
 });
+
+test('メールアドレスでも会員登録を始められる（電話番号は、未確認として入れる）', async () => {
+  const t = await setup();
+  try {
+    const b = t.browser();
+    const mails = (to) => t.outbox().filter((m) => m.channel === 'email' && m.to === to);
+    const start = await b.post('/api/register/start', { id: 'Hana@Example.com' });
+    assert.deepEqual([start.status, start.json.via], [200, 'email']);
+    const code = /認証番号は (\d{6})/.exec(mails('hana@example.com').at(-1).body)[1];
+    assert.equal((await b.post('/api/register/verify', { id: 'hana@example.com', code })).status, 200);
+    assert.deepEqual([(await b.get('/api/me')).json.registerVia, (await b.get('/api/me')).json.registerId], ['email', 'hana@example.com']);
+    // 電話番号が要る。ほかの会員・スタッフの番号は使えない
+    assert.ok((await b.post('/api/register/complete', { ...person, phone: '' })).json.errors.phone);
+    assert.equal((await register(t, t.browser(), '09022220001')).status, 200);
+    assert.ok((await b.post('/api/register/complete', { ...person, phone: '090-2222-0001' })).json.errors.phone);
+    const sent = mails('hana@example.com').length;
+    const done = await b.post('/api/register/complete', { ...person, email: 'ignored@example.com', phone: '090-2222-0002' });
+    assert.equal(done.status, 200);
+    const m = done.json.member;
+    assert.deepEqual([m.email, m.emailVerified, m.phone, m.phoneVerified], ['hana@example.com', true, '09022220002', false]);
+    assert.equal(mails('hana@example.com').length, sent, '確認済みなので、確認のメールは送らない');
+    // 未確認の電話番号では、SMS のログインができない（返事は同じ）。メールでは入れる
+    const smsBefore = t.outbox().filter((x) => x.channel === 'sms').length;
+    assert.equal((await t.browser().post('/api/login/start', { id: '09022220002' })).status, 200);
+    assert.equal(t.outbox().filter((x) => x.channel === 'sms').length, smsBefore);
+    const c = t.browser();
+    await c.post('/api/login/start', { id: 'hana@example.com' });
+    const code2 = /認証番号は (\d{6})/.exec(mails('hana@example.com').at(-1).body)[1];
+    assert.equal((await c.post('/api/login/verify', { id: 'hana@example.com', code: code2 })).status, 200);
+    // 登録済み（確認済み）のアドレスでは、登録を始められない
+    const again = await t.browser().post('/api/register/start', { id: 'hana@example.com' });
+    assert.deepEqual([again.status, again.json.login], [409, true]);
+  } finally { await t.close(); }
+});

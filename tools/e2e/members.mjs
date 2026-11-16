@@ -146,11 +146,11 @@ try {
   console.log('会員登録');
   await phone.click('#lead a[href="/register.html"]');
   await phone.waitForSelector('#stepPhone');
-  await phone.fill('[name=phone]', '123');
+  await phone.fill('[name=id]', '123');
   await phone.click('#stepPhone button[type=submit]');
   await phone.waitForFunction(() => document.querySelector('#stepPhone .msg').textContent.length > 0);
   check(true, '電話番号の誤りは、理由を出す');
-  await phone.fill('[name=phone]', '090-0000-1111');
+  await phone.fill('[name=id]', '090-0000-1111');
   await phone.click('#stepPhone button[type=submit]');
   await phone.waitForSelector('#stepCode:not([hidden])');
   await shot(phone, 'mvp-08-register-code');
@@ -235,7 +235,7 @@ try {
   await guest.goto(venueUrl); // QR コードを読み取った
   await guest.waitForURL(/login\.html\?next=bidder/);
   await guest.click('main a[href*="register.html"]');
-  await guest.fill('[name=phone]', '090-0000-2222');
+  await guest.fill('[name=id]', '090-0000-2222');
   await guest.click('#stepPhone button[type=submit]');
   await guest.waitForSelector('#stepCode:not([hidden])');
   await guest.fill('[name=code]', lastCode());

@@ -26,6 +26,7 @@ main.narrow { max-width: 520px; }
 .req, .opt { font-size: 11px; font-weight: 700; line-height: 1; padding: 3px 6px; border-radius: 3px; letter-spacing: .04em; }
 .req { background: var(--red-text); color: #fff; }
 .opt { background: var(--ground-alt); color: var(--ink-2); }
+.verified { font-size: 14px; color: var(--ink-2); background: var(--ground-alt); padding: 12px 16px; border-radius: var(--r); overflow-wrap: anywhere; }
 .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .formhead { font-size: 16px; letter-spacing: .08em; color: var(--ink); margin-top: 16px; padding-top: 20px; border-top: 1px solid var(--line); }
 .picks { display: flex; flex-wrap: wrap; gap: 8px; }

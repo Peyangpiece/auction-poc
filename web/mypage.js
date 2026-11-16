@@ -29,7 +29,7 @@ const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.s
   if (dev && !m.emailVerified) showDevVerify(dev);
   const rows = [
     ['区分', m.kind === 'b2b' ? '法人' : '個人'],
-    ['会社名', m.company], ['担当者名', m.contactName], ['氏名', m.name], ['フリガナ', m.nameKana], ['電話番号', telFmt(m.phone)],
+    ['会社名', m.company], ['担当者名', m.contactName], ['氏名', m.name], ['フリガナ', m.nameKana], ['電話番号', telFmt(m.phone) + (m.phoneVerified ? '' : '（未確認。ログインには、メールアドレスをお使いください）')],
     ['メールアドレス', m.email + (m.emailVerified ? '（確認済み）' : '（未確認）')],
     ['住所', m.address], ['配送先', m.shipTo], ['請求先', m.billing],
   ];

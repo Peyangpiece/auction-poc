@@ -31,15 +31,15 @@
   <hr class="rule">
 </div>
 <ol class="steps" id="steps">
-  <li data-n="1" aria-current="step">電話番号</li>
+  <li data-n="1" aria-current="step">連絡先</li>
   <li data-n="2">認証番号</li>
   <li data-n="3">お客様の情報</li>
 </ol>
 
 <form class="form" id="stepPhone" novalidate>
-  <label class="field">携帯電話の番号
-    <small>SMS で認証番号を送ります</small>
-    <input class="input" name="phone" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="090-1234-5678" required>
+  <label class="field">携帯電話の番号 または メールアドレス
+    <small>認証番号をお送りします</small>
+    <input class="input" name="id" type="text" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="090-1234-5678 / taro@example.com" required>
     <span class="err" role="alert"></span>
   </label>
   <p class="msg" role="alert" tabindex="-1"></p>
@@ -71,7 +71,9 @@
     <label class="field"><span class="field__label">担当者名<span class="req">必須</span></span><input class="input" name="contactName" autocomplete="off"><span class="err" role="alert"></span></label>
     <label class="field"><span class="field__label">請求先<span class="req">必須</span></span><small>請求書の宛名と送り先</small><textarea class="input" name="billing" rows="2" autocomplete="off"></textarea><span class="err" role="alert"></span></label>
   </div>
-  <label class="field"><span class="field__label">メールアドレス<span class="req">必須</span></span><small>請求書やお知らせをお送りします</small><input class="input" name="email" type="email" inputmode="email" autocomplete="email" spellcheck="false" placeholder="taro@example.com" required><span class="err" role="alert"></span></label>
+  <label class="field" id="phoneRow" hidden><span class="field__label">携帯電話の番号<span class="req">必須</span></span><small>当日のご連絡と、配送に使います</small><input class="input" name="phone" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="090-1234-5678" disabled required><span class="err" role="alert"></span></label>
+  <p class="verified" id="verifiedEmail" hidden></p>
+  <label class="field" id="emailRow"><span class="field__label">メールアドレス<span class="req">必須</span></span><small>請求書やお知らせをお送りします</small><input class="input" name="email" type="email" inputmode="email" autocomplete="email" spellcheck="false" placeholder="taro@example.com" required><span class="err" role="alert"></span></label>
   <div class="form" id="person"></div>
   <label class="check"><input type="checkbox" id="shipSame" checked><span>配送先は、上の住所と同じ</span></label>
   <label class="field" id="shipRow" hidden><span class="field__label">配送先<span class="opt">任意</span></span><small>郵便番号から、建物名まで</small><textarea class="input" name="shipTo" rows="3" autocomplete="off"></textarea><span class="err" role="alert"></span></label>

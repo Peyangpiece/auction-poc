@@ -1,4 +1,4 @@
-// 会員登録: 電話番号 → SMS の認証番号 → お客様の情報。
+// 会員登録: 携帯電話の番号かメールアドレス → 認証番号 → お客様の情報。
 'use strict';
 
 const forms = { phone: $('#stepPhone'), code: $('#stepCode'), profile: $('#stepProfile') };
@@ -15,22 +15,22 @@ function show(step) {
 }
 
 onSubmit(forms.phone, async (data) => {
-  phone = data.phone;
-  const res = await api('POST', '/api/register/start', { phone });
+  phone = data.id.trim();
+  const res = await api('POST', '/api/register/start', { id: phone });
   if (res.ok) { $('#sentTo').textContent = `${phone} に送りました。5分以内に入力してください`; show('code'); }
   if (res.devCode) $('#sentTo').textContent += `　【お試し用】認証番号 ${res.devCode}`;
-  else if (res.login) res.message = 'この電話番号は登録済みです。下の「ログイン」からお入りください';
+  else if (res.login) res.message = '登録済みです。下の「ログイン」からお入りください';
   return res;
 });
 onSubmit(forms.code, async (data) => {
-  const res = await api('POST', '/api/register/verify', { phone, code: data.code });
-  if (res.ok) show('profile');
+  const res = await api('POST', '/api/register/verify', { id: phone, code: data.code });
+  if (res.ok) { setContact(res.via, phone); show('profile'); }
   else forms.code.elements.code.value = '';
   return res;
 });
 $('#resend').addEventListener('click', async (ev) => {
   ev.target.disabled = true;
-  const res = await api('POST', '/api/register/start', { phone });
+  const res = await api('POST', '/api/register/start', { id: phone });
   const msg = $('.msg', forms.code);
   msg.classList.toggle('ok', res.ok);
   msg.textContent = res.ok ? '認証番号を送り直しました' : res.message;
@@ -41,6 +41,16 @@ $('#resend').addEventListener('click', async (ev) => {
 $('#person').append(...personFields());
 // 配送先: 住所と同じなら、欄を出さない
 $('#shipSame').addEventListener('change', (ev) => { $('#shipRow').hidden = ev.target.checked; if (ev.target.checked) forms.profile.elements.shipTo.value = ''; });
+
+// 確かめた連絡先に合わせて、もう片方を入力してもらう（メールで確かめた人は電話番号、電話で確かめた人はメール）
+function setContact(via, id) {
+  const byEmail = via === 'email';
+  const f = forms.profile.elements;
+  $('#phoneRow').hidden = !byEmail; f.phone.disabled = !byEmail;
+  $('#emailRow').hidden = byEmail; f.email.disabled = byEmail;
+  $('#verifiedEmail').hidden = !byEmail;
+  if (byEmail) $('#verifiedEmail').textContent = `メールアドレス: ${id}（確認済み）`;
+}
 
 function syncKind() {
   const corp = forms.profile.elements.kind.value === 'b2b';
@@ -58,7 +68,7 @@ onSubmit(forms.profile, async (data) => {
   if (res.ok) dirty = false;
   if (res.ok && res.devVerifyUrl) sessionStorage.setItem('devVerifyUrl', res.devVerifyUrl); // お試し用: 確認のリンクを、マイページで出す
   if (res.ok) location.href = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/mypage.html?registered=1';
-  else if (res.status === 401) { res.message = '時間が空いたため、電話番号の確認からやり直してください'; show('phone'); }
+  else if (res.status === 401) { res.message = '時間が空いたため、連絡先の確認からやり直してください'; show('phone'); }
   return res;
 });
 
@@ -66,7 +76,7 @@ onSubmit(forms.profile, async (data) => {
   const me = await setupNav();
   if (new URLSearchParams(location.search).get('next') === 'bidder') for (const link of document.querySelectorAll('a[href="/login.html"]')) link.href = '/login.html?next=bidder';
   if (me.member) location.replace('/mypage.html');
-  else if (me.registering) show('profile'); // 認証まで済ませて、読み込み直した場合
+  else if (me.registering) { setContact(me.registerVia, me.registerId); show('profile'); } // 認証まで済ませて、読み込み直した場合
   syncKind();
   // 利用規約が登録されていれば、同意の欄を出す
   const legal = await api('GET', '/api/legal');
