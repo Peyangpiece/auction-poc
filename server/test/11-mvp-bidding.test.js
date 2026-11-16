@@ -12,6 +12,14 @@ import { totp } from '../src/mvp/security.js';
 import { makeEnv, startServer, connect, cleanup, createLot, sleep } from './helpers.js';
 import { Client } from '../../tools/client.js';
 
+/** 条件が成り立つまで待つ（通知がすでに届いたあとでも、取りこぼさない） */
+async function until(cond, timeoutMs = 10000) {
+  const end = Date.now() + timeoutMs;
+  while (!cond()) {
+    if (Date.now() > end) throw new Error('until: 時間切れ');
+    await sleep(20);
+  }
+}
 /** クッキーを覚える、ブラウザの代わり */
 function browser(base) {
   let cookie = '';
@@ -103,7 +111,7 @@ test('入札と締め: 会員が参加番号で入札し、締めで落札が確
     const lot = await createLot(auctioneer, 9500);
     assert.equal(lot.lotNo, 1, 'No. は、開催ごとに1から');
     await auctioneer.cmd('start', { lotId: lot.id });
-    await wa.waitFor(() => wa.lots.get(lot.id)?.status === 'open');
+    await until(() => wa.lots.get(lot.id)?.status === 'open');
 
     assert.equal((await wa.bid(lot.id, 9500)).accepted, true);
     assert.equal((await wa.bid(lot.id, 10000)).code, 'ALREADY_HIGHEST');
@@ -152,7 +160,7 @@ test('開催が変わると、参加手続きも参加番号も No. も、その
     assert.equal(wb.lots.size, 1, '前の開催の品は、画面に出ない');
     const lot = [...wb.lots.values()][0];
     await auctioneer.cmd('start', { lotId: lot.id });
-    await wb.waitFor(() => wb.lots.get(lot.id)?.status === 'open');
+    await until(() => wb.lots.get(lot.id)?.status === 'open');
     assert.equal((await stale.bid(lot.id, 1000)).code, 'NOT_JOINED', '前の開催の参加番号では、入札できない');
     assert.equal((await wb.bid(lot.id, 1000)).accepted, true);
     stale.close();
@@ -265,5 +273,124 @@ test('オンライン参加から会場参加への変更は、受付係が来�
     assert.deepEqual([p.mode, p.payment, p.checkedIn, p.paddle], ['venue', 'cash', true, 1], '参加番号は変わらない');
     const audit = (await t.staff.get('/api/audit')).json.entries.find((e) => e.type === 'reception.checkin');
     assert.deepEqual(JSON.parse(audit.before), { mode: 'online', payment: 'transfer', checkedIn: false });
+  } finally { await t.end(); }
+});
+
+// ---------------------------------------------------------------- MVP の 5: 進行（休憩・開催終了）と、緊急用の代理入札
+async function venueSetup(t) {
+  const online = await t.register('09055550001', '検証 一郎');
+  const venue = await t.register('09055550002', '検証 二郎');
+  await t.publishEvent('本日の競り');
+  await online.post('/api/join', { receive: 'ship', payment: 'transfer' });            // 参加番号 1（オンライン）
+  const rec = (await t.staff.get('/api/reception')).json;
+  const code = new URL(rec.event.venueUrl).searchParams.get('venue');
+  await venue.post('/api/join', { receive: 'pickup', payment: 'cash', venueCode: code }); // 参加番号 2（会場）
+  const id = (await t.staff.get('/api/reception')).json.participants.find((p) => p.paddle === 2).id;
+  await t.staff.post(`/api/reception/${id}/checkin`);
+  // 進行コンソールは、スタッフのログイン（クッキー）でつなぐ
+  const con = new Client(t.srv.url, undefined, { ack: false, headers: { cookie: t.staff.cookie } });
+  con.hello = { as: 'console' };
+  await con.connect();
+  return { online, venue, con };
+}
+
+test('進行コンソールは、スタッフのログインでつなぐ。受付係と会員は、進行できない（8.14）', async () => {
+  const t = await setup();
+  try {
+    const { online, con } = await venueSetup(t);
+    assert.equal(con.role, 'auctioneer');
+    const made = (await t.staff.post('/api/staff/accounts', { loginId: 'uketsuke', name: '受付 三郎', role: 'reception' })).json;
+    const reception = browser(t.srv.httpUrl);
+    await reception.post('/api/staff/login', { loginId: 'uketsuke', password: made.initialPassword, code: totp(made.totpSecret) });
+    for (const [who, b] of [['受付係', reception], ['会員', online], ['未ログイン', browser(t.srv.httpUrl)]]) {
+      const c = new Client(t.srv.url, undefined, { ack: false, headers: { cookie: b.cookie } });
+      c.hello = { as: 'console' };
+      await assert.rejects(c.connect(), /進行|ログイン/, who);
+    }
+    con.close();
+  } finally { await t.end(); }
+});
+
+test('代理入札（FR-CON-005）と取り消し（AC-FR-CON-006-1）', async () => {
+  const t = await setup();
+  try {
+    const { online, con } = await venueSetup(t);
+    const w1 = await t.ws(online);
+    const lot = await createLot(con, 10000);
+    await con.cmd('start', { lotId: lot.id });
+    await until(() => w1.lots.get(lot.id)?.status === 'open');
+    assert.equal((await w1.bid(lot.id, 10000)).accepted, true);
+    assert.equal((await w1.bid(lot.id, 11000)).code, 'ALREADY_HIGHEST');
+
+    const proxy = (extra) => con.cmd('proxy_bid', { lotId: lot.id, paddle: 2, amount: 11000, reason: '電池切れ', cardChecked: true, ...extra });
+    assert.match((await proxy({ cardChecked: false })).message, /札を確認/);
+    assert.match((await proxy({ reason: ' ' })).message, /理由/);
+    assert.match((await proxy({ paddle: 1 })).message, /会場参加で、来場確認が済んでいる人/, 'オンライン参加の人には、代理入札できない');
+    assert.match((await proxy({ paddle: 99 })).message, /見つかりません/);
+    assert.match((await proxy({ amount: 10000 })).message, /最低入札額より低い/, '受理の条件は、本人の入札と同じ');
+    const done = await proxy();
+    assert.equal(done.ok, true);
+    await until(() => w1.lots.get(lot.id)?.currentPrice === 11000);
+    assert.equal(w1.lots.get(lot.id).highestPaddle, 2);
+    const log1 = (await con.cmd('lot_log', { lotId: lot.id })).log;
+    assert.equal(log1.bids.find((b) => b.seq === done.seq).proxy_by, '管理 花子', '誰が代理で入れたかを、記録に残す');
+
+    // その後に別の入札があると、取り消せない
+    assert.equal((await w1.bid(lot.id, 12000)).accepted, true);
+    assert.match((await con.cmd('proxy_cancel', { lotId: lot.id, bidSeq: done.seq, reason: '入力の誤り' })).message, /別の入札/);
+    // もう一度代理入札（13,000円）→ 取り消すと、12,000円（参加番号 1）に戻る
+    const second = await proxy({ amount: 13000 });
+    assert.equal(second.ok, true);
+    assert.match((await con.cmd('proxy_cancel', { lotId: lot.id, bidSeq: second.seq, reason: '' })).message, /理由/);
+    assert.equal((await con.cmd('proxy_cancel', { lotId: lot.id, bidSeq: second.seq, reason: '入力の誤り' })).ok, true);
+    await until(() => w1.lots.get(lot.id)?.currentPrice === 12000);
+    assert.equal(w1.lots.get(lot.id).highestPaddle, 1, '1つ前の最高入札者に、権利が戻る');
+    assert.match((await con.cmd('proxy_cancel', { lotId: lot.id, bidSeq: second.seq, reason: 'x' })).message, /見つかりません/, '2度は取り消せない');
+    // 本人の入札は、取り消せない（FR-BID-007）
+    const own = (await con.cmd('lot_log', { lotId: lot.id })).log.bids.find((b) => b.amount === 12000);
+    assert.match((await con.cmd('proxy_cancel', { lotId: lot.id, bidSeq: own.seq, reason: 'x' })).message, /見つかりません/);
+
+    const closed = await con.cmd('close', { lotId: lot.id });
+    assert.deepEqual([closed.status, closed.paddle, closed.amount], ['sold', 1, 12000]);
+    assert.match((await con.cmd('proxy_cancel', { lotId: lot.id, bidSeq: done.seq, reason: 'x' })).message, /取り消せません/, '締めの後は、取り消せない');
+    const sold = (await con.cmd('sold_list')).sold;
+    assert.deepEqual(sold.map((s) => [s.lotNo, s.paddle, s.amount, s.receive, s.payment]), [[1, 1, 12000, 'ship', 'transfer']], '落札の一覧に、受け取り方法と支払方法が出る');
+    const types = (await t.staff.get('/api/audit')).json.entries.map((e) => e.type);
+    assert.ok(types.includes('proxy.bid') && types.includes('proxy.cancel'), '操作者・理由・対象を、監査ログに残す');
+    const entry = (await t.staff.get('/api/audit')).json.entries.find((e) => e.type === 'proxy.cancel');
+    assert.deepEqual([entry.actor_kind, entry.actor_role, entry.reason], ['staff', 'admin', '入力の誤り']);
+    w1.close(); con.close();
+  } finally { await t.end(); }
+});
+
+test('休憩と開催終了（FR-CON-003、FR-EVT-003）', async () => {
+  const t = await setup();
+  try {
+    const { online, con } = await venueSetup(t);
+    const w1 = await t.ws(online);
+    const events = [];
+    w1.handlers.add((m) => { if (m.type === 'event') events.push(m); });
+    const a = await createLot(con, 1000);
+    await createLot(con, 1000);
+    assert.match((await con.cmd('event_break', {})).message, /次の開始予定時刻/);
+    assert.equal((await con.cmd('event_break', { resumeAt: '13:00' })).ok, true);
+    await until(() => events.at(-1)?.event?.phase === 'break');
+    assert.equal(events.at(-1).event.resumeAt, '13:00', '次の開始予定時刻が、参加者に届く');
+    await con.cmd('start', { lotId: a.id });
+    await until(() => events.at(-1)?.event?.phase === 'running', 10000);
+    assert.match((await con.cmd('event_break', { resumeAt: '14:00' })).message, /進行中の品/);
+    assert.match((await con.cmd('event_end')).message, /進行中の品/);
+    await until(() => w1.lots.get(a.id)?.status === 'open');
+    await w1.bid(a.id, 1000);
+    await con.cmd('close', { lotId: a.id });
+
+    const ended = await con.cmd('event_end');
+    assert.equal(ended.ok, true);
+    assert.equal(ended.notHeld, 1, '待機の品は、未実施になる');
+    await until(() => events.at(-1)?.ended === true);
+    assert.equal((await online.get('/api/participation')).json.event, null, '終了した開催には、参加できない');
+    assert.match((await con.cmd('event_end')).message, /本日の開催はありません/, '開催終了は、やり直せない');
+    assert.equal((await w1.bid(a.id, 2000)).accepted, false);
+    w1.close(); con.close();
   } finally { await t.end(); }
 });

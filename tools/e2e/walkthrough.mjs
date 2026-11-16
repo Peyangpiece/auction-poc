@@ -130,7 +130,7 @@ try {
   check((await text(b1, 'result')).includes('あなたが落札'), 'つながり直した後、状態が正しく戻る');
 
   console.log('強制終了からの復帰');
-  await con.click('details summary');
+  await con.click('details:not(#proxyBox) summary');
   await con.click('[data-crash="now"]');
   await shot(con, 'console-dialog');
   await con.click('#dlgOk');

@@ -280,6 +280,14 @@ function onClient(ws, req) {
           send({ type: 'error', message: '合言葉（トークン）が正しくありません' });
           return ws.close(4401, 'unauthorized');
         }
+      } else if (msg.as === 'console') {
+        // 進行コンソール: スタッフのログイン（主催者管理者・進行役）で名乗る
+        const found = api.staffFromCookie(req);
+        if (!found.staff) {
+          send({ type: 'error', code: found.code, message: found.message });
+          return ws.close(4403, found.code);
+        }
+        staff = found.staff;
       } else {
         const found = api.participantFromCookie(req);
         if (!found.member) {
@@ -290,7 +298,7 @@ function onClient(ws, req) {
       }
       if (conn.role) return; // 名乗り直しは受け付けない
       // 同じ人の同時接続に上限を置く（合言葉が漏れたときに、際限なくつながれないようにする）
-      const userKey = member ? `member:${member.id}` : `staff:${staff.id}`;
+      const userKey = member ? `member:${member.id}` : `staff:${staff.account ? 'a' : 't'}${staff.id}`;
       const open = userConnections.get(userKey) ?? 0;
       if (config.maxConnectionsPerUser > 0 && open >= config.maxConnectionsPerUser) {
         send({ type: 'error', message: '同時に開ける画面の数を超えました。ほかの画面を閉じてから、開き直してください' });
@@ -309,7 +317,8 @@ function onClient(ws, req) {
         type: 'welcome', role: conn.role, paddle: member?.paddle_no ?? null, mode: member?.mode ?? null, name: (member ?? staff).name,
         conn: conn.id, serverTime: nowMs(), stream: stream.view(), allowCrash: config.allowCrash,
         playerScriptUrl: config.ivsPlayerScriptUrl, venueContact: config.venueContact,
-        commentMaxLength: config.commentMaxLength, comments: store.q.recentComments.all(), ...auction.snapshot(),
+        commentMaxLength: config.commentMaxLength, comments: store.q.recentComments.all(), ...auction.snapshot(), event: api.eventState(),
+        ...(conn.role === 'auctioneer' ? { sold: auction.soldList() } : {}),
       }));
       return presence();
     }
@@ -317,7 +326,7 @@ function onClient(ws, req) {
 
     switch (msg.type) {
       case 'sync': // 再接続のあとなどに、最新の状態を取り直す（FR-UI-002）
-        return send((conn.role === 'auctioneer' ? (m) => m : forMember)({ type: 'snapshot', serverTime: nowMs(), stream: stream.view(), comments: store.q.recentComments.all(), ...auction.snapshot() }));
+        return send((conn.role === 'auctioneer' ? (m) => m : forMember)({ type: 'snapshot', serverTime: nowMs(), stream: stream.view(), comments: store.q.recentComments.all(), ...auction.snapshot(), event: api.eventState() }));
       case 'bid':
         // 主催者側のスタッフは入札できない（FR-CON-004）
         if (conn.role !== 'member') return send({ type: 'error', message: 'スタッフは入札できません' });
@@ -364,14 +373,64 @@ function onClient(ws, req) {
   ws.on('error', () => {});
 }
 
+// 監査ログに残す操作者。ログインしたスタッフならその人、検証用の合言葉で入った進行役なら「システム」扱い
+const staffRef = (conn) => (conn.staff.account ? { id: conn.staff.id, role: conn.staff.role } : null);
+const PROXY_REJECT = {
+  LOT_NOT_OPEN: 'この品は入札を受け付けていません', AFTER_CLOSE: '締めに間に合いませんでした', BELOW_MINIMUM: '最低入札額より低い金額です',
+  OFF_LADDER: '入札できる金額ではありません', ALREADY_HIGHEST: 'この参加者が、すでに最高入札者です', SUSPENDED: 'この参加者は、参加が停止されています', NOT_JOINED: 'この参加者は、いまの開催の参加者ではありません',
+};
 function onAuctioneer(conn, msg, send) {
+  const sendSold = () => send({ type: 'sold', sold: auction.soldList() });
   const ok = (extra = {}) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: true, action: msg.action, ...extra });
   const ng = (message) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: false, action: msg.action, message });
   try {
     switch (msg.action) {
       case 'start': case 'close': case 'suspend': case 'resume': case 'cancel': case 'exclude':
       case 'start_without_video': case 'back_to_waiting':
-        return auction.receiveCommand(conn.staff, msg, send);
+        return auction.receiveCommand(conn.staff, msg, (res) => {
+          send(res);
+          if (!res.ok) return;
+          // 競りを始めたら、開催は「進行中」になる（休憩も終わる。FR-EVT-003）
+          if (msg.action === 'start' && api.eventState() && api.eventState().phase !== 'running') broadcast({ type: 'event', event: api.setPhase(staffRef(conn), 'running') });
+          // 落札の一覧を、進行役に送り直す（受け取り方法・支払方法つき。FR-CON-002）
+          if (msg.action === 'close') sendSold();
+        });
+      case 'sold_list': return ok({ sold: auction.soldList() });
+      case 'event_break': { // 休憩（FR-CON-003）: 進行中の品がないときだけ。次の開始予定時刻が要る
+        if (auction.hasActiveLot()) return ng('進行中の品があるあいだは、休憩に入れません');
+        const at = String(msg.resumeAt ?? '');
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(at)) return ng('次の開始予定時刻を、入力してください');
+        broadcast({ type: 'event', event: api.setPhase(staffRef(conn), 'break', at) });
+        return ok();
+      }
+      case 'event_end': { // 開催終了（FR-EVT-003）: 取り消せない
+        if (auction.hasActiveLot()) return ng('進行中の品があるあいだは、開催を終了できません');
+        if (!api.eventState()) return ng('本日の開催はありません');
+        const notHeld = auction.closeOutWaiting(conn.staff.name); // 待機の品は、未実施にする
+        stream.manual('stop');                                    // 配信を停止する
+        const sold = auction.soldList();
+        api.setPhase(staffRef(conn), 'ended');
+        broadcast({ type: 'event', event: null, ended: true });
+        return ok({ notHeld, sold });
+      }
+      case 'proxy_bid': { // 緊急用の代理入札（FR-CON-005）
+        if (!msg.cardChecked) return ng('参加番号の札を確認して、チェックを入れてください');
+        const reason = String(msg.reason ?? '').trim().slice(0, 500);
+        if (!reason) return ng('理由を入力してください');
+        const target = api.proxyTarget(msg.paddle);
+        // 受理の条件は、本人の入札とまったく同じ（同じ処理の列に入れる）
+        return auction.receiveBid(target, { lotId: msg.lotId, amount: msg.amount, reqId: msg.reqId }, (res) => {
+          api.audit({ staff: staffRef(conn), system: true }, 'proxy.bid', { target: `participant:${target.id}`, after: { lotId: Number(msg.lotId), paddle: target.paddle_no, amount: Number(msg.amount), seq: res.seq, result: res.accepted ? 'ACCEPTED' : res.code }, reason });
+          send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: res.accepted, action: msg.action, seq: res.seq, code: res.code, minBid: res.minBid, message: res.accepted ? undefined : (PROXY_REJECT[res.code] ?? res.code) });
+        }, { proxyBy: conn.staff.name });
+      }
+      case 'proxy_cancel': { // 代理入札の取り消し（FR-CON-006）
+        const reason = String(msg.reason ?? '').trim().slice(0, 500);
+        return auction.receiveCommand(conn.staff, { ...msg, action: 'cancel_proxy', reason }, (res) => {
+          if (res.ok) api.audit({ staff: staffRef(conn), system: true }, 'proxy.cancel', { target: `lot:${Number(msg.lotId)}`, after: { bidSeq: Number(msg.bidSeq) }, reason });
+          send({ ...res, action: msg.action });
+        });
+      }
       case 'stream_start': stream.manual('start'); return ok();
       case 'stream_stop': stream.manual('stop'); return ok();
       case 'stream_status': stream.manual('status'); return ok();
@@ -379,7 +438,7 @@ function onAuctioneer(conn, msg, send) {
       case 'create_lot': {
         // 商品は、競りの最中にその場で登録する（発注者の決定）。登録は記録に残す。
         const lot = auction.createLot(msg);
-        api.audit({ system: true }, 'lot.create', { target: `lot:${lot.id}`, after: { via: 'console', staff: conn.staff.id, title: lot.title, startPrice: lot.startPrice } });
+        api.audit({ staff: staffRef(conn), system: true }, 'lot.create', { target: `lot:${lot.id}`, after: { via: 'console', staff: conn.staff.id, title: lot.title, startPrice: lot.startPrice } });
         return ok({ lot });
       }
       case 'lot_log': return ok({ log: auction.lotLog(Number(msg.lotId)) });

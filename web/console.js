@@ -1,7 +1,7 @@
 // 進行コンソールの動き。接続と時刻合わせは common.js
 'use strict';
 const $ = (id) => document.getElementById(id);
-const S = { lots: new Map(), focus: null, history: [], stream: null, comments: [] };
+const S = { lots: new Map(), focus: null, history: [], stream: null, comments: [], event: null, sold: [] };
 // 一覧は、いちばん下を見ているときだけ新しい行に追従する
 function follow(el, update) { const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24; update(); if (atEnd) el.scrollTop = el.scrollHeight; }
 function renderComments() {
@@ -57,10 +57,23 @@ function render() {
   show('b_nv', st === 'preparing_warn'); show('b_back', st === 'preparing' || st === 'preparing_warn');
 
   const cell = (text, cls) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; return td; };
+  const lastValid = [...S.history].reverse().find((h) => h.valid);
   follow($('histWrap'), () => $('history').replaceChildren(...S.history.map((h) => {
     const tr = document.createElement('tr');
     if (!h.valid) tr.className = 'void';
-    tr.append(cell(h.seq, 'num'), cell(jst(h.received_at), 'num'), cell(`${h.paddle}番`, 'num'), cell(yen(h.amount), 'digits amt'), cell(h.valid ? '' : '無効'));
+    // 代理入札には「代理」と出す（FR-BID-008）
+    const state = cell(h.valid ? '' : '無効');
+    tr.append(cell(h.seq, 'num'), cell(jst(h.received_at), 'num'), cell(`${h.paddle}番${h.proxy ? '（代理）' : ''}`, 'num'), cell(yen(h.amount), 'digits amt'), state);
+    // 取り消せるのは、いちばん新しい有効な入札が代理入札で、まだ締めていないときだけ（FR-CON-006）
+    if (h.proxy && h.valid && h === lastValid && (st === 'open' || st === 'suspended')) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn btn-danger'; b.textContent = '代理入札を取り消す…';
+      b.onclick = async () => {
+        const ans = await ask({ title: '代理入札を取り消しますか？', body: `${h.paddle}番の ${yen(h.amount)} を無効にして、1つ前の入札に戻します。`, needReason: true, okLabel: '取り消す', danger: true });
+        if (ans) cmd('proxy_cancel', { lotId: S.focus, bidSeq: h.seq, reason: ans.reason });
+      };
+      state.append(b);
+    }
     return tr;
   })));
   $('histCount').textContent = `${S.history.filter((h) => h.valid).length}件`;
@@ -168,6 +181,7 @@ function onMessage(msg, at) {
     case 'welcome': case 'snapshot':
       S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history; S.stream = msg.stream;
       S.comments = msg.comments ?? S.comments; renderComments();
+      S.event = msg.event ?? null; if (msg.sold) S.sold = msg.sold; renderEvent(); renderSold();
       if (msg.type === 'welcome') {
         log(`接続しました（${msg.name}）`);
         document.querySelectorAll('[data-crash]').forEach((b) => { b.disabled = !msg.allowCrash; });
@@ -185,9 +199,17 @@ function onMessage(msg, at) {
     case 'price': {
       const lot = S.lots.get(msg.lotId);
       if (lot) Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle, urikiri: msg.urikiri });
-      if (msg.lotId === S.focus) S.history.push({ seq: msg.seq, amount: msg.amount, received_at: msg.receivedAt, valid: 1, paddle: msg.paddle });
+      if (msg.lotId === S.focus) S.history.push({ seq: msg.seq, amount: msg.amount, received_at: msg.receivedAt, valid: 1, paddle: msg.paddle, proxy: msg.proxy });
       render(); break;
     }
+    case 'bid_void': { // 代理入札の取り消し: その入札を無効にして、品を1つ前の状態に戻す
+      S.lots.set(msg.lot.id, msg.lot);
+      const h = S.history.find((x) => x.seq === msg.seq); if (h) h.valid = 0;
+      log(`代理入札を取り消しました（受付連番 ${msg.seq}）`);
+      render(); break;
+    }
+    case 'event': S.event = msg.event; if (msg.ended) log('開催を終了しました'); renderEvent(); break;
+    case 'sold': S.sold = msg.sold; renderSold(); break;
     case 'result':
       link.send({ type: 'result_ack', lotId: msg.lotId, at: at + link.offset, net: 'console' });
       S.lots.set(msg.lotId, msg.lot); render(); break;
@@ -204,7 +226,59 @@ function onMessage(msg, at) {
     case 'error': log('エラー: ' + msg.message); break;
   }
 }
+// ---- 開催（休憩・開催終了）と、落札一覧、代理入札
+const PAYMENT = { transfer: '銀行振込', cash: '当日現金' };
+const RECEIVE = { pickup: '現地受け取り', ship: '配送' };
+function renderEvent() {
+  const e = S.event;
+  $('eventBar').hidden = !e;
+  $('proxySection').hidden = !e; // 代理入札は、開催の参加者（会場参加）が相手なので、開催があるときだけ
+  if (!e) return;
+  $('evTitle').textContent = e.title;
+  $('evPhase').textContent = e.phase === 'break' ? `休憩中（再開予定 ${e.resumeAt}）` : e.phase === 'running' ? '進行中' : '開始前';
+  $('evPhase').dataset.on = e.phase === 'running' ? '1' : '0';
+}
+// 終了の予定時刻を過ぎても終了していなければ、注意を出す（自動では終了しない。FR-EVT-003）
+setInterval(() => {
+  if (!S.event || !link) return;
+  const now = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(link.serverNow());
+  $('evWarn').textContent = now >= S.event.endsAt ? `終了の予定（${S.event.endsAt}）を過ぎています` : '';
+}, 5000);
+function renderSold() {
+  const cell = (text, cls) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; return td; };
+  $('sold').replaceChildren(...S.sold.map((x) => {
+    const tr = document.createElement('tr');
+    tr.append(cell(x.lotNo, 'num'), cell(x.title, 'dyn'), cell(`${x.paddle}番${x.proxy ? '（代理）' : ''}`, 'num'), cell(yen(x.amount), 'digits amt'), cell(RECEIVE[x.receive] ?? ''), cell(PAYMENT[x.payment] ?? ''));
+    return tr;
+  }));
+  $('soldCount').textContent = `${S.sold.length}件`;
+}
+$('breakForm').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('event_break', { resumeAt: $('resumeAt').value }); });
+$('b_end').addEventListener('click', async () => {
+  const waiting = [...S.lots.values()].filter((l) => l.status === 'waiting').length;
+  const ans = await ask({ title: '開催を終了しますか？', body: `取り消せません。待機中の品（${waiting}件）は「未実施」になり、配信を停止します。`, okLabel: '開催を終了する', danger: true });
+  if (!ans) return;
+  const res = await cmd('event_end');
+  if (res?.ok) { S.sold = res.sold; renderSold(); }
+});
+$('proxyBox').addEventListener('toggle', () => {
+  const lot = S.lots.get(S.focus);
+  if ($('proxyBox').open && lot && !$('pxAmount').value) $('pxAmount').value = lot.minBid; // 既定は、最低入札額
+});
+$('proxyForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const res = await cmd('proxy_bid', { lotId: S.focus, paddle: Number($('pxPaddle').value), amount: Number($('pxAmount').value), reason: $('pxReason').value || $('pxNote').value, cardChecked: $('pxCard').checked });
+  if (res?.ok) { $('pxPaddle').value = ''; $('pxAmount').value = ''; $('pxNote').value = ''; $('pxCard').checked = false; }
+  else if (res?.minBid) $('pxAmount').value = res.minBid;
+});
+
 let link = null;
 const token = takeToken('auction-staff');
-if (!token) { $('overlay').style.display = 'flex'; $('overlayText').textContent = '進行役用の URL を開き直してください'; }
-else link = new Link({ token, label: 'console', onMessage, onStatus: (up, why) => { $('overlay').style.display = up ? 'none' : 'flex'; $('overlayText').textContent = why ?? '再接続中…'; } });
+const onStatus = (up, why) => { $('overlay').style.display = up ? 'none' : 'flex'; $('overlayText').textContent = why ?? '再接続中…'; };
+// 検証用の合言葉つきの URL で開いたときは、そのまま入る。なければ、スタッフのログイン（主催者管理者・進行役）で入る
+if (token) link = new Link({ token, label: 'console', onMessage, onStatus });
+else fetch('/api/me', { credentials: 'same-origin' }).then((r) => r.json()).then((me) => {
+  if (!me.staff) return location.replace('/staff.html?next=console');
+  if (me.staff.role !== 'admin' && me.staff.role !== 'auctioneer') { $('overlay').style.display = 'flex'; $('overlayText').textContent = '競りの進行は、主催者管理者と進行役だけができます'; return; }
+  link = new Link({ token: null, as: 'console', label: 'console', onMessage, onStatus });
+}).catch(() => { $('overlay').style.display = 'flex'; $('overlayText').textContent = 'サーバーにつながりません'; });

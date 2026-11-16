@@ -65,3 +65,21 @@ details summary { cursor: pointer; font-size: 15px; font-weight: 700; letter-spa
 details .stack { display: grid; gap: 8px; justify-items: start; margin-top: 8px; }
 
 #dlgReasonWrap { margin-top: 16px; }
+
+/* ---- 開催（休憩・開催終了） */
+.eventbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.eventbar[hidden] { display: none; }
+.eventbar > div { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; min-height: 48px; }
+.eventbar b { font-size: 17px; }
+.eventbar .inline { margin-top: 0; }
+.eventbar .inline .field { flex: 0 0 140px; }
+#evWarn { color: var(--danger); font-weight: 700; font-size: 14px; }
+#evWarn:empty { display: none; }
+/* ---- 緊急用の代理入札 */
+#proxyBox summary { display: flex; align-items: center; cursor: pointer; min-height: 44px; }
+.proxy { display: grid; grid-template-columns: 110px 150px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: end; margin-top: 12px; }
+.proxy .pxcheck { grid-column: 1 / 4; display: flex; align-items: center; gap: 8px; min-height: 48px; font-weight: 700; cursor: pointer; }
+.proxy .pxcheck input { width: 20px; height: 20px; }
+.proxy select.input { appearance: auto; }
+#history td .btn { min-height: 36px; padding: 2px 10px; font-size: 13px; }
+@media (max-width: 640px) { .proxy { grid-template-columns: minmax(0, 1fr); } .proxy .pxcheck { grid-column: auto; } }

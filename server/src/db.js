@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS bids (
   received_at REAL NOT NULL,      -- サーバーが受け付けた時刻（UTC エポックミリ秒）
   result TEXT NOT NULL,           -- 'ACCEPTED' または FR-BID-012 の理由コード
   valid INTEGER NOT NULL DEFAULT 1,  -- 取りやめで無効になったら 0（記録は消さない。FR-BID-007）
-  void_reason TEXT
+  void_reason TEXT,
+  proxy_by TEXT                   -- 代理入札なら、操作したスタッフ（FR-CON-005）。本人の入札は NULL
 );
 CREATE INDEX IF NOT EXISTS bids_lot ON bids(lot_id, seq);
 -- ロットの出来事（締め・状態の変化）。追記だけ（DATA-001）。入札と同じ受付連番の系列を使う。
@@ -108,6 +109,7 @@ function migrate(db) {
   if (!has('members', 'account_id')) todo.push(['members', 'id, paddle_no, name, token_hash']);
   if (!has('lots', 'event_id')) todo.push(['lots', 'id, lot_no, title, start_price, unit_override, reserve_price, status, prep_from, no_video, current_bid_seq, close_seq, winner_bid_seq, updated_at']);
   if (has('members', 'account_id') && !has('members', 'checked_in_at')) db.exec('ALTER TABLE members ADD COLUMN checked_in_at REAL');
+  if (!has('bids', 'proxy_by')) db.exec('ALTER TABLE bids ADD COLUMN proxy_by TEXT');
   if (!todo.length) return;
   db.pragma('foreign_keys = OFF');
   db.pragma('legacy_alter_table = ON'); // 名前を戻すときに、ほかの表からの参照を書き換えさせない
@@ -144,7 +146,7 @@ export function openDb(dbPath) {
       `SELECT id FROM lots WHERE status IN ('preparing','preparing_warn','open','suspended') AND id <> ? LIMIT 1`),
     activeLots: db.prepare(`SELECT id, status FROM lots WHERE status IN ('preparing','preparing_warn','open','suspended')`),
     insertBid: db.prepare(
-      `INSERT INTO bids (seq, lot_id, member_id, amount, received_at, result) VALUES (?, ?, ?, ?, ?, ?)`),
+      `INSERT INTO bids (seq, lot_id, member_id, amount, received_at, result, proxy_by) VALUES (?, ?, ?, ?, ?, ?, ?)`),
     setCurrentBid: db.prepare(`UPDATE lots SET current_bid_seq = ?, updated_at = ? WHERE id = ?`),
     insertEvent: db.prepare(
       `INSERT INTO lot_events (seq, lot_id, type, at, actor, data) VALUES (?, ?, ?, ?, ?, ?)`),
@@ -155,11 +157,11 @@ export function openDb(dbPath) {
     clearCurrentBid: db.prepare(`UPDATE lots SET current_bid_seq = NULL WHERE id = ?`),
     // 画面に出す履歴は、受理された入札の全件（無効になったものは取り消し線用に valid=0 で返す）。受付連番の順。
     history: db.prepare(`
-      SELECT b.seq, b.amount, b.received_at, b.valid, m.paddle_no AS paddle
+      SELECT b.seq, b.amount, b.received_at, b.valid, m.paddle_no AS paddle, b.proxy_by IS NOT NULL AS proxy
       FROM bids b JOIN members m ON m.id = b.member_id
       WHERE b.lot_id = ? AND b.result = 'ACCEPTED' ORDER BY b.seq`),
     allBids: db.prepare(`
-      SELECT b.seq, b.amount, b.received_at, b.result, b.valid, m.paddle_no AS paddle
+      SELECT b.seq, b.amount, b.received_at, b.result, b.valid, m.paddle_no AS paddle, b.proxy_by
       FROM bids b JOIN members m ON m.id = b.member_id WHERE b.lot_id = ? ORDER BY b.seq`),
     events: db.prepare(`SELECT seq, type, at, actor, data FROM lot_events WHERE lot_id = ? ORDER BY seq`),
     lastEvent: db.prepare(`SELECT seq, type FROM lot_events WHERE lot_id = ? ORDER BY seq DESC LIMIT 1`),
@@ -170,6 +172,16 @@ export function openDb(dbPath) {
     insertLot: db.prepare(
       `INSERT INTO lots (lot_no, event_id, title, start_price, unit_override, reserve_price, updated_at)
        VALUES ((SELECT COALESCE(MAX(lot_no), 0) + 1 FROM lots WHERE event_id IS @event), @event, @title, @start, @unit, @reserve, @at)`),
+    bid: db.prepare(`SELECT * FROM bids WHERE seq = ?`),
+    // 代理入札の取り消し（FR-CON-006）: その入札だけを無効にし、1つ前の有効な入札に戻す
+    voidBid: db.prepare(`UPDATE bids SET valid = 0, void_reason = ? WHERE seq = ?`),
+    prevValidBid: db.prepare(`SELECT seq FROM bids WHERE lot_id = ? AND result = 'ACCEPTED' AND valid = 1 AND seq < ? ORDER BY seq DESC LIMIT 1`),
+    // 落札の一覧（受け取り方法・支払方法つき。FR-CON-002）
+    soldList: db.prepare(`
+      SELECT l.lot_no AS lotNo, l.title, b.amount, m.paddle_no AS paddle, m.receive, m.payment, m.mode, b.proxy_by IS NOT NULL AS proxy
+      FROM lots l JOIN bids b ON b.seq = l.winner_bid_seq JOIN members m ON m.id = b.member_id
+      WHERE l.status = 'sold' AND l.event_id IS ? ORDER BY l.lot_no`),
+    waitingLots: db.prepare(`SELECT id FROM lots WHERE status = 'waiting' AND event_id IS ?`),
     insertMember: db.prepare(`INSERT INTO members (paddle_no, name, token_hash) VALUES (?, ?, ?)`),
     insertComment: db.prepare(`INSERT INTO comments (lot_id, member_id, body, at) VALUES (?, ?, ?, ?)`),
     hideComment: db.prepare(`UPDATE comments SET hidden = 1 WHERE id = ?`),

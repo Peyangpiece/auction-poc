@@ -80,13 +80,14 @@ export class Auction {
 
   // ---------------------------------------------------------------- 受付（連番を振って列に入れる）
   /** 入札を受け付ける。reply は入札した端末だけに結果を返す関数。 */
-  receiveBid(member, msg, reply) {
+  receiveBid(member, msg, reply, { proxyBy = null } = {}) {
     const receivedAt = nowMs();
     const seq = this.nextSeq();
     const lotId = Number(msg.lotId);
     const amount = Number(msg.amount);
     this.#enqueue(lotId, {
       kind: 'bid', seq, receivedAt, lotId, amount, member, reply,
+      proxyBy, // 代理入札なら、操作したスタッフの名前（FR-CON-005）。受理の条件は、本人の入札と同じ
       reqId: msg.reqId ?? null,
       clientSentAt: msg.clientSentAt ?? null, // 端末の時計のまま
       clientSentAtCorrected: msg.clientSentAtCorrected ?? null, // サーバーとの時刻の差で補正した値
@@ -100,7 +101,7 @@ export class Auction {
     const lotId = Number(msg.lotId);
     this.#enqueue(lotId, {
       kind: 'cmd', seq, receivedAt, lotId, actor, reply,
-      action: msg.action, reason: msg.reason ?? '', reqId: msg.reqId ?? null,
+      action: msg.action, reason: msg.reason ?? '', reqId: msg.reqId ?? null, bidSeq: Number(msg.bidSeq),
       clientSentAt: msg.clientSentAt ?? null, clientSentAtCorrected: msg.clientSentAtCorrected ?? null,
     });
   }
@@ -150,7 +151,7 @@ export class Auction {
     if (lot) {
       // 受理も拒否も記録する。この書き込み（fsync つき）が終わるまで、端末には何も返さない（NFR-REL-001）
       tx(() => {
-        q.insertBid.run(item.seq, item.lotId, item.member.id, item.amount, item.receivedAt, result);
+        q.insertBid.run(item.seq, item.lotId, item.member.id, item.amount, item.receivedAt, result, item.proxyBy);
         if (accepted) q.setCurrentBid.run(item.seq, item.receivedAt, item.lotId);
       });
     }
@@ -171,7 +172,7 @@ export class Auction {
     let broadcastAt = null;
     if (accepted) {
       broadcastAt = this.broadcast({
-        type: 'price', lotId: item.lotId, seq: item.seq, amount: item.amount, paddle: item.member.paddle_no,
+        type: 'price', lotId: item.lotId, seq: item.seq, amount: item.amount, paddle: item.member.paddle_no, proxy: item.proxyBy ? 1 : 0,
         receivedAt: item.receivedAt, currentPrice, minBid, urikiri: reserveMet(lot.reserve_price, currentPrice),
       });
     }
@@ -253,6 +254,25 @@ export class Auction {
         this.stream.cancelWait();
         const to = lot.prep_from === 'suspended' ? 'suspended' : 'waiting';
         this.#transition(lot, to, item.actor.name, {}, item.seq);
+        break;
+      }
+      case 'cancel_proxy': {
+        // 代理入札の取り消し（FR-CON-006）: 締めの前で、その後に別の入札がまだない場合だけ
+        if (s !== 'open' && s !== 'suspended') return fail(`「${stateName}」の品では、代理入札を取り消せません`);
+        const bid = q.bid.get(item.bidSeq);
+        if (!bid || bid.lot_id !== lot.id || !bid.proxy_by || !bid.valid || bid.result !== 'ACCEPTED') return fail('取り消せる代理入札が見つかりません');
+        if (lot.current_bid_seq !== bid.seq) return fail('その後に別の入札があるため、取り消せません');
+        const err = needReason();
+        if (err) return fail(err);
+        const prev = q.prevValidBid.get(lot.id, bid.seq);
+        this.store.tx(() => {
+          q.voidBid.run(item.reason, bid.seq);
+          // 現在価格を、1つ前の有効な入札に戻す。なければ「入札なし」に戻す
+          if (prev) q.setCurrentBid.run(prev.seq, item.receivedAt, lot.id); else q.clearCurrentBid.run(lot.id);
+          q.insertEvent.run(item.seq, lot.id, 'proxy_cancel', item.receivedAt, item.actor.name, JSON.stringify({ bidSeq: bid.seq, reason: item.reason }));
+        });
+        // 全員の画面を更新する（1つ前の最高入札者に、権利表示が戻る）
+        this.broadcast({ type: 'bid_void', lotId: lot.id, seq: bid.seq, lot: this.lotView(lot.id) });
         break;
       }
       default:
@@ -377,6 +397,21 @@ export class Auction {
       focusLotId: last?.id ?? null,
       history: last ? this.store.q.history.all(last.id) : [],
     };
+  }
+
+  /** 落札の一覧（進行コンソール用。受け取り方法・支払方法つき） */
+  soldList() {
+    return this.store.q.soldList.all(this.eventId());
+  }
+
+  /** 開催終了（FR-EVT-003）: 待機の品を、すべて未実施にする。進行中の品があるときは呼ばない */
+  closeOutWaiting(actor) {
+    const ids = this.store.q.waitingLots.all(this.eventId()).map((r) => r.id);
+    for (const id of ids) this.#transition(this.store.q.lot.get(id), 'not_held', actor, { reason: '開催終了' }, this.nextSeq());
+    return ids.length;
+  }
+  hasActiveLot() {
+    return this.store.q.activeLots.all().length > 0;
   }
 
   createLot({ title, startPrice, unitOverride = null, reservePrice = null }) {

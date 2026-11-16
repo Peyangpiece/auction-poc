@@ -30,6 +30,18 @@
 
 <main>
   <div class="col">
+    <section class="eventbar" id="eventBar" aria-label="開催" hidden>
+      <div>
+        <b class="dyn" id="evTitle"></b>
+        <span class="state" id="evPhase"></span>
+        <span id="evWarn" role="status"></span>
+      </div>
+      <form class="inline" id="breakForm">
+        <label class="field">次の開始予定<input class="input num" id="resumeAt" type="time" required></label>
+        <button class="btn" type="submit">休憩に入る</button>
+        <button class="btn btn-danger" id="b_end" type="button">開催終了…</button>
+      </form>
+    </section>
     <section aria-label="進行中の品">
       <div class="board" id="board">
         <div class="board-top">
@@ -62,6 +74,28 @@
       <div class="sechead"><h2 id="histTitle">入札の履歴</h2><span class="count num" id="histCount">0件</span></div>
       <div class="tablewrap" id="histWrap" tabindex="0" aria-label="入札の履歴">
         <table><thead><tr><th scope="col">受付連番</th><th scope="col">受付時刻</th><th scope="col">参加番号</th><th scope="col">入札額</th><th scope="col"><span class="sr-only">状態</span></th></tr></thead><tbody id="history"></tbody></table>
+      </div>
+    </section>
+
+    <section aria-labelledby="proxyTitle" id="proxySection">
+      <details id="proxyBox">
+        <summary><h2 id="proxyTitle">緊急用の代理入札</h2></summary>
+        <p class="note">会場参加で来場確認が済んでいる人に限ります。電池切れ・端末の故障のときに、本人に代わって入札します。</p>
+        <form class="proxy" id="proxyForm">
+          <label class="field">参加番号<input class="input num" id="pxPaddle" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" required></label>
+          <label class="field">入札額（税込）<input class="input num" id="pxAmount" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" required></label>
+          <label class="field">理由<select class="input" id="pxReason"><option>電池切れ</option><option>端末の故障</option><option value="">その他（右に書く）</option></select></label>
+          <label class="field">理由（その他）<input class="input" id="pxNote" autocomplete="off" maxlength="200"></label>
+          <label class="pxcheck"><input type="checkbox" id="pxCard">参加番号の札を確認した</label>
+          <button class="btn btn-primary" type="submit">代理で入札する</button>
+        </form>
+      </details>
+    </section>
+
+    <section aria-labelledby="soldTitle">
+      <div class="sechead"><h2 id="soldTitle">落札一覧</h2><span class="count num" id="soldCount">0件</span></div>
+      <div class="tablewrap">
+        <table><thead><tr><th scope="col">No.</th><th scope="col">品名</th><th scope="col">参加番号</th><th scope="col">落札額</th><th scope="col">受け取り</th><th scope="col">支払</th></tr></thead><tbody id="sold"></tbody></table>
       </div>
     </section>
 

@@ -43,8 +43,9 @@ const STATE_LABEL = {
 };
 
 class Link {
-  constructor({ token, label, onMessage, onStatus }) {
+  constructor({ token, label, onMessage, onStatus, as = undefined }) {
     this.token = token;
+    this.as = as; // 'console' なら、スタッフのログインで名乗る
     this.label = label;
     this.onMessage = onMessage;
     this.onStatus = onStatus;
@@ -77,7 +78,7 @@ class Link {
   connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = (this.ws = new WebSocket(`${proto}//${location.host}/ws`));
-    ws.onopen = () => { this.lastHeardAt = localNow(); ws.send(JSON.stringify({ type: 'hello', token: this.token, label: this.label })); };
+    ws.onopen = () => { this.lastHeardAt = localNow(); ws.send(JSON.stringify({ type: 'hello', token: this.token ?? undefined, label: this.label, as: this.as })); };
     ws.onmessage = (ev) => {
       if (ws !== this.ws) return; // 見切りをつけた古い接続からの遅れた受信は捨てる
       const at = localNow();

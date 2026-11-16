@@ -2,6 +2,7 @@
 // どの操作ができるかは、サーバーが役割で決める。ここでは、できない操作の入口を出さないだけ。
 'use strict';
 
+const toConsole = new URLSearchParams(location.search).get('next') === 'console';
 const dlg = $('#dlg');
 const panel = $('#panel');
 let me = null;
@@ -254,7 +255,8 @@ async function show(key) {
 
 onSubmit($('#loginForm'), async (data) => {
   const res = await api('POST', '/api/staff/login', data);
-  if (res.ok) location.reload();
+  // 進行コンソールから来た人は、ログインのあと進行コンソールへ戻す
+  if (res.ok) { if (toConsole && ['admin', 'auctioneer'].includes(res.staff.role)) location.href = '/console.html'; else location.href = '/staff.html'; }
   else $('#loginForm').elements.code.value = '';
   return res;
 });
@@ -265,6 +267,8 @@ onSubmit($('#loginForm'), async (data) => {
   if (!me) { $('#login').hidden = false; $('#loginForm').elements.loginId.focus(); return; }
   $('#app').hidden = false;
   $('#who').textContent = `${me.name}（${me.roleLabel}）`;
+  // 競りの進行は、主催者管理者と進行役（8.14）
+  $('#toConsole').hidden = !['admin', 'auctioneer'].includes(me.role);
   const keys = Object.keys(PANELS).filter((k) => PANELS[k][2].includes(me.role));
   $('#tabs').replaceChildren(...keys.map((k) => el('button', { type: 'button', role: 'tab', 'data-key': k, text: PANELS[k][0], onclick: () => show(k) })));
   show(keys[0]);

@@ -33,7 +33,7 @@ export class Client {
     return new Promise((resolve, reject) => {
       const ws = (this.ws = new WebSocket(this.url, { perMessageDeflate: false, headers: this.headers }));
       ws.on('error', reject);
-      ws.on('open', () => { this.closed = false; ws.send(JSON.stringify({ type: 'hello', token: this.token, label: this.label })); });
+      ws.on('open', () => { this.closed = false; ws.send(JSON.stringify({ type: 'hello', token: this.token, label: this.label, ...(this.hello ?? {}) })); });
       ws.on('close', () => {
         for (const p of this.pending.values()) p.reject(new Error('closed'));
         this.pending.clear();
@@ -63,6 +63,7 @@ export class Client {
         for (const lot of msg.lots) this.lots.set(lot.id, lot);
         break;
       case 'lot':
+      case 'bid_void': // 代理入札の取り消し。品の最新の状態が付いてくる
         this.lots.set(msg.lot.id, msg.lot);
         break;
       case 'price': {

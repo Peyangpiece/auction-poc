@@ -122,7 +122,7 @@ function renderHistory() {
     const li = document.createElement('li');
     li.className = [h.valid ? '' : 'void', h.paddle === S.paddle ? 'mine' : '', grew && i === S.history.length - 1 ? 'new' : ''].join(' ').trim();
     const cell = (cls, text) => { const s = document.createElement('span'); s.className = cls; s.textContent = text; return s; };
-    li.append(cell('who', `${h.paddle}番${h.paddle === S.paddle ? '（あなた）' : ''}`), cell('amt digits', yen(h.amount)), cell('at num', h.valid ? jstShort(h.received_at) : '無効'));
+    li.append(cell('who', `${h.paddle}番${h.proxy ? '（代理）' : ''}${h.paddle === S.paddle ? '（あなた）' : ''}`), cell('amt digits', yen(h.amount)), cell('at num', h.valid ? jstShort(h.received_at) : '無効'));
     return li;
   })));
   S.rendered = S.history.length;
@@ -233,6 +233,11 @@ setInterval(() => {
 }, 5000);
 
 // ---- サーバーからのメッセージ
+// 休憩と開催終了の知らせ（FR-CON-003、FR-EVT-003）
+function renderEvent(event, ended = false) {
+  $('eventNote').textContent = ended ? '本日の競りは終了しました。ご参加ありがとうございました。'
+    : event?.phase === 'break' ? `休憩中です。再開の予定は ${event.resumeAt} です。` : '';
+}
 function onMessage(msg, at) {
   switch (msg.type) {
     case 'welcome': case 'snapshot':
@@ -246,7 +251,7 @@ function onMessage(msg, at) {
       S.comments = msg.comments ?? S.comments;
       S.lots = new Map(msg.lots.map((l) => [l.id, l]));
       S.focus = msg.focusLotId; S.history = msg.history; S.stream = msg.stream; S.rendered = msg.history.length;
-      render(); renderHistory(); renderStream(); renderComments();
+      render(); renderHistory(); renderStream(); renderComments(); renderEvent(msg.event ?? null);
       break;
     case 'comment':
       S.comments.push(msg); if (S.comments.length > 30) S.comments.shift();
@@ -275,7 +280,7 @@ function onMessage(msg, at) {
         if (S.mode === 'bid' && lot.minBid !== msg.minBid) { S.lockUntil = performance.now() + 600; setTimeout(render, 620); }
       }
       Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle, urikiri: msg.urikiri });
-      if (msg.lotId === S.focus) S.history.push({ seq: msg.seq, amount: msg.amount, received_at: msg.receivedAt, valid: 1, paddle: msg.paddle });
+      if (msg.lotId === S.focus) S.history.push({ seq: msg.seq, amount: msg.amount, received_at: msg.receivedAt, valid: 1, paddle: msg.paddle, proxy: msg.proxy });
       render(); renderHistory();
       if (outbid) notifyOutbid(msg);
       break;
@@ -291,6 +296,17 @@ function onMessage(msg, at) {
       if (won) { beep(); if ('vibrate' in navigator) navigator.vibrate(300); }
       break;
     }
+    case 'bid_void': { // 代理入札の取り消し: その入札に取り消し線を引き、品を1つ前の状態に戻す（権利表示も戻る）
+      S.lots.set(msg.lot.id, msg.lot);
+      const h = S.history.find((x) => x.seq === msg.seq); if (h) h.valid = 0;
+      // 自分に権利が戻ったら、上回られたときの警告は、もう今の状況ではないので消す
+      if (msg.lot.highestPaddle === S.paddle) { document.body.classList.remove('outbid'); say('代理入札が取り消され、あなたが最高入札者に戻りました', 'ok'); }
+      render(); renderHistory();
+      break;
+    }
+    case 'event':
+      renderEvent(msg.event, msg.ended);
+      break;
     case 'stream':
       S.stream = msg.stream; renderStream();
       break;

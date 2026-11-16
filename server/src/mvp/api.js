@@ -33,6 +33,7 @@ export function createApi({ store, config, nowMs }) {
   const db = store.db;
   db.exec(MVP_SCHEMA);
   // 以前の版のデータベースに、後から足した列を加える
+  for (const col of ['phase', 'resume_at']) if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = ?").get(col)) db.exec(`ALTER TABLE events ADD COLUMN ${col} TEXT`);
   if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'venue_code'").get()) db.exec('ALTER TABLE events ADD COLUMN venue_code TEXT');
   if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'highlights'").get()) db.exec("ALTER TABLE events ADD COLUMN highlights TEXT NOT NULL DEFAULT ''");
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
@@ -400,9 +401,9 @@ export function createApi({ store, config, nowMs }) {
   const todayJst = () => new Date(nowMs() + 9 * HOUR).toISOString().slice(0, 10);
   /**
    * いまの開催: 公開中の開催のうち、開催日が今日（日本時間）のもの【前提】。同じ日に2つあれば、開始が早いほう。
-   * 開催は月に2〜3回（発注者の決定）。参加手続きと入札は、開催の当日だけ受け付ける。
+   * 開催は月に2〜3回（発注者の決定）。参加手続きと入札は、開催の当日だけ受け付ける。終了した開催（FR-EVT-003）は除く。
    */
-  const activeEvent = () => db.prepare("SELECT * FROM events WHERE status = 'published' AND substr(starts_at, 1, 10) = ? ORDER BY starts_at, id LIMIT 1").get(todayJst()) ?? null;
+  const activeEvent = () => db.prepare("SELECT * FROM events WHERE status = 'published' AND substr(starts_at, 1, 10) = ? AND (phase IS NULL OR phase <> 'ended') ORDER BY starts_at, id LIMIT 1").get(todayJst()) ?? null;
   // 開催の予定（トップページのカレンダー用）。公開中の開催だけ。だれでも見られる
   route('GET', '/api/schedule', () => {
     const today = todayJst();
@@ -609,5 +610,39 @@ export function createApi({ store, config, nowMs }) {
     }
   }
 
-  return { handle, createStaff, audit, participantFromCookie, bidGate, eventId: () => activeEvent()?.id ?? null };
+  // ------------------------------------------------------------ 進行コンソール用（FR-CON、FR-EVT-003）
+  /** 進行コンソールの接続を、スタッフのログインで確かめる。進行できるのは、主催者管理者と進行役（8.14） */
+  function staffFromCookie(req) {
+    const ctx = { req };
+    loadSession(ctx);
+    if (!ctx.staff) return { code: 'LOGIN', message: 'スタッフのログインが必要です' };
+    if (ctx.staff.role !== 'admin' && ctx.staff.role !== 'auctioneer') return { code: 'FORBIDDEN', message: '競りの進行は、主催者管理者と進行役だけができます' };
+    return { staff: { id: ctx.staff.id, name: ctx.staff.name, role: ctx.staff.role, account: true } };
+  }
+  /** 開催の進み具合（参加者の画面と進行コンソールに送る）。phase: null（開始前）/ running（進行中）/ break（休憩）*/
+  const eventState = () => {
+    const e = activeEvent();
+    return e ? { title: e.title, phase: e.phase ?? null, resumeAt: e.phase === 'break' ? e.resume_at : null, endsAt: e.ends_at.slice(11) } : null;
+  };
+  function setPhase(staff, phase, resumeAt = null) {
+    const e = activeEvent();
+    if (!e) throw new HttpError(409, '本日の開催はありません');
+    if ((e.phase ?? null) === phase && (e.resume_at ?? null) === resumeAt) return eventState();
+    db.prepare('UPDATE events SET phase = ?, resume_at = ? WHERE id = ?').run(phase, resumeAt, e.id);
+    audit({ staff, system: true }, `event.${phase}`, { target: `event:${e.id}`, before: { phase: e.phase ?? null }, after: { phase, resumeAt } });
+    return eventState();
+  }
+  /** 代理入札の対象（FR-CON-005）: いまの開催で、会場参加として来場確認が済んでいる参加者 */
+  function proxyTarget(paddle) {
+    const e = activeEvent();
+    if (!e) throw new HttpError(409, '本日の開催はありません');
+    const p = db.prepare('SELECT id, paddle_no, name, account_id, event_id, mode, checked_in_at FROM members WHERE event_id = ? AND paddle_no = ?').get(e.id, Number(paddle));
+    if (!p) throw new HttpError(404, `参加番号 ${paddle} の参加者が見つかりません`);
+    if (p.mode !== 'venue' || !p.checked_in_at) throw new HttpError(409, '代理入札は、会場参加で、来場確認が済んでいる人にだけ行えます');
+    return p;
+  }
+  return {
+    handle, createStaff, audit, participantFromCookie, bidGate, eventId: () => activeEvent()?.id ?? null,
+    staffFromCookie, eventState, setPhase, proxyTarget,
+  };
 }

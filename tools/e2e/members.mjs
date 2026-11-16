@@ -99,8 +99,16 @@ try {
   check((await auct.locator('#tabs button').count()) === 2, '進行役の管理画面には、受付と SMS の制限だけが出る');
 
   console.log('その場での登録（進行コンソール）');
-  const con = await open(`/console.html?t=${sys.tokens.auctioneer}`, { viewport: { width: 1280, height: 860 } });
-  await con.waitForSelector('#addLot');
+  // 進行コンソールは、スタッフのログインで入る（合言葉つきの URL は使わない）
+  const anon = await open('/console.html', { viewport: { width: 1280, height: 860 } });
+  await anon.waitForURL(/staff\.html\?next=console/);
+  check(true, 'ログインしていない人が進行コンソールを開くと、スタッフのログインへ進む');
+  const con = await auct.context().newPage();
+  con.on('pageerror', (e) => errors.push(`console: ${e.message}`));
+  await con.setViewportSize({ width: 1280, height: 1100 });
+  await con.goto(sys.base + '/console.html');
+  await con.waitForSelector('#eventBar:not([hidden])');
+  check((await con.textContent('#evTitle')).includes('12月の競り') && (await con.textContent('#evPhase')) === '開始前', '進行役がログインで入れる。開催の名前と「開始前」が出る');
   await con.fill('#newTitle', '防水シート（検証）');
   await con.click('#addLot button[type=submit]');
   await con.waitForFunction(() => document.body.textContent.includes('防水シート（検証）'));
@@ -273,6 +281,49 @@ try {
   await admin.click('#dlg button[type=submit]');
   await admin.waitForFunction(() => document.querySelectorAll('#panel .state[data-on="1"]').length === 2);
   check(true, 'オンライン参加の人を、支払方法を選び直して、会場参加に切り替えられる');
+
+  console.log('進行: 代理入札・取り消し・締め・休憩・開催終了');
+  check((await con.textContent('#evPhase')) === '進行中', '競りを始めると、開催が「進行中」になる');
+  await con.click('#proxyBox summary');
+  await con.fill('#pxPaddle', '1');
+  await con.fill('#pxAmount', '11000');
+  await con.click('#proxyForm button[type=submit]');
+  await con.waitForFunction(() => document.getElementById('cmdMsg').textContent.includes('札を確認'));
+  check(true, '札の確認のチェックがないと、代理入札できない');
+  await con.check('#pxCard');
+  await con.click('#proxyForm button[type=submit]');
+  await con.waitForFunction(() => document.getElementById('history').textContent.includes('1番（代理）'));
+  await guest.waitForFunction(() => document.getElementById('history').textContent.includes('1番（代理）'));
+  check(true, '代理入札が受理され、全員の履歴に「代理」と出る');
+  await shot(con, 'mvp-21-console-proxy', { fullPage: true });
+  await con.click('#history >> text=代理入札を取り消す');
+  await con.fill('#dlgReason', '金額の入力の誤り');
+  await con.click('#dlgOk');
+  await con.waitForFunction(() => document.getElementById('price').textContent.includes('10,000'));
+  await guest.waitForFunction(() => document.querySelector('#right')?.classList.contains('on'));
+  check(!(await guest.evaluate(() => document.body.classList.contains('outbid'))) && (await guest.textContent('#msg')).includes('最高入札者に戻りました'), '権利が戻った人の画面から、上回られた警告が消える');
+  check(true, '代理入札を取り消すと、現在価格が1つ前に戻り、前の最高入札者に権利表示が戻る');
+  await con.click('#b_close');
+  await con.waitForFunction(() => document.getElementById('sold').textContent.includes('10,000'));
+  const soldRow = await con.textContent('#sold');
+  check(soldRow.includes('2番') && soldRow.includes('現地受け取り') && soldRow.includes('当日現金'), '落札一覧に、参加番号・落札額・受け取り方法・支払方法が出る');
+  await con.fill('#resumeAt', '13:00');
+  await con.click('#breakForm button[type=submit]');
+  await guest.waitForFunction(() => document.getElementById('eventNote').textContent.includes('13:00'));
+  await con.waitForFunction(() => document.getElementById('evPhase').textContent.includes('休憩中'));
+  check(true, '休憩に入ると、参加者の画面に再開の予定時刻が出る');
+  await shot(guest, 'mvp-22-bidder-break');
+  await shot(con, 'mvp-23-console-event', { fullPage: true });
+  await con.click('#b_end');
+  await con.waitForSelector('#dlg[open]');
+  check((await con.textContent('#dlgBody')).includes('取り消せません'), '開催終了の前に、取り消せないことを確かめる');
+  await con.click('#dlgOk');
+  await guest.waitForFunction(() => document.getElementById('eventNote').textContent.includes('終了しました'));
+  await con.waitForSelector('#eventBar', { state: 'hidden' });
+  check(true, '開催を終了すると、参加者の画面に終了の知らせが出る');
+  const after = await open('/');
+  await after.waitForSelector('#calBody td');
+  check(await after.isHidden('#today'), '終了した開催は、トップページの「本日開催」に出ない');
 
   // 会員の停止と、記録
   await admin.click('#tabs [data-key=members]');
