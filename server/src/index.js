@@ -122,7 +122,7 @@ try { api.billing.sweep(); } catch (err) { console.error('[billing]', err); }
 setInterval(() => { try { api.billing.sweep(); } catch (err) { console.error('[billing]', err); } }, 3600000).unref();
 
 // ---------------------------------------------------------------- HTTP
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png', '.svg': 'image/svg+xml' };
 
 // ブラウザに守らせる制限。スクリプトとスタイルは自分のサイトのファイルだけ（画面の中に直接書いたものは動かない）。
 // 映像の再生（Amazon IVS のプレーヤー）に要る許可は、公式の資料を見ずに書いた想定で【未検証】。実物で映像が出なければ、ここを直すか POC_CSP=off にする。
@@ -170,7 +170,7 @@ const server = http.createServer((req, res) => {
     const ext = path.extname(file);
     if (!MIME[ext]) return res.writeHead(404).end('not found'); // 画面に使う種類のファイルだけを配る
     // 書体と画像は1日おぼえさせる。画面とスクリプトは毎回取り直す（直した内容がすぐ届く）
-    const cache = ext === '.woff2' || ext === '.webp' || ext === '.png' ? 'public, max-age=86400' : 'no-store';
+    const cache = ext === '.woff2' || ext === '.webp' || ext === '.png' || ext === '.svg' ? 'public, max-age=86400' : 'no-store';
     res.writeHead(200, { 'content-type': MIME[ext], 'cache-control': cache });
     res.end(body);
   });

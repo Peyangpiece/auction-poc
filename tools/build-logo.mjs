@@ -68,19 +68,20 @@ function brushLine(x, y, w, id) {
 }
 const emblem = 'data:image/png;base64,' + fs.readFileSync(`${ROOT}server/assets/emblem.png`).toString('base64');
 
-function build({ dark = false, withEmblem = false }) {
+function build({ dark = false, withEmblem = false, plain = false }) {
   const pad = 36, base = 200, ex = withEmblem ? 210 : 0;
   const wm = wordmark(pad + ex, base);
   const W = Math.ceil(pad * 2 + ex + wm.width + 58), H = 300;
   const main = dark ? WHITE : NAVY, accent = dark ? GOLD : RED;
   // 文字は、同じ色の細い縁を足して、筆の太さを少し出す
   const letters = wm.parts.map((g) => { const c = g.role === 'accent' ? accent : main; return `<path d="${g.d}" fill="${c}" stroke="${c}" stroke-width="1.6" stroke-linejoin="round"/>`; }).join('');
-  const line = brushLine(pad + ex + 2, base + 34, wm.width + 14, `kasure${dark ? 'd' : ''}${withEmblem ? 's' : ''}`);
-  const bg = dark ? `<rect width="${W}" height="${H}" rx="14" fill="${NAVY}"/>` : '';
+  const line = brushLine(pad + ex + 2, base + 34, wm.width + 14, `kasure${dark ? 'd' : ''}${withEmblem ? 's' : ''}${plain ? 'p' : ''}`);
+  // plain: 地の四角を付けない（暗い画面の上に、そのまま置く）
+  const bg = dark && !plain ? `<rect width="${W}" height="${H}" rx="14" fill="${NAVY}"/>` : '';
   const mark = withEmblem ? `<image href="${emblem}" x="${pad}" y="${(H - 190) / 2 - 2}" width="190" height="190"/>` : '';
   return { W, H, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="令和の競り"><title>令和の競り</title>${bg}${mark}${line}${letters}</svg>` };
 }
-const variants = { 'reiwa-no-seri': {}, 'reiwa-no-seri-dark': { dark: true }, 'reiwa-no-seri-symbol': { withEmblem: true } };
+const variants = { 'reiwa-no-seri': {}, 'reiwa-no-seri-dark': { dark: true }, 'reiwa-no-seri-symbol': { withEmblem: true }, 'reiwa-no-seri-symbol-dark': { withEmblem: true, dark: true, plain: true } };
 fs.mkdirSync(OUT, { recursive: true });
 const b = await chromium.launch();
 const made = [];

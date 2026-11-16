@@ -191,7 +191,9 @@ details[open] > summary::before { transform: rotate(45deg); }
 .brandbar { background: var(--ground); border-bottom: 1px solid var(--line); }
 .brandbar > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; margin: 0 auto; }
 .brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; color: var(--ink); text-decoration: none; }
-.brand img { width: 40px; height: 40px; flex: none; }
+/* ロゴ（会社のシンボル＋毛筆の「令和の競り」）。暗い画面では、白い文字の版に切り替える */
+.brand__logo { display: block; height: 48px; width: auto; }
+.brand picture { display: block; }
 .brand__text { display: grid; line-height: 1.3; min-width: 0; }
 .brand__name { font-weight: 700; font-size: 17px; letter-spacing: .1em; white-space: nowrap; }
 .brand__service { font-size: 12px; font-weight: 700; letter-spacing: .12em; color: var(--action); white-space: nowrap; }

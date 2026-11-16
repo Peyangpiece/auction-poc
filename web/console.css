@@ -1,7 +1,7 @@
 /* 進行コンソールのスタイル。共通の部品は app.css */
 .brandbar > div, main { max-width: 1240px; margin: 0 auto; padding-left: 24px; padding-right: 24px; }
 .brandbar > div { min-height: 80px; }
-.brand img { width: 48px; height: 48px; }
+.brand__logo { height: 52px; }
 .brand__name { font-size: 20px; }
 .meta { display: flex; align-items: baseline; gap: 24px; color: var(--ink-2); font-size: 14px; }
 .meta b { color: var(--ink); }
