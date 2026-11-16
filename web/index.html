@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e1028" media="(prefers-color-scheme: dark)">
-<title>出品カタログ｜株式会社NEWS ライブオークション</title>
+<title>トップ｜株式会社NEWS ライブオークション</title>
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
 <!-- impeccable-disable overused-font: Inter は News-HP（株式会社NEWS のサイト）で決まっている数字用の書体 -->
 <link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
@@ -22,26 +22,24 @@
     <nav id="nav" aria-label="メニュー"></nav>
   </div>
 </header>
-<main>
+<main class="narrow">
 <div class="pagehead">
-  <h1>出品カタログ</h1>
+  <h1>ライブオークション</h1>
   <hr class="rule">
 </div>
-<div id="events" aria-live="polite"></div>
+<div class="lead" id="lead">
+  <p>参加には、会員登録が必要です。</p>
+  <div class="actions">
+    <a class="btn btn-primary btn-lg" href="/register.html">会員登録</a>
+    <a class="btn btn-lg" href="/login.html">ログイン</a>
+  </div>
+</div>
 <section class="terms" id="terms" hidden>
   <div><h2>送料</h2><p class="pre dyn" id="shipping"></p></div>
   <div><h2>返品</h2><p class="pre dyn" id="returns"></p></div>
 </section>
-<dialog class="wide" id="detail" aria-labelledby="detailTitle">
-  <p class="no" id="detailNo"></p>
-  <h2 class="dyn" id="detailTitle"></h2>
-  <div id="detailHero"></div>
-  <div class="gallery" id="detailThumbs"></div>
-  <dl class="facts" id="detailFacts"></dl>
-  <div class="actions"><button class="btn" type="button" id="detailClose">閉じる</button></div>
-</dialog>
 </main>
 <script src="site.js"></script>
-<script src="catalog.js"></script>
+<script src="home.js"></script>
 </body>
 </html>

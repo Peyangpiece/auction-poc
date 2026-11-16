@@ -1,4 +1,4 @@
-// MVP の 1（会員登録・認証・スタッフ）と 2（商品登録・カタログ・審査）。
+// MVP の 1（会員登録・認証・スタッフ）と、開催・設定・監査ログ、進行コンソールからのその場での商品登録。
 // 時刻を進められるように、API を同じプロセスの中で立てて確かめる。データはすべて架空のもの。
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -64,8 +64,6 @@ async function register(t, b, phone, input = person) {
   assert.equal((await b.post('/api/register/verify', { phone, code: t.lastCode(normalizePhone(phone)) })).status, 200);
   return b.post('/api/register/complete', input);
 }
-const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
-const item = { title: '防水シート', description: '訓練で使われたもの', quantity: 1, startPrice: 3000, size: '2m×3m', condition: '小さな破れあり', surplusInfo: '' };
 
 test('二段階認証は RFC 6238 の検査値と一致する', () => {
   const secret = base32Encode(Buffer.from('12345678901234567890'));
@@ -228,10 +226,13 @@ test('権限はサーバーで確かめる（8.14）: 会員・受付係・進�
     await register(t, member, '09033330001');
     const anon = t.browser();
     for (const [who, b, status] of [['未ログイン', anon, 401], ['会員', member, 401], ['受付係', reception, 403]]) {
-      assert.equal((await b.get('/api/items')).status, status, `${who}: 商品の一覧`);
-      assert.equal((await b.post('/api/items', item)).status, status, `${who}: 商品の登録`);
+      assert.equal((await b.get('/api/events')).status, status, `${who}: 開催の一覧`);
       assert.equal((await b.get('/api/members')).status, status, `${who}: 会員の一覧`);
+      assert.equal((await b.post('/api/settings', {})).status, status, `${who}: 設定の変更`);
     }
+    // 事前の商品登録・審査・カタログは持たない（商品は、進行コンソールからその場で登録する）
+    for (const url of ['/api/items', '/api/catalog', '/uploads/x.png']) assert.equal((await admin.get(url)).status, 404, url);
+    assert.equal((await anon.get('/api/terms')).json.shippingNotice.includes('送料'), true, '送料・返品の表示は、だれでも見られる');
     for (const url of ['/api/members', '/api/staff/accounts', '/api/audit', '/api/settings']) {
       assert.equal((await auctioneer.get(url)).status, 403, `進行役: ${url}`);
     }
@@ -259,103 +260,10 @@ test('開催: 届出済みの印がないと公開できない（FR-EVT-002）',
     assert.equal((await admin.post(`/api/events/${id}/publish`)).status, 409);
     assert.equal((await admin.post(`/api/events/${id}`, { ...ev, notified: true })).status, 200);
     assert.equal((await admin.post(`/api/events/${id}/publish`)).status, 200);
-    assert.equal((await t.browser().get('/api/catalog')).json.events.length, 1);
+    assert.equal((await admin.get('/api/events')).json.events[0].status, 'published');
     // 印を外すと、公開も取り下げる
     await admin.post(`/api/events/${id}`, { ...ev, notified: false });
-    assert.equal((await t.browser().get('/api/catalog')).json.events.length, 0);
-  } finally { await t.close(); }
-});
-
-test('商品: 登録 → 審査 → カタログ。AC-FR-ITEM-005-1（登録した人は承認できない）、AC-FR-ITEM-008-1（承認後の変更で審査待ちに戻る）', async () => {
-  const t = await setup();
-  try {
-    const admin = await t.staffLogin('admin', 'kanri');
-    const auctioneer = await t.staffLogin('auctioneer', 'shinko');
-    const ev = { title: '12月の競り', startsAt: '2026-12-05T09:00', endsAt: '2026-12-05T16:00', venueName: '検証会場', venueAddress: '埼玉県◯◯市1-2-3', notified: true };
-    const eventId = (await admin.post('/api/events', ev)).json.id;
-    await admin.post(`/api/events/${eventId}/publish`);
-
-    // 入力の検査
-    const badItem = await auctioneer.post('/api/items', { ...item, title: '', startPrice: 0, reservePrice: 100 });
-    assert.deepEqual(Object.keys(badItem.json.errors).sort(), ['startPrice', 'title']);
-    assert.ok((await auctioneer.post('/api/items', { ...item, reservePrice: 3200 })).json.errors.reservePrice, '最低落札額は、入札できる金額に合わせる');
-
-    const { id } = (await auctioneer.post('/api/items', { ...item, eventId, sortOrder: 2, reservePrice: 5000 })).json;
-    const second = (await admin.post('/api/items', { ...item, title: '飯ごう', eventId, sortOrder: 1 })).json.id;
-    const catalog = async () => (await t.browser().get('/api/catalog')).json.events[0].items;
-    assert.equal((await catalog()).length, 0, '承認の前は、カタログに出ない');
-
-    assert.equal((await auctioneer.post(`/api/items/${id}/review`, { decision: 'approved' })).status, 409, '審査に出す前は審査できない');
-    await auctioneer.post(`/api/items/${id}/submit`);
-    assert.equal((await auctioneer.post(`/api/items/${id}/review`, { decision: 'approved' })).status, 403, '登録した人は承認できない');
-    assert.equal((await admin.post(`/api/items/${id}/review`, { decision: 'rejected' })).status, 400, '却下には理由が要る');
-    assert.equal((await admin.post(`/api/items/${id}/review`, { decision: 'approved' })).status, 200);
-    await admin.post(`/api/items/${second}/submit`);
-    await auctioneer.post(`/api/items/${second}/review`, { decision: 'approved' });
-
-    const shown = await catalog();
-    assert.deepEqual(shown.map((i) => [i.no, i.title]), [[1, '飯ごう'], [2, '防水シート']], '出品順に、No. を1から振る');
-    assert.equal(/reserve|5000|status|createdBy/.test(JSON.stringify(shown)), false, '最低落札額と内部の情報は、カタログに出さない');
-
-    // 出品順だけの変更では、承認は保たれる
-    assert.equal((await auctioneer.post(`/api/items/${id}`, { ...item, eventId, sortOrder: 0, reservePrice: 5000 })).json.status, 'approved');
-    // 内容の変更で、審査待ちに戻り、カタログから消える
-    assert.equal((await auctioneer.post(`/api/items/${id}`, { ...item, description: '書き足した説明', eventId, reservePrice: 5000 })).json.status, 'pending');
-    assert.deepEqual((await catalog()).map((i) => i.title), ['飯ごう']);
-    // 変えた人は、承認できない
-    assert.equal((await auctioneer.post(`/api/items/${id}/review`, { decision: 'approved' })).status, 403);
-    assert.equal((await admin.post(`/api/items/${id}/review`, { decision: 'approved' })).status, 200);
-    const reviews = (await admin.get(`/api/items/${id}/reviews`)).json.reviews;
-    assert.equal(reviews.length, 2);
-    // 審査の記録は、消せない・直せない
-    assert.throws(() => t.store.db.prepare('DELETE FROM item_reviews').run(), /追記だけ/);
-  } finally { await t.close(); }
-});
-
-test('出品禁止の言葉: 警告が出た商品は、理由がないと承認できない（FR-ITEM-006・007）', async () => {
-  const t = await setup();
-  try {
-    const admin = await t.staffLogin('admin', 'kanri');
-    const auctioneer = await t.staffLogin('auctioneer', 'shinko');
-    assert.equal((await admin.post('/api/settings', { orgName: '株式会社NEWS', returnPolicy: '仮', shippingNotice: '仮', bannedWords: ['実銃', ' '] })).status, 200);
-    const { id } = (await auctioneer.post('/api/items', { ...item, description: '実銃ではなく模型' })).json;
-    assert.deepEqual((await admin.get('/api/items')).json.items[0].warnings, ['実銃']);
-    await auctioneer.post(`/api/items/${id}/submit`);
-    const noReason = await admin.post(`/api/items/${id}/review`, { decision: 'approved' });
-    assert.equal(noReason.status, 400);
-    assert.deepEqual(noReason.json.warnings, ['実銃']);
-    assert.equal((await admin.post(`/api/items/${id}/review`, { decision: 'approved', reason: '模型であることを現物で確かめた' })).status, 200);
-    const review = (await admin.get(`/api/items/${id}/reviews`)).json.reviews[0];
-    assert.deepEqual(review.warnings, ['実銃']);
-    assert.equal(review.reason, '模型であることを現物で確かめた');
-  } finally { await t.close(); }
-});
-
-test('写真: JPEG・PNG・WebP だけ、1枚 10MB まで、1商品 20 枚まで。公開前の写真は外から見えない（FR-ITEM-002）', async () => {
-  const t = await setup();
-  try {
-    const admin = await t.staffLogin('admin', 'kanri');
-    const auctioneer = await t.staffLogin('auctioneer', 'shinko');
-    const { id } = (await auctioneer.post('/api/items', item)).json;
-    const up = (buf) => auctioneer.post(`/api/items/${id}/photos`, buf, { 'content-type': 'application/octet-stream' });
-    assert.equal((await up(Buffer.from('<svg onload=alert(1)>'))).status, 400, '中身が画像でなければ断る');
-    assert.equal((await up(Buffer.concat([PNG, Buffer.alloc(10 * 1024 * 1024)]))).status, 413);
-    const ok = await up(PNG);
-    assert.equal(ok.status, 200);
-    const url = ok.json.photos[0].url;
-    assert.equal((await t.browser().get(url)).status, 404, '承認・公開の前は、外から見えない');
-    const seen = await auctioneer.get(url);
-    assert.equal(seen.status, 200);
-    assert.equal(seen.headers.get('content-type'), 'image/png');
-    for (let i = 1; i < 20; i++) assert.equal((await up(PNG)).status, 200);
-    assert.equal((await up(PNG)).status, 400, '21枚目は断る');
-    // 承認の後に写真を足すと、審査待ちに戻る
-    const pid = ok.json.photos[0].id;
-    await auctioneer.post(`/api/items/${id}/submit`);
-    await admin.post(`/api/items/${id}/review`, { decision: 'approved' });
-    assert.equal((await auctioneer.post(`/api/photos/${pid}/delete`)).status, 200);
-    assert.equal((await admin.get('/api/items')).json.items[0].status, 'pending');
-    assert.equal((await auctioneer.get(url)).status, 404);
+    assert.equal((await admin.get('/api/events')).json.events[0].status, 'preparing');
   } finally { await t.close(); }
 });
 

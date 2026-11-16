@@ -1,11 +1,9 @@
-// スタッフ用の管理画面: 商品の登録と審査、開催、会員、スタッフ、設定、記録。
+// スタッフ用の管理画面: 開催、会員、スタッフ、設定、記録。商品の登録は、進行コンソールで競りの最中に行う。
 // どの操作ができるかは、サーバーが役割で決める。ここでは、できない操作の入口を出さないだけ。
 'use strict';
 
 const dlg = $('#dlg');
 const panel = $('#panel');
-const STATUS = { draft: '下書き', pending: '審査待ち', approved: '承認済み', rejected: '却下' };
-const PHOTO_MAX = 10 * 1024 * 1024;
 let me = null;
 let current = null;
 
@@ -37,114 +35,7 @@ function askReason(title, label, required, run) {
   form.elements.reason.focus();
 }
 
-// ------------------------------------------------------------ 商品
-async function itemsPanel() {
-  const [items, events] = await Promise.all([api('GET', '/api/items'), api('GET', '/api/events')]);
-  if (!items.ok) return [el('p', { class: 'msg', text: items.message })];
-  const evName = Object.fromEntries(events.events.map((e) => [e.id, e.title]));
-  const rows = items.items.map((i) => {
-    return el('tr', {},
-      el('td', { class: 'n', text: String(i.id) }),
-      el('td', { class: 'dyn' }, i.title, i.warnings.length ? el('div', { class: 'warn', text: `出品禁止の言葉: ${i.warnings.join('、')}` }) : null),
-      el('td', { class: 'n', text: yen(i.startPrice) }),
-      el('td', { class: 'n', text: i.reservePrice === null ? 'なし' : yen(i.reservePrice) }),
-      el('td', { class: 'dyn', text: i.eventId ? `${evName[i.eventId] ?? ''}（順 ${i.sortOrder}）` : '未定' }),
-      el('td', {}, el('span', { class: 'state', 'data-on': i.status === 'approved' ? '1' : '0', text: STATUS[i.status] })),
-      act(
-        smallBtn('編集', () => itemDialog(i, events.events)),
-        (i.status === 'draft' || i.status === 'rejected') && smallBtn('審査に出す', async () => { const r = await api('POST', `/api/items/${i.id}/submit`); if (!r.ok) alertLine(r.message); show('items'); }),
-        i.status === 'pending' && smallBtn('審査', () => reviewDialog(i), 'btn-primary')));
-  });
-  return [
-    el('div', { class: 'toolbar' }, el('p', { class: 'note', text: '登録・変更した本人は、その商品を審査できません。' }), smallBtn('商品を登録', () => itemDialog(null, events.events), 'btn-primary')),
-    el('p', { class: 'msg', id: 'line', role: 'alert' }),
-    table(['番号', '商品名', '開始価格', '最低落札額', '開催', '状態', ''], rows, '商品はまだありません。'),
-  ];
-}
 const alertLine = (text) => { const line = $('#line'); if (line) line.textContent = text; };
-
-function itemDialog(item, events) {
-  const i = item ?? { title: '', description: '', quantity: 1, startPrice: '', unitOverride: null, reservePrice: null, size: '', condition: '', surplusInfo: '', eventId: null, sortOrder: 0, photos: [] };
-  const form = el('form', { class: 'form', novalidate: true },
-    field('商品名', 'title', { value: i.title, required: true, maxLength: 120 }),
-    el('div', { class: 'grid2' },
-      field('開始価格（税込・円）', 'startPrice', { value: i.startPrice, inputMode: 'numeric', required: true }),
-      field('数量', 'quantity', { value: i.quantity, inputMode: 'numeric' }),
-      field('最低落札額（円）', 'reservePrice', { value: i.reservePrice ?? '', inputMode: 'numeric' }, '任意。参加者には見せません'),
-      field('入札単位（円）', 'unitOverride', { value: i.unitOverride ?? '', inputMode: 'numeric' }, '任意。空なら既定の表')),
-    field('説明', 'description', { value: i.description, rows: 3 }),
-    el('div', { class: 'grid2' },
-      field('サイズ', 'size', { value: i.size }),
-      field('状態', 'condition', { value: i.condition })),
-    field('放出品の情報', 'surplusInfo', { value: i.surplusInfo }, '放出元・年式など'),
-    el('div', { class: 'grid2' },
-      field('出品する開催', 'eventId', { options: [['', '未定'], ...events.map((e) => [String(e.id), e.title])], value: i.eventId === null ? '' : String(i.eventId) }),
-      field('出品順', 'sortOrder', { value: i.sortOrder, inputMode: 'numeric' }, '小さい順に No. を振ります')),
-    item && item.status === 'approved' && el('p', { class: 'note', text: '承認済みです。出品順と開催のほかを変えると、審査待ちに戻ります。' }),
-    msgLine(),
-    el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: item ? '保存する' : '登録して写真へ進む' }), closeBtn()));
-  onSubmit(form, async (data) => {
-    const res = await api('POST', item ? `/api/items/${item.id}` : '/api/items', data);
-    if (res.ok) {
-      show('items');
-      if (item) dlg.close();
-      else { const fresh = (await api('GET', '/api/items')).items.find((x) => x.id === res.id); itemDialog(fresh, events); }
-    }
-    return res;
-  });
-  const photos = el('div', { class: 'photos' });
-  const drawPhotos = (list) => {
-    const input = el('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', multiple: true, class: 'sr-only', id: 'photoInput' });
-    const line = msgLine();
-    input.addEventListener('change', async () => {
-      let latest = list;
-      for (const file of input.files) {
-        if (file.size > PHOTO_MAX) { line.textContent = `${file.name}: 写真は、1枚 10MB までです`; continue; }
-        const res = await api('POST', `/api/items/${item.id}/photos`, file);
-        if (!res.ok) { line.textContent = `${file.name}: ${res.message}`; break; }
-        latest = res.photos;
-      }
-      const keep = line.textContent;
-      drawPhotos(latest);
-      $('.msg', photos).textContent = keep;
-      show('items');
-    });
-    photos.replaceChildren(
-      el('h2', { text: `写真（${list.length} / 20）` }),
-      el('div', { class: 'gallery' }, list.map((p, n) => el('figure', {},
-        el('img', { src: p.url, alt: `写真 ${n + 1}`, loading: 'lazy' }),
-        smallBtn('削除', async () => { const r = await api('POST', `/api/photos/${p.id}/delete`); if (r.ok) { drawPhotos(r.photos); show('items'); } })))),
-      input,
-      el('label', { class: 'btn', htmlFor: 'photoInput', text: '写真を追加' }),
-      el('p', { class: 'note', text: 'JPEG・PNG・WebP、1枚 10MB まで' }),
-      line);
-  };
-  if (item) drawPhotos(i.photos);
-  openDialog(item ? `商品 ${item.id} の編集` : '商品を登録', form, photos);
-}
-
-async function reviewDialog(i) {
-  const history = await api('GET', `/api/items/${i.id}/reviews`);
-  const facts = [['商品名', i.title], ['開始価格（税込）', yen(i.startPrice)], ['最低落札額', i.reservePrice === null ? 'なし' : yen(i.reservePrice)], ['数量', String(i.quantity)], ['サイズ', i.size], ['状態', i.condition], ['放出品の情報', i.surplusInfo], ['説明', i.description]];
-  const form = el('form', { class: 'form', novalidate: true },
-    i.warnings.length ? el('p', { class: 'warn', role: 'alert', text: `出品禁止の言葉が含まれています: ${i.warnings.join('、')}。承認する場合は、判断の理由が必要です。` }) : null,
-    field('判断の理由', 'reason', { rows: 3 }, i.warnings.length ? '承認・却下のどちらでも必須' : '却下のときは必須'),
-    msgLine(),
-    el('div', { class: 'actions' },
-      el('button', { class: 'btn btn-primary', type: 'submit', value: 'approved', text: '承認する' }),
-      el('button', { class: 'btn btn-danger', type: 'submit', value: 'rejected', text: '却下する' }), closeBtn()));
-  onSubmit(form, async (data, button) => {
-    const res = await api('POST', `/api/items/${i.id}/review`, { decision: button.value, reason: data.reason });
-    if (res.ok) { dlg.close(); show('items'); }
-    return res;
-  });
-  openDialog(`商品 ${i.id} の審査`,
-    el('div', { class: 'gallery' }, i.photos.map((p, n) => el('figure', {}, el('img', { src: p.url, alt: `写真 ${n + 1}` })))),
-    el('dl', { class: 'facts' }, facts.filter(([, v]) => v).flatMap(([k, v]) => [el('dt', { text: k }), el('dd', { class: 'pre dyn', text: v })])),
-    history.ok && history.reviews.length ? el('div', {}, el('h2', { text: 'これまでの審査' }),
-      el('ul', { class: 'rows' }, history.reviews.map((r) => el('li', { class: 'dyn', text: `${dateFmt.format(r.at)}　${r.reviewer}　${STATUS[r.decision]}${r.reason ? '　' + r.reason : ''}` })))) : null,
-    form);
-}
 
 // ------------------------------------------------------------ 開催
 async function eventsPanel() {
@@ -270,9 +161,9 @@ async function settingsPanel() {
   const s = await api('GET', '/api/settings');
   const form = el('form', { class: 'form', novalidate: true },
     field('主催者の名称', 'orgName', { value: s.orgName, required: true }),
-    field('返品特約の表示', 'returnPolicy', { value: s.returnPolicy, rows: 4, required: true }, 'カタログに表示します。弁護士の確認が済むまでは仮の文言です'),
-    field('送料の表示', 'shippingNotice', { value: s.shippingNotice, rows: 3, required: true }, 'カタログに表示します'),
-    field('出品禁止の言葉', 'bannedWords', { value: s.bannedWords.join('\n'), rows: 6 }, '1行に1つ。商品の文面に含まれると、審査で警告を出します'),
+    field('返品特約の表示', 'returnPolicy', { value: s.returnPolicy, rows: 4, required: true }, 'トップページに表示します。弁護士の確認が済むまでは仮の文言です'),
+    field('送料の表示', 'shippingNotice', { value: s.shippingNotice, rows: 3, required: true }, 'トップページに表示します'),
+    field('出品禁止の言葉', 'bannedWords', { value: s.bannedWords.join('\n'), rows: 6 }, '1行に1つ。品名に含まれると、進行コンソールでの登録のときに、判断の理由を求めます'),
     el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '保存する' })));
   onSubmit(form, async (data) => {
@@ -297,7 +188,6 @@ async function auditPanel() {
 
 // ------------------------------------------------------------ 切り替え
 const PANELS = {
-  items: ['商品', itemsPanel, ['admin', 'auctioneer']],
   events: ['開催', eventsPanel, ['admin']],
   members: ['会員', membersPanel, ['admin']],
   sms: ['SMS の制限', smsPanel, ['admin', 'auctioneer', 'reception']],

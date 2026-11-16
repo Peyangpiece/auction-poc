@@ -83,7 +83,6 @@ async function setupNav() {
     const link = (href, text) => el('a', { href, text });
     const here = location.pathname;
     const items = [];
-    if (here !== '/' && here !== '/index.html') items.push(link('/', '出品カタログ'));
     if (me.member) {
       if (here !== '/mypage.html') items.push(link('/mypage.html', 'マイページ'));
     } else if (!me.staff) {

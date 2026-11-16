@@ -1,4 +1,5 @@
-// MVP の 1（会員登録・認証・スタッフ）と 2（商品登録・カタログ・審査）の API。
+// MVP の 1（会員登録・認証・スタッフ）の API と、開催・主催者設定・監査ログ。
+// 商品は、競りの最中に進行コンソールからその場で登録する（発注者の決定）ので、事前の登録・審査・カタログは持たない。
 // 権限は、必ずここ（サーバーの側）で確かめる。画面でボタンを隠すだけにはしない（本仕様 8.14）。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +9,6 @@ import {
   newOtpCode, normalizePhone, isEmail,
 } from './security.js';
 import { Notifier, outboxSender } from './notify.js';
-import { isOnLadder } from '../ladder.js';
 
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
@@ -21,8 +21,6 @@ const STAFF_LIFETIME = 12 * HOUR;   // スタッフ: 12時間（FR-AUTH-012）
 const REGISTER_LIFETIME = 15 * MIN; // SMS 認証から登録の完了まで
 const LOCK_AFTER = 5;               // パスワードの誤り5回で
 const LOCK_FOR = 15 * MIN;          // 15分ロック
-const PHOTO_MAX_BYTES = 10 * 1024 * 1024;  // 写真は1枚 10MB まで（FR-ITEM-002）
-const PHOTO_MAX_COUNT = 20;                // 1商品 20 枚まで
 const ROLE_LABEL = { admin: '主催者管理者', auctioneer: '進行役', reception: '受付係' };
 
 class HttpError extends Error {
@@ -30,20 +28,10 @@ class HttpError extends Error {
 }
 const bad = (message, extra) => new HttpError(400, message, extra);
 
-/** 写真の種類を、中身の先頭の数バイトで確かめる（拡張子や申告された種類は信用しない） */
-function sniffImage(buf) {
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { mime: 'image/jpeg', ext: 'jpg' };
-  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { mime: 'image/png', ext: 'png' };
-  if (buf.length >= 12 && buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') return { mime: 'image/webp', ext: 'webp' };
-  return null;
-}
-
 export function createApi({ store, config, nowMs }) {
   const db = store.db;
   db.exec(MVP_SCHEMA);
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
-  const uploadDir = path.join(config.dataDir, 'uploads');
-  fs.mkdirSync(uploadDir, { recursive: true });
 
   const notifier = new Notifier(
     outboxSender(path.join(config.dataDir, 'outbox')),
@@ -403,141 +391,11 @@ export function createApi({ store, config, nowMs }) {
     return { ok: true };
   });
 
-  // ------------------------------------------------------------ 商品（FR-ITEM-001〜009）
-  const photosOf = (itemId) => db.prepare('SELECT id, file FROM item_photos WHERE item_id = ? ORDER BY sort, id').all(itemId).map((p) => ({ id: p.id, url: `/uploads/${p.file}` }));
+  // ------------------------------------------------------------ 出品禁止の言葉・表示する文言
+  // 商品は、競りの最中に進行コンソールからその場で登録する（発注者の決定）。事前の登録・審査・カタログは持たない。
   const bannedWords = () => { try { return JSON.parse(setting('banned_words')).filter((w) => typeof w === 'string' && w.trim()); } catch { return []; } };
-  /** 商品名・説明などに、出品禁止の言葉が含まれていないか（FR-ITEM-006） */
-  const warningsFor = (item) => {
-    const hay = [item.title, item.description, item.size, item.condition, item.surplus_info].join('\n').toLowerCase();
-    return bannedWords().filter((w) => hay.includes(w.toLowerCase()));
-  };
-  const itemView = (i, { staff = false } = {}) => ({
-    id: i.id, title: i.title, description: i.description, quantity: i.quantity, startPrice: i.start_price,
-    size: i.size, condition: i.condition, surplusInfo: i.surplus_info, sortOrder: i.sort_order, photos: photosOf(i.id),
-    // ここから下は、スタッフにだけ返す（最低落札額は、参加者には見せない）
-    ...(staff ? { status: i.status, eventId: i.event_id, unitOverride: i.unit_override, reservePrice: i.reserve_price, createdBy: i.created_by, editedBy: i.edited_by, warnings: warningsFor(i) } : {}),
-  });
-  // 承認の後に変えると、審査をやり直す項目（出品順と、出品する開催は除く。FR-ITEM-008）
-  const REVIEWED = ['title', 'description', 'quantity', 'start_price', 'unit_override', 'reserve_price', 'size', 'condition', 'surplus_info'];
-  function itemInput(body) {
-    const text = (v, max) => String(v ?? '').trim().slice(0, max);
-    const int = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
-    const it = {
-      title: text(body.title, 120), description: text(body.description, 4000), quantity: int(body.quantity) ?? 1,
-      start_price: int(body.startPrice), unit_override: int(body.unitOverride), reserve_price: int(body.reservePrice),
-      size: text(body.size, 200), condition: text(body.condition, 1000), surplus_info: text(body.surplusInfo, 1000),
-      event_id: int(body.eventId), sort_order: int(body.sortOrder) ?? 0,
-    };
-    const errors = {};
-    if (!it.title) errors.title = '商品名を入力してください';
-    if (!Number.isSafeInteger(it.quantity) || it.quantity < 1) errors.quantity = '数量は1以上にしてください';
-    if (!Number.isSafeInteger(it.start_price) || it.start_price < 1) errors.startPrice = '開始価格（税込）を1円以上で入力してください';
-    if (it.unit_override !== null && (!Number.isSafeInteger(it.unit_override) || it.unit_override < 1)) errors.unitOverride = '入札単位は1円以上にしてください';
-    if (it.reserve_price !== null && !errors.startPrice) {
-      if (!Number.isSafeInteger(it.reserve_price) || it.reserve_price < it.start_price) errors.reservePrice = '最低落札額は、開始価格以上にしてください';
-      else if (!isOnLadder(it.reserve_price, it.start_price, config.incrementTable, it.unit_override)) errors.reservePrice = '最低落札額は、入札できる金額に合わせてください';
-    }
-    if (it.event_id !== null && !db.prepare('SELECT 1 FROM events WHERE id = ?').get(it.event_id)) errors.eventId = '開催が見つかりません';
-    if (Object.keys(errors).length) throw bad('入力を確かめてください', { errors });
-    return it;
-  }
-  const getItem = (id) => { const i = db.prepare('SELECT * FROM items WHERE id = ?').get(id); if (!i) throw new HttpError(404, '商品が見つかりません'); return i; };
-
-  route('GET', '/api/items', (ctx) => {
-    needStaff(ctx, 'admin', 'auctioneer');
-    return { items: db.prepare('SELECT * FROM items ORDER BY id DESC').all().map((i) => itemView(i, { staff: true })) };
-  });
-  route('POST', '/api/items', (ctx, body) => {
-    const me = needStaff(ctx, 'admin', 'auctioneer');
-    const it = itemInput(body);
-    const now = nowMs();
-    const info = db.prepare(`INSERT INTO items (title, description, quantity, start_price, unit_override, reserve_price, size, condition, surplus_info, event_id, sort_order, created_by, edited_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(it.title, it.description, it.quantity, it.start_price, it.unit_override, it.reserve_price, it.size, it.condition, it.surplus_info, it.event_id, it.sort_order, me.id, me.id, now, now);
-    audit(ctx, 'item.create', { target: `item:${info.lastInsertRowid}`, after: it });
-    return { ok: true, id: Number(info.lastInsertRowid) };
-  });
-  route('POST', '/api/items/:id', (ctx, body, id) => {
-    const me = needStaff(ctx, 'admin', 'auctioneer');
-    const before = getItem(id);
-    const it = itemInput(body);
-    const changed = REVIEWED.some((k) => before[k] !== it[k]);
-    // 承認済みの商品の内容を変えたら、審査待ちに戻す（承認の後に禁止語を書き足す抜け道をふさぐ。FR-ITEM-008）
-    const status = changed && before.status === 'approved' ? 'pending' : before.status;
-    db.prepare(`UPDATE items SET title=?, description=?, quantity=?, start_price=?, unit_override=?, reserve_price=?, size=?, condition=?, surplus_info=?, event_id=?, sort_order=?, status=?, edited_by=?, updated_at=? WHERE id=?`)
-      .run(it.title, it.description, it.quantity, it.start_price, it.unit_override, it.reserve_price, it.size, it.condition, it.surplus_info, it.event_id, it.sort_order, status, changed ? me.id : before.edited_by, nowMs(), id);
-    const pick = (o) => Object.fromEntries([...REVIEWED, 'event_id', 'sort_order', 'status'].map((k) => [k, o[k]]));
-    audit(ctx, 'item.update', { target: `item:${id}`, before: pick(before), after: pick({ ...it, status }) });
-    return { ok: true, status };
-  });
-  route('POST', '/api/items/:id/submit', (ctx, body, id) => {
-    needStaff(ctx, 'admin', 'auctioneer');
-    const i = getItem(id);
-    if (i.status !== 'draft' && i.status !== 'rejected') throw new HttpError(409, '下書きか、却下された商品だけを審査に出せます');
-    db.prepare("UPDATE items SET status = 'pending', updated_at = ? WHERE id = ?").run(nowMs(), id);
-    audit(ctx, 'item.submit', { target: `item:${id}`, before: { status: i.status }, after: { status: 'pending' } });
-    return { ok: true };
-  });
-  route('POST', '/api/items/:id/review', (ctx, body, id) => {
-    const me = needStaff(ctx, 'admin', 'auctioneer');
-    const i = getItem(id);
-    if (i.status !== 'pending') throw new HttpError(409, '審査待ちの商品だけを審査できます');
-    // 承認する人は、登録した人と別のアカウント（FR-ITEM-005）。最後に内容を変えた人も、承認できないようにしている
-    if (i.created_by === me.id || i.edited_by === me.id) throw new HttpError(403, '自分が登録・変更した商品は、審査できません。ほかのスタッフに依頼してください');
-    const decision = body.decision === 'approved' ? 'approved' : body.decision === 'rejected' ? 'rejected' : null;
-    if (!decision) throw bad('承認か却下かを選んでください');
-    const reason = String(body.reason ?? '').trim().slice(0, 1000);
-    const warnings = warningsFor(i);
-    // 警告が出ている商品は、判断の理由がないと承認できない（FR-ITEM-006）
-    if (decision === 'approved' && warnings.length && !reason) throw bad('出品禁止の言葉が含まれています。承認する場合は、判断の理由を入力してください', { warnings });
-    if (decision === 'rejected' && !reason) throw bad('却下の理由を入力してください');
-    db.prepare('UPDATE items SET status = ?, updated_at = ? WHERE id = ?').run(decision, nowMs(), id);
-    db.prepare('INSERT INTO item_reviews (item_id, reviewer_id, decision, reason, warnings, at) VALUES (?,?,?,?,?,?)').run(id, me.id, decision, reason, JSON.stringify(warnings), nowMs());
-    audit(ctx, 'item.review', { target: `item:${id}`, before: { status: 'pending' }, after: { status: decision, warnings }, reason });
-    return { ok: true };
-  });
-  route('GET', '/api/items/:id/reviews', (ctx, body, id) => {
-    needStaff(ctx, 'admin', 'auctioneer');
-    return { reviews: db.prepare('SELECT r.decision, r.reason, r.warnings, r.at, s.name AS reviewer FROM item_reviews r JOIN staff_accounts s ON s.id = r.reviewer_id WHERE r.item_id = ? ORDER BY r.id').all(id).map((r) => ({ ...r, warnings: JSON.parse(r.warnings) })) };
-  });
-  // 写真（FR-ITEM-002）。本体をそのまま送る
-  route('POST', '/api/items/:id/photos', (ctx, body, id) => {
-    const me = needStaff(ctx, 'admin', 'auctioneer');
-    const i = getItem(id);
-    if (db.prepare('SELECT COUNT(*) AS n FROM item_photos WHERE item_id = ?').get(id).n >= PHOTO_MAX_COUNT) throw bad(`写真は、1商品 ${PHOTO_MAX_COUNT} 枚までです`);
-    const kind = sniffImage(ctx.raw);
-    if (!kind) throw bad('写真は、JPEG・PNG・WebP のどれかにしてください');
-    const file = `${randomToken(16)}.${kind.ext}`;
-    fs.writeFileSync(path.join(uploadDir, file), ctx.raw, { mode: 0o640 });
-    db.prepare('INSERT INTO item_photos (item_id, file, mime, bytes, sort) VALUES (?,?,?,?,?)').run(id, file, kind.mime, ctx.raw.length, Date.now() % 1e9);
-    // 写真も商品の内容なので、承認済みなら審査待ちに戻す
-    if (i.status === 'approved') db.prepare("UPDATE items SET status = 'pending', edited_by = ?, updated_at = ? WHERE id = ?").run(me.id, nowMs(), id);
-    else db.prepare('UPDATE items SET edited_by = ?, updated_at = ? WHERE id = ?').run(me.id, nowMs(), id);
-    audit(ctx, 'item.photo_add', { target: `item:${id}`, after: { file, bytes: ctx.raw.length } });
-    return { ok: true, photos: photosOf(id) };
-  });
-  route('POST', '/api/photos/:id/delete', (ctx, body, id) => {
-    const me = needStaff(ctx, 'admin', 'auctioneer');
-    const p = db.prepare('SELECT * FROM item_photos WHERE id = ?').get(id);
-    if (!p) throw new HttpError(404, '写真が見つかりません');
-    const i = getItem(p.item_id);
-    db.prepare('DELETE FROM item_photos WHERE id = ?').run(id);
-    fs.rmSync(path.join(uploadDir, p.file), { force: true });
-    db.prepare('UPDATE items SET status = ?, edited_by = ?, updated_at = ? WHERE id = ?').run(i.status === 'approved' ? 'pending' : i.status, me.id, nowMs(), i.id);
-    audit(ctx, 'item.photo_delete', { target: `item:${i.id}`, before: { file: p.file } });
-    return { ok: true, photos: photosOf(i.id) };
-  });
-
-  // ------------------------------------------------------------ カタログ（FR-ITEM-003。未登録の人も見られる）
-  route('GET', '/api/catalog', () => ({
-    orgName: setting('org_name'),
-    shippingNotice: setting('shipping_notice'), // 送料が含まれないことの表示（FR-SHIP-003）
-    returnPolicy: setting('return_policy'),     // 返品特約の表示（FR-LEG-002）
-    events: db.prepare("SELECT * FROM events WHERE status = 'published' ORDER BY starts_at").all().map((e) => ({
-      ...eventView(e),
-      // 承認済みの商品だけ。出品順に並べる。番号は、出品順に 1 から（FR-NUM-001）
-      items: db.prepare("SELECT * FROM items WHERE event_id = ? AND status = 'approved' ORDER BY sort_order, id").all(e.id).map((i, n) => ({ no: n + 1, ...itemView(i) })),
-    })),
-  }));
+  // 送料が含まれないことの表示（FR-SHIP-003）と、返品特約の表示（FR-LEG-002）。だれでも見られる
+  route('GET', '/api/terms', () => ({ orgName: setting('org_name'), shippingNotice: setting('shipping_notice'), returnPolicy: setting('return_policy') }));
 
   // ------------------------------------------------------------ 主催者設定（FR-ORG-001 の一部）・監査ログ・知らせ
   route('GET', '/api/settings', (ctx) => {
@@ -578,7 +436,7 @@ export function createApi({ store, config, nowMs }) {
         if (size > limit) { chunks.length = 0; if (size > limit * 2) req.destroy(); return; }
         chunks.push(c);
       });
-      req.on('end', () => (size > limit ? reject(new HttpError(413, limit === PHOTO_MAX_BYTES ? '写真は、1枚 10MB までです' : '送信が大きすぎます')) : resolve(Buffer.concat(chunks))));
+      req.on('end', () => (size > limit ? reject(new HttpError(413, '送信が大きすぎます')) : resolve(Buffer.concat(chunks))));
       req.on('close', () => reject(new HttpError(413, '送信が大きすぎます')));
       req.on('error', reject);
     });
@@ -588,23 +446,10 @@ export function createApi({ store, config, nowMs }) {
     res.end(JSON.stringify(obj));
   }
 
-  /** 写真を配る。スタッフか、公開中の開催の承認済みの商品の写真だけ */
-  function serveUpload(ctx) {
-    const file = path.basename(ctx.url.pathname);
-    const p = db.prepare('SELECT p.*, i.status AS item_status, e.status AS event_status FROM item_photos p JOIN items i ON i.id = p.item_id LEFT JOIN events e ON e.id = i.event_id WHERE p.file = ?').get(file);
-    if (!p || !(ctx.staff || (p.item_status === 'approved' && p.event_status === 'published'))) { ctx.res.writeHead(404).end('not found'); return; }
-    fs.readFile(path.join(uploadDir, file), (err, data) => {
-      if (err) return ctx.res.writeHead(404).end('not found');
-      ctx.res.writeHead(200, { 'content-type': p.mime, 'cache-control': ctx.staff ? 'no-store' : 'public, max-age=3600' });
-      ctx.res.end(data);
-    });
-  }
-
   async function handle(req, res, url) {
     const ctx = { req, res, url, ip: req.socket.remoteAddress };
     try {
       loadSession(ctx);
-      if (url.pathname.startsWith('/uploads/')) return serveUpload(ctx);
       const found = routes.map((r) => ({ r, m: r.re.exec(url.pathname) })).filter((x) => x.m);
       const hit = found.find((x) => x.r.method === req.method);
       if (!hit) throw new HttpError(found.length ? 405 : 404, found.length ? 'この方法では呼び出せません' : '見つかりません');
@@ -617,13 +462,10 @@ export function createApi({ store, config, nowMs }) {
           try { host = new URL(origin).host; } catch { /* 形の崩れた Origin は断る */ }
           if (host !== req.headers.host && !config.allowedOrigins.includes(origin)) throw new HttpError(403, 'このページからは操作できません');
         }
-        const isPhoto = /\/photos$/.test(url.pathname);
-        ctx.raw = await readBody(req, isPhoto ? PHOTO_MAX_BYTES : 64 * 1024);
-        if (!isPhoto) {
-          if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) throw new HttpError(415, 'JSON で送ってください');
-          try { body = ctx.raw.length ? JSON.parse(ctx.raw.toString('utf8')) : {}; } catch { throw bad('JSON として読めません'); }
-          if (body === null || typeof body !== 'object' || Array.isArray(body)) throw bad('JSON のオブジェクトで送ってください');
-        }
+        const raw = await readBody(req, 64 * 1024);
+        if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) throw new HttpError(415, 'JSON で送ってください');
+        try { body = raw.length ? JSON.parse(raw.toString('utf8')) : {}; } catch { throw bad('JSON として読めません'); }
+        if (body === null || typeof body !== 'object' || Array.isArray(body)) throw bad('JSON のオブジェクトで送ってください');
       }
       const result = await hit.r.handler(ctx, body, ...hit.m.slice(1).map(Number));
       if (result?.redirect) { res.writeHead(302, { location: result.redirect }); return res.end(); }

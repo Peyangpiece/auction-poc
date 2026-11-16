@@ -1,4 +1,4 @@
-// MVP の 1（会員登録・認証・スタッフ）と 2（商品登録・カタログ・審査）のデータ。
+// MVP の 1（会員登録・認証・スタッフ）と、開催・主催者設定・監査ログのデータ。商品は進行コンソールからその場で登録する（PoC の lots）。
 // PoC の入札用の表（members・staff・lots・bids）とは別に持つ。入札との結び付け（参加手続き・参加番号）は MVP の 3 で行う。
 export const MVP_SCHEMA = `
 -- 会員（FR-AUTH-001・002・003・009・011）
@@ -56,33 +56,6 @@ CREATE TABLE IF NOT EXISTS events (
   status TEXT NOT NULL DEFAULT 'preparing' CHECK (status IN ('preparing','published')),
   created_at REAL NOT NULL
 );
--- 商品（FR-ITEM-001〜009）
-CREATE TABLE IF NOT EXISTS items (
-  id INTEGER PRIMARY KEY,
-  title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
-  quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
-  start_price INTEGER NOT NULL CHECK (start_price > 0),   -- 税込
-  unit_override INTEGER,                  -- 入札単位の上書き（任意）
-  reserve_price INTEGER,                  -- 最低落札額（任意。参加者には見せない。発注者の指示による）
-  size TEXT NOT NULL DEFAULT '', condition TEXT NOT NULL DEFAULT '', surplus_info TEXT NOT NULL DEFAULT '',
-  event_id INTEGER REFERENCES events(id),
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','pending','approved','rejected')),
-  created_by INTEGER NOT NULL REFERENCES staff_accounts(id),
-  edited_by INTEGER NOT NULL REFERENCES staff_accounts(id),   -- 最後に内容を変えた人
-  created_at REAL NOT NULL, updated_at REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS item_photos (
-  id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES items(id),
-  file TEXT NOT NULL UNIQUE, mime TEXT NOT NULL, bytes INTEGER NOT NULL, sort INTEGER NOT NULL DEFAULT 0
-);
--- 審査の記録（FR-ITEM-007）
-CREATE TABLE IF NOT EXISTS item_reviews (
-  id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES items(id),
-  reviewer_id INTEGER NOT NULL REFERENCES staff_accounts(id),
-  decision TEXT NOT NULL CHECK (decision IN ('approved','rejected')),
-  reason TEXT NOT NULL DEFAULT '', warnings TEXT NOT NULL DEFAULT '[]', at REAL NOT NULL
-);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 -- 主催者管理者への知らせ（送信の失敗など）
 CREATE TABLE IF NOT EXISTS notices (id INTEGER PRIMARY KEY, at REAL NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL);
@@ -96,8 +69,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log BEGIN SELECT RAISE(ABORT, 'audit_log は追記だけ'); END;
 CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log BEGIN SELECT RAISE(ABORT, 'audit_log は追記だけ'); END;
-CREATE TRIGGER IF NOT EXISTS reviews_no_update BEFORE UPDATE ON item_reviews BEGIN SELECT RAISE(ABORT, 'item_reviews は追記だけ'); END;
-CREATE TRIGGER IF NOT EXISTS reviews_no_delete BEFORE DELETE ON item_reviews BEGIN SELECT RAISE(ABORT, 'item_reviews は追記だけ'); END;
 `;
 
 // 既定の文言。法務の確認が済んでいないので、どれも仮のもの（本仕様 FR-LEG-002、OQ-22 は【要確認】）

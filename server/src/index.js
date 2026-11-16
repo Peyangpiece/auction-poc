@@ -114,7 +114,7 @@ const auction = new Auction({ store, config, metrics, broadcast, stream, crashPo
 const recovered = auction.recover();
 if (recovered.length) console.log('[recovery]', JSON.stringify(recovered));
 
-// 会員登録・ログイン・スタッフ・商品・審査・カタログ（MVP の 1・2）
+// 会員登録・ログイン・スタッフ・開催・設定（MVP の 1）。商品は、進行コンソールからその場で登録する
 const api = createApi({ store, config, nowMs });
 
 // ---------------------------------------------------------------- HTTP
@@ -156,7 +156,7 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, agent: stream.view().agentConnected }));
   }
   if (url.pathname === '/hooks/ivs' && req.method === 'POST') return handleEventBridge(req, res);
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) return api.handle(req, res, url);
+  if (url.pathname.startsWith('/api/')) return api.handle(req, res, url);
   if (req.method !== 'GET') return res.writeHead(405).end();
 
   const name = url.pathname === '/' ? 'index.html' : path.basename(url.pathname);
