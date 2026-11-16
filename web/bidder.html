@@ -170,7 +170,7 @@
     <p class="co">株式会社NEWS</p>
     <h1>ライブオークション</h1>
     <ul>
-      <li>「うりきり」と「権利」のランプが両方点いている人が落札します。</li>
+      <li>「うりきり」と「権利」のランプが両方点いている人が落札します。「うりきり」は、出品者が決めた最低落札額に届くと点きます（金額は表示されません）。</li>
       <li>上回られたときは、音と画面の色でお知らせします。「参加する」を押すと、確認の音が鳴ります。</li>
       <li>入札額は税込で、参加者全員に公開されます。</li>
       <li>締めは進行役の操作で確定します。通信や映像の遅れにより、締めの直前の入札が間に合わないことがあります。</li>
@@ -219,7 +219,7 @@
       </div>
       <p class="board-result" id="result" role="status"></p>
       <div class="lamps">
-        <div class="lamp" id="urikiri" role="img"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub">最低落札額なし</small></div>
+        <div class="lamp" id="urikiri" role="img"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub">最低落札額に未達</small></div>
         <div class="lamp" id="right" role="img"><span class="bulb"></span><b id="rightLabel">権利</b><small class="num" id="rightSub">最高入札者なし</small></div>
       </div>
       <p id="msg" role="status" aria-live="polite"></p>
@@ -233,7 +233,7 @@
     </section>
 
     <div class="fine">
-      <p class="note">「うりきり」と「権利」の両方が点いている人が落札します。落札価格に送料は含まれません。</p>
+      <p class="note">「うりきり」と「権利」の両方が点いている人が落札します。最低落札額の金額は表示されません。落札価格に送料は含まれません。</p>
       <p class="note" id="contact"></p>
       <details>
         <summary>検証用の情報</summary>
@@ -339,7 +339,7 @@ function render() {
     $('lotNo').textContent = ''; $('title').textContent = '次のロットをお待ちください';
     $('status').textContent = '待機中'; $('status').dataset.on = '';
     $('priceLabel').textContent = '現在価格'; $('price').textContent = ''; $('result').textContent = '次のロットの開始をお待ちください';
-    setLamp('urikiri', '', 'うりきり', '最低落札額なし'); setLamp('right', '', '権利', '最高入札者なし');
+    setLamp('urikiri', '', 'うりきり', '最低落札額に未達'); setLamp('right', '', '権利', '最高入札者なし');
     $('bid').disabled = true; $('bid').textContent = '入札'; S.shownPrice = null; return;
   }
   const st = lot.status;
@@ -359,7 +359,8 @@ function render() {
 
   // 「うりきり」: 最低落札額（公開）に届いていて、この価格で締めれば売れる。「権利」: 最高入札者。両方が点いた人が落札する
   const urikiri = !!lot.urikiri;
-  setLamp('urikiri', urikiri ? 'on' : '', 'うりきり', lot.reservePrice === null ? '最低落札額なし' : `最低落札額 ${yen(lot.reservePrice)}`);
+  // 最低落札額の金額は表示しない（端末にも届かない）。分かるのは、届いたかどうかだけ
+  setLamp('urikiri', urikiri ? 'on' : '', 'うりきり', urikiri ? (ended ? '最低落札額に到達' : 'この価格で売り切り') : '最低落札額に未達');
   const holds = mine && st !== 'unsold';
   setLamp('right', holds ? (st === 'sold' ? 'won' : 'on') : '', holds && st === 'sold' ? '落札' : '権利',
     lot.highestPaddle === null ? '最高入札者なし' : mine ? `あなた（${lot.highestPaddle}番）` : `最高入札者 ${lot.highestPaddle}番`);
@@ -593,7 +594,8 @@ $('bid').addEventListener('click', async () => {
   const shown = localNow();
   say(res.accepted ? `受理されました：${yen(res.amount)}` : (REJECT[res.code]?.(res) ?? res.code), res.accepted ? 'ok' : 'ng');
   Object.assign(lot, { currentPrice: res.currentPrice, minBid: res.minBid });
-  if (res.accepted) { lot.highestPaddle = S.paddle; lot.urikiri = lot.reservePrice === null || res.currentPrice >= lot.reservePrice; }
+  if (res.accepted) lot.highestPaddle = S.paddle;
+  if (typeof res.urikiri === 'boolean') lot.urikiri = res.urikiri;
   render();
   // ボタンを押してから、受理・拒否が画面に出るまで（P3-7）
   const ms = Math.round(shown - sent);

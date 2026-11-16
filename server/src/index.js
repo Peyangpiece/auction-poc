@@ -20,11 +20,26 @@ const metrics = new Metrics(config.metricsDir);
 const clients = new Set(); // { ws, role: 'member'|'auctioneer', member?, staff?, id }
 let connSeq = 0;
 
-/** 全端末へ同じ内容を送る。会場とオンラインで分けない。送り出した時刻を返す。 */
+/**
+ * 会員に送る前に、最低落札額の金額を必ず落とす。
+ * 会員が知るのは「うりきり」（届いたかどうか）だけで、金額は進行役にしか送らない。
+ * ロットを含むメッセージはすべてここを通す（1か所で落とすので、送り先ごとの書き忘れが起きない）。
+ */
+const publicLot = ({ reservePrice, ...rest }) => rest;
+function forMember(msg) {
+  if (!msg.lot && !msg.lots) return msg;
+  const out = { ...msg };
+  if (out.lot) out.lot = publicLot(out.lot);
+  if (out.lots) out.lots = out.lots.map(publicLot);
+  return out;
+}
+
+/** 全端末へ送る。入札額・価格・結果は、会場とオンラインで分けない。送り出した時刻を返す。 */
 function broadcast(msg) {
   const sentAt = nowMs();
-  const text = JSON.stringify({ ...msg, sentAt });
-  for (const c of clients) if (c.ws.readyState === 1) c.ws.send(text);
+  const staffText = JSON.stringify({ ...msg, sentAt });
+  const memberText = msg.lot || msg.lots ? JSON.stringify({ ...forMember(msg), sentAt }) : staffText;
+  for (const c of clients) if (c.ws.readyState === 1) c.ws.send(c.role === 'auctioneer' ? staffText : memberText);
   return nowMs();
 }
 
@@ -164,19 +179,20 @@ function onClient(ws, req) {
       conn.staff = staff ?? null;
       clients.add(conn);
       metrics.write('connect', { conn: conn.id, role: conn.role, paddle: member?.paddle_no ?? null, label: msg.label ?? null });
-      send({
+      const shape = (m) => (conn.role === 'auctioneer' ? m : forMember(m));
+      send(shape({
         type: 'welcome', role: conn.role, paddle: member?.paddle_no ?? null, name: (member ?? staff).name,
         conn: conn.id, serverTime: nowMs(), stream: stream.view(), allowCrash: config.allowCrash,
         playerScriptUrl: config.ivsPlayerScriptUrl, venueContact: config.venueContact,
         commentMaxLength: config.commentMaxLength, comments: store.q.recentComments.all(), ...auction.snapshot(),
-      });
+      }));
       return presence();
     }
     if (!conn.role) return send({ type: 'error', message: '先に hello を送ってください' });
 
     switch (msg.type) {
       case 'sync': // 再接続のあとなどに、最新の状態を取り直す（FR-UI-002）
-        return send({ type: 'snapshot', serverTime: nowMs(), stream: stream.view(), comments: store.q.recentComments.all(), ...auction.snapshot() });
+        return send((conn.role === 'auctioneer' ? (m) => m : forMember)({ type: 'snapshot', serverTime: nowMs(), stream: stream.view(), comments: store.q.recentComments.all(), ...auction.snapshot() }));
       case 'bid':
         // 主催者側のスタッフは入札できない（FR-CON-004）
         if (conn.role !== 'member') return send({ type: 'error', message: 'スタッフは入札できません' });

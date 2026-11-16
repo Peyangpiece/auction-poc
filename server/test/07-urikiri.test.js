@@ -1,4 +1,5 @@
-// 「うりきり」: 最低落札額（全員に公開）に届いているか。落札の条件は「権利」と「うりきり」の両方。
+// 「うりきり」: 最低落札額に届いているか。落札の条件は「権利」と「うりきり」の両方。
+// 最低落札額の金額は、進行役にだけ送る。会員の端末には、どのメッセージでも届かない。
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, startServer, connectAll, createLot, lotLog, cleanup } from './helpers.js';
@@ -11,13 +12,17 @@ before(async () => {
 });
 after(async () => { await srv.stop(); cleanup(ctx); });
 
-test('最低落札額は全員に見え、届いたときに「うりきり」になる。届いて締めれば落札', async () => {
+test('最低落札額の金額は会員に届かず、届いたときに「うりきり」だけが伝わる。届いて締めれば落札', async () => {
   // ロットの追加は全員に知らせる。会員の接続に届くのを待ってから確かめる（進行役への応答とは別の接続なので、順序は保証されない）
-  const seen = m[0].waitFor((x) => x.type === 'lot' && x.lot.reservePrice === 11000);
+  // 会員に届くメッセージをすべて控えておき、最後に金額が1度も含まれていないことを確かめる
+  const heard = [];
+  const tap = (msg) => heard.push(JSON.stringify(msg));
+  m[2].handlers.add(tap);
+  const seen = m[0].waitFor((x) => x.type === 'lot' && x.lot.startPrice === 9500 && x.lot.urikiri === false);
   const lot = await createLot(A, 9500, null, 'テスト品', 11000);
   await seen;
-  // 会員の画面にも、最低落札額の金額そのものが届いている（隠さない）
-  assert.equal(m[0].lots.get(lot.id).reservePrice, 11000);
+  assert.equal(lot.reservePrice, 11000); // 進行役には金額が返る
+  assert.equal('reservePrice' in m[0].lots.get(lot.id), false); // 会員の端末には、項目そのものが届かない
   assert.equal(m[0].lots.get(lot.id).urikiri, false);
   await A.cmd('start', { lotId: lot.id });
 
@@ -31,6 +36,18 @@ test('最低落札額は全員に見え、届いたときに「うりきり」�
 
   const res = await A.cmd('close', { lotId: lot.id });
   assert.deepEqual([res.status, res.reason, res.amount, res.paddle], ['sold', null, 11000, m[0].paddle]);
+
+  // つなぎ直したとき・状態を取り直したときにも、金額は届かない
+  m[2].send({ type: 'sync' });
+  const snap = await m[2].waitFor((x) => x.type === 'snapshot');
+  assert.ok(snap.lots.every((l) => !('reservePrice' in l)));
+  m[2].handlers.delete(tap);
+  assert.ok(heard.length >= 5);
+  assert.ok(heard.every((t) => !t.includes('reservePrice')), '会員に届いたメッセージに、最低落札額の項目が含まれている');
+  // 進行役の取り直しには含まれる
+  A.send({ type: 'sync' });
+  const staffSnap = await A.waitFor((x) => x.type === 'snapshot');
+  assert.equal(staffSnap.lots.find((l) => l.id === lot.id).reservePrice, 11000);
 });
 
 test('入札があっても、最低落札額に届かないまま締めると流札になる', async () => {

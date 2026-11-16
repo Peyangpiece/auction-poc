@@ -11,7 +11,7 @@ export const TERMINAL = new Set(['sold', 'unsold', 'not_held']);
 
 /**
  * 「うりきり」: この価格で締めれば売れる状態か。
- * 最低落札額（全員に公開する金額）がないロットは、いつでも売れる。あるロットは、現在価格がその額以上になったとき。
+ * 最低落札額（出品者が決める。参加者には金額を見せない）がないロットは、いつでも売れる。あるロットは、現在価格がその額以上になったとき。
  */
 export function reserveMet(reservePrice, currentPrice) {
   if (reservePrice === null || reservePrice === undefined) return true;
@@ -159,6 +159,7 @@ export class Auction {
     item.reply({
       type: 'bid_result', reqId: item.reqId, lotId: item.lotId, seq: item.seq, accepted,
       code: accepted ? null : result, amount: item.amount, currentPrice, minBid,
+      urikiri: lot ? reserveMet(lot.reserve_price, currentPrice) : null,
       receivedAt: item.receivedAt, sentAt: processedAt,
     });
     const repliedAt = nowMs();
@@ -355,7 +356,8 @@ export class Auction {
       currentPrice: lot.current_price ?? null, // 入札がなければ null（画面には開始価格を出す）
       minBid: minimumBid(lot.start_price, lot.current_price, this.config.incrementTable, lot.unit_override),
       highestPaddle: lot.highest_paddle ?? null,
-      reservePrice: lot.reserve_price ?? null, // 最低落札額。全員に公開する（隠さない）
+      // 最低落札額。進行役だけに送る。会員の端末には金額を送らない（index.js の forMember で必ず落とす）
+      reservePrice: lot.reserve_price ?? null,
       urikiri: reserveMet(lot.reserve_price, lot.current_price),
       closeSeq: lot.close_seq ?? null,
     };
