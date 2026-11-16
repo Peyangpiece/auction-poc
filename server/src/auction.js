@@ -9,6 +9,15 @@ import { minimumBid, isOnLadder, validateTable } from './ladder.js';
 
 export const TERMINAL = new Set(['sold', 'unsold', 'not_held']);
 
+/**
+ * 「うりきり」: この価格で締めれば売れる状態か。
+ * 最低落札額（全員に公開する金額）がないロットは、いつでも売れる。あるロットは、現在価格がその額以上になったとき。
+ */
+export function reserveMet(reservePrice, currentPrice) {
+  if (reservePrice === null || reservePrice === undefined) return true;
+  return currentPrice !== null && currentPrice !== undefined && currentPrice >= reservePrice;
+}
+
 export class Auction {
   /**
    * @param {object} deps
@@ -158,7 +167,7 @@ export class Auction {
     if (accepted) {
       broadcastAt = this.broadcast({
         type: 'price', lotId: item.lotId, seq: item.seq, amount: item.amount, paddle: item.member.paddle_no,
-        receivedAt: item.receivedAt, currentPrice, minBid,
+        receivedAt: item.receivedAt, currentPrice, minBid, urikiri: reserveMet(lot.reserve_price, currentPrice),
       });
     }
     this.metrics.write('bid', {
@@ -299,17 +308,21 @@ export class Auction {
   #finalize(lot, closeSeq, actor, data = {}, item = null) {
     const { q, tx } = this.store;
     const fresh = q.lot.get(lot.id);
-    const status = fresh.current_bid_seq ? 'sold' : 'unsold'; // 受理された有効な入札が1件以上あれば落札
+    // 落札の条件: 受理された有効な入札があり（＝最高入札者に「権利」がある）、かつ最低落札額に届いている（＝「うりきり」）
+    const met = reserveMet(fresh.reserve_price, fresh.current_price);
+    const status = fresh.current_bid_seq && met ? 'sold' : 'unsold';
+    const reason = status === 'unsold' ? (fresh.current_bid_seq ? 'reserve_not_met' : 'no_bids') : null;
     const at = nowMs();
     tx(() => {
-      q.finalize.run(status, closeSeq, fresh.current_bid_seq, at, lot.id);
+      q.finalize.run(status, closeSeq, status === 'sold' ? fresh.current_bid_seq : null, at, lot.id);
       q.insertEvent.run(this.nextSeq(), lot.id, 'finalized', at, actor, JSON.stringify({
-        status, closeSeq, winnerBidSeq: fresh.current_bid_seq, amount: fresh.current_price, paddle: fresh.highest_paddle, ...data,
+        status, reason, reservePrice: fresh.reserve_price, closeSeq, winnerBidSeq: status === 'sold' ? fresh.current_bid_seq : null,
+        amount: fresh.current_price, paddle: fresh.highest_paddle, ...data,
       }));
     });
     const finalizedAt = nowMs();
     const result = {
-      status, closeSeq, paddle: fresh.highest_paddle ?? null, amount: fresh.current_price ?? null,
+      status, reason, closeSeq, paddle: fresh.highest_paddle ?? null, amount: fresh.current_price ?? null,
     };
     // 確定したら、すぐに全員へ結果を送る（FR-CLS-003）
     const sentAt = this.broadcast({
@@ -342,6 +355,8 @@ export class Auction {
       currentPrice: lot.current_price ?? null, // 入札がなければ null（画面には開始価格を出す）
       minBid: minimumBid(lot.start_price, lot.current_price, this.config.incrementTable, lot.unit_override),
       highestPaddle: lot.highest_paddle ?? null,
+      reservePrice: lot.reserve_price ?? null, // 最低落札額。全員に公開する（隠さない）
+      urikiri: reserveMet(lot.reserve_price, lot.current_price),
       closeSeq: lot.close_seq ?? null,
     };
   }
@@ -358,8 +373,16 @@ export class Auction {
     };
   }
 
-  createLot({ title, startPrice, unitOverride = null }) {
-    const info = this.store.q.insertLot.run(String(title), Number(startPrice), unitOverride, nowMs());
+  createLot({ title, startPrice, unitOverride = null, reservePrice = null }) {
+    const start = Number(startPrice);
+    if (!Number.isSafeInteger(start) || start <= 0) throw new Error('開始価格は1円以上の整数にしてください');
+    let reserve = reservePrice === null || reservePrice === undefined || reservePrice === '' ? null : Number(reservePrice);
+    if (reserve !== null) {
+      if (!Number.isSafeInteger(reserve) || reserve < start) throw new Error('最低落札額は、開始価格以上の整数にしてください');
+      if (!isOnLadder(reserve, start, this.config.incrementTable, unitOverride)) throw new Error('最低落札額は、入札できる金額（価格の段）に合わせてください');
+      if (reserve === start) reserve = null; // 開始価格と同じなら、最初の入札で必ず届くので、設定なしと同じ
+    }
+    const info = this.store.q.insertLot.run(String(title), start, unitOverride, reserve, nowMs());
     const lot = this.lotView(Number(info.lastInsertRowid));
     this.broadcast({ type: 'lot', lot });
     return lot;

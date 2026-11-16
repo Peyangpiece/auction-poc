@@ -57,8 +57,8 @@ export async function connectAll(srv, ctx, n) {
   return { auctioneer, members };
 }
 
-export async function createLot(auctioneer, startPrice, unitOverride = null, title = 'テスト品') {
-  const res = await auctioneer.cmd('create_lot', { title, startPrice, unitOverride });
+export async function createLot(auctioneer, startPrice, unitOverride = null, title = 'テスト品', reservePrice = null) {
+  const res = await auctioneer.cmd('create_lot', { title, startPrice, unitOverride, reservePrice });
   if (!res.ok) throw new Error(res.message);
   return res.lot;
 }

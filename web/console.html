@@ -23,7 +23,9 @@
   #title { font-size: 20px; font-weight: 800; overflow-wrap: anywhere; }
   #price { font-size: clamp(48px, 7vw, 76px); font-weight: 800; line-height: 1.05; letter-spacing: -.02em; margin: 4px 0 12px; }
   #price small { font-size: 16px; font-weight: 700; color: var(--ink-3); letter-spacing: 0; margin-left: 8px; }
-  .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 16px; }
+  .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 16px; }
+  .facts dd small { display: block; font-size: 12px; font-weight: 700; color: var(--ink-3); }
+  .facts dd small[data-on="1"] { color: var(--ok); }
   .facts div { background: var(--surface-2); border-radius: var(--r-sm); padding: 8px 12px; }
   .facts dt { font-size: 12px; font-weight: 700; color: var(--ink-3); }
   .facts dd { margin: 0; font-size: 20px; font-weight: 800; }
@@ -62,8 +64,8 @@
   tr.focus td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 0; }
   td .btn { min-height: 40px; padding: 6px 14px; font-size: 14px; }
   #lotsEmpty { color: var(--ink-3); font-size: 14px; padding: 12px 0; }
-  .addlot { display: grid; grid-template-columns: minmax(0, 1fr) 140px auto; gap: 8px; align-items: end; margin-top: 16px; }
-  @media (max-width: 520px) { .addlot { grid-template-columns: minmax(0, 1fr); } }
+  .addlot { display: grid; grid-template-columns: minmax(0, 1fr) 130px 150px auto; gap: 8px; align-items: end; margin-top: 16px; }
+  @media (max-width: 640px) { .addlot { grid-template-columns: minmax(0, 1fr); } }
 
   .cmtlist { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; overscroll-behavior: contain; }
   .cmtlist li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; overflow-wrap: anywhere; }
@@ -94,8 +96,9 @@
       <p id="title">進行中のロットはありません</p>
       <div class="num" id="price" aria-live="polite">—</div>
       <dl class="facts num">
-        <div><dt>最低入札額</dt><dd id="min">—</dd></div>
+        <div><dt>次の入札額</dt><dd id="min">—</dd></div>
         <div><dt>最高入札者</dt><dd id="highest">—</dd></div>
+        <div><dt>最低落札額（公開）</dt><dd><span id="reserve">—</span><small id="urikiri"></small></dd></div>
       </dl>
       <div class="alert" id="warn" role="alert">配信が始まりません（60秒経過）<span>「映像なしで開始」か「待機に戻す」を選んでください。</span></div>
       <div class="actions">
@@ -116,12 +119,13 @@
     <section class="card" aria-labelledby="lotsTitle">
       <div class="cardhead"><h2 id="lotsTitle" class="eyebrow">ロット一覧</h2></div>
       <div class="tablewrap">
-        <table><thead><tr><th scope="col">番号</th><th scope="col">商品</th><th scope="col">開始価格</th><th scope="col">状態</th><th scope="col">結果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="lots" class="num"></tbody></table>
+        <table><thead><tr><th scope="col">番号</th><th scope="col">商品</th><th scope="col">開始価格</th><th scope="col">最低落札額</th><th scope="col">状態</th><th scope="col">結果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="lots" class="num"></tbody></table>
       </div>
       <p id="lotsEmpty">ロットがまだありません。下の欄から追加してください。</p>
       <form class="addlot" id="addLot">
         <label class="field">商品名<input class="input" id="newTitle" name="title" value="テスト品" autocomplete="off" required></label>
         <label class="field">開始価格（円・税込）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" value="9500" autocomplete="off" required></label>
+        <label class="field">最低落札額（任意・公開）<input class="input num" id="newReserve" name="reserve" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="なし…"></label>
         <button class="btn" id="create" type="submit">ロットを追加</button>
       </form>
     </section>
@@ -220,6 +224,9 @@ function render() {
   if (lot && lot.currentPrice === null) { const sm = document.createElement('small'); sm.textContent = '開始価格・入札なし'; $('price').appendChild(sm); }
   $('min').textContent = lot && lot.status !== 'sold' && lot.status !== 'unsold' ? yen(lot.minBid) : '—';
   $('highest').textContent = lot?.highestPaddle ? `${lot.highestPaddle}番` : '—';
+  $('reserve').textContent = lot ? (lot.reservePrice === null ? 'なし' : yen(lot.reservePrice)) : '—';
+  $('urikiri').textContent = lot ? (lot.urikiri ? 'うりきり（締めれば売れる）' : 'うりきり前（締めると流札）') : '';
+  $('urikiri').dataset.on = lot?.urikiri ? '1' : '';
   $('warn').style.display = st === 'preparing_warn' ? 'grid' : 'none';
   $('b_close').disabled = st !== 'open'; $('b_suspend').disabled = st !== 'open';
   $('b_resume').disabled = st !== 'suspended'; $('b_cancel').disabled = st !== 'suspended';
@@ -233,8 +240,8 @@ function render() {
   for (const l of S.lots.values()) {
     const tr = document.createElement('tr');
     if (l.id === S.focus) tr.className = 'focus';
-    const cells = [l.lotNo, l.title, yen(l.startPrice), STATE_LABEL[l.status],
-      l.status === 'sold' ? `${l.highestPaddle}番 ${yen(l.currentPrice)}` : ''];
+    const cells = [l.lotNo, l.title, yen(l.startPrice), l.reservePrice === null ? 'なし' : yen(l.reservePrice), STATE_LABEL[l.status],
+      l.status === 'sold' ? `${l.highestPaddle}番 ${yen(l.currentPrice)}` : l.status === 'unsold' && l.currentPrice !== null ? '最低落札額に届かず' : ''];
     for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
     const td = document.createElement('td');
     if (l.status === 'waiting') {
@@ -272,7 +279,7 @@ async function cmd(action, extra = {}) {
   const res = await link.request(reqId, { type: 'cmd', reqId, action, ...extra, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
   if (!res) log(`${action}: 応答なし`);
   else if (!res.ok) log(`${action}: 拒否 — ${res.message}`);
-  else log(`${action}: OK${res.status ? `（${STATE_LABEL[res.status]} ${res.paddle ?? ''} ${res.amount ? yen(res.amount) : ''}）` : ''} ${Math.round(res.clientRecvAt - sent)}ms`);
+  else log(`${action}: OK${res.status ? `（${STATE_LABEL[res.status]}${res.reason === 'reserve_not_met' ? '・最低落札額に届かず' : ''} ${res.paddle ?? ''} ${res.amount ? yen(res.amount) : ''}）` : ''} ${Math.round(res.clientRecvAt - sent)}ms`);
   return res;
 }
 // 確認と理由の入力は、ブラウザ標準の prompt / confirm ではなく、画面の中のダイアログで行う
@@ -317,7 +324,7 @@ document.querySelectorAll('[data-crash]').forEach((b) => b.addEventListener('cli
 document.querySelectorAll('[data-mark]').forEach((b) => b.addEventListener('click', () => cmd('mark', { label: $('markLabel').value || 'unnamed', phase: b.dataset.mark })));
 $('markForm').addEventListener('submit', (ev) => ev.preventDefault());
 $('autoForm').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('set_auto_stop', { ms: Number($('autoSec').value) * 1000 }); });
-$('addLot').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('create_lot', { title: $('newTitle').value, startPrice: Number($('newPrice').value) }); });
+$('addLot').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('create_lot', { title: $('newTitle').value, startPrice: Number($('newPrice').value), reservePrice: $('newReserve').value === '' ? null : Number($('newReserve').value) }); });
 
 function onMessage(msg, at) {
   switch (msg.type) {
@@ -340,7 +347,7 @@ function onMessage(msg, at) {
     }
     case 'price': {
       const lot = S.lots.get(msg.lotId);
-      if (lot) Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle });
+      if (lot) Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle, urikiri: msg.urikiri });
       if (msg.lotId === S.focus) S.history.push({ seq: msg.seq, amount: msg.amount, received_at: msg.receivedAt, valid: 1, paddle: msg.paddle });
       render(); break;
     }

@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS lots (
   title TEXT NOT NULL,
   start_price INTEGER NOT NULL CHECK (start_price > 0),   -- 税込（FR-BID-010）
   unit_override INTEGER,                                    -- 商品ごとの入札単位の上書き（FR-BID-005）
+  reserve_price INTEGER,                                    -- 最低落札額（全員に公開する。なければ NULL）
   status TEXT NOT NULL DEFAULT 'waiting'
     CHECK (status IN ('waiting','preparing','preparing_warn','open','suspended','sold','unsold','not_held')),
   prep_from TEXT,                 -- 配信準備中に入る前の状態（waiting / suspended）
@@ -81,6 +82,10 @@ export function openDb(dbPath) {
   db.pragma('synchronous = FULL'); // コミットごとに fsync する。電源断でも受理済みの入札を失わない
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  // 以前の版で作ったデータベースに、後から足した列を加える
+  if (!db.prepare(`SELECT 1 FROM pragma_table_info('lots') WHERE name = 'reserve_price'`).get()) {
+    db.exec('ALTER TABLE lots ADD COLUMN reserve_price INTEGER');
+  }
 
   const q = {
     lot: db.prepare(`
@@ -123,8 +128,8 @@ export function openDb(dbPath) {
     memberByToken: db.prepare(`SELECT id, paddle_no, name FROM members WHERE token_hash = ?`),
     staffByToken: db.prepare(`SELECT id, role, name FROM staff WHERE token_hash = ?`),
     insertLot: db.prepare(
-      `INSERT INTO lots (lot_no, title, start_price, unit_override, updated_at)
-       VALUES ((SELECT COALESCE(MAX(lot_no), 0) + 1 FROM lots), ?, ?, ?, ?)`),
+      `INSERT INTO lots (lot_no, title, start_price, unit_override, reserve_price, updated_at)
+       VALUES ((SELECT COALESCE(MAX(lot_no), 0) + 1 FROM lots), ?, ?, ?, ?, ?)`),
     insertMember: db.prepare(`INSERT INTO members (paddle_no, name, token_hash) VALUES (?, ?, ?)`),
     insertComment: db.prepare(`INSERT INTO comments (lot_id, member_id, body, at) VALUES (?, ?, ?, ?)`),
     hideComment: db.prepare(`UPDATE comments SET hidden = 1 WHERE id = ?`),

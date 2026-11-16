@@ -85,7 +85,16 @@
   #right.on::before, #right.won::before { background: currentColor; }
   #right.won { background: var(--ok); color: #fff; box-shadow: none; }
   @media (prefers-color-scheme: dark) { #right.on, #right.won { color: #10131a; } }
-  .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+  .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+  .lamps { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  /* 「うりきり」「権利」は、点いているか消えているかを色だけでなく文字と印でも示す */
+  .lamp { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: var(--r-md); font-weight: 800; font-size: 15px; background: var(--surface-2); color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line); transition: background-color .2s ease, color .2s ease, transform .2s ease; }
+  .lamp::before { content: ""; width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 2px currentColor; }
+  #urikiri.on { background: var(--ok); color: #fff; box-shadow: none; }
+  #urikiri.on::before { background: currentColor; }
+  @media (prefers-color-scheme: dark) { #urikiri.on { color: #10131a; } }
+  #hint { font-size: 14px; font-weight: 700; color: var(--warn); background: var(--warn-soft); border-radius: var(--r-sm); padding: 8px 12px; }
+  #hint:empty { display: none; }
   .facts div { background: var(--surface-2); border-radius: var(--r-sm); padding: 8px 10px; min-width: 0; }
   .facts dt { font-size: 12px; color: var(--ink-3); font-weight: 700; }
   .facts dd { margin: 0; font-size: 17px; font-weight: 800; overflow-wrap: anywhere; }
@@ -194,12 +203,17 @@
     <section class="card pricecard" aria-label="現在の価格">
       <div class="pricehead">
         <p class="eyebrow" id="priceLabel">現在価格</p>
-        <span id="right" aria-live="polite">権利</span>
+        <div class="lamps">
+          <span class="lamp" id="urikiri" aria-live="polite">うりきり</span>
+          <span id="right" aria-live="polite">権利</span>
+        </div>
       </div>
       <div class="num" id="price" aria-live="polite">—</div>
       <div id="banner" role="status"></div>
+      <p id="hint" role="status"></p>
       <dl class="facts num">
-        <div><dt>最低入札額</dt><dd id="min">—</dd></div>
+        <div><dt>次の入札額</dt><dd id="min">—</dd></div>
+        <div><dt>最低落札額（公開）</dt><dd id="reserve">—</dd></div>
         <div><dt>最高入札者</dt><dd id="highest">—</dd></div>
         <div><dt>入札の件数</dt><dd id="count">0件</dd></div>
       </dl>
@@ -296,7 +310,8 @@ function render() {
     $('lotNo').textContent = 'ロット —'; $('title').textContent = '次のロットをお待ちください';
     $('status').textContent = '—'; $('status').dataset.state = '';
     $('price').textContent = '—'; $('min').textContent = '—'; $('highest').textContent = '—'; $('banner').textContent = '';
-    $('bid').disabled = true; $('bid').textContent = '入札'; $('right').className = ''; S.shownPrice = null; return;
+    $('bid').disabled = true; $('bid').textContent = '入札'; $('right').className = ''; S.shownPrice = null;
+    $('urikiri').className = 'lamp'; $('reserve').textContent = '—'; $('hint').textContent = ''; return;
   }
   const mine = lot.highestPaddle !== null && lot.highestPaddle === S.paddle;
   $('lotNo').textContent = `ロット ${lot.lotNo}`;
@@ -312,12 +327,21 @@ function render() {
   S.shownPrice = price;
   $('min').textContent = lot.status === 'sold' || lot.status === 'unsold' ? '—' : yen(lot.minBid);
   $('highest').textContent = lot.highestPaddle === null ? '—' : `${lot.highestPaddle}番`;
-  $('right').className = mine ? (lot.status === 'sold' ? 'won' : 'on') : '';
-  $('right').textContent = mine ? (lot.status === 'sold' ? '落札' : '権利あり') : '権利';
+  $('right').className = mine && lot.status !== 'unsold' ? (lot.status === 'sold' ? 'won' : 'on') : '';
+  $('right').textContent = mine && lot.status !== 'unsold' ? (lot.status === 'sold' ? '落札' : '権利あり') : '権利';
+  // 「うりきり」: 最低落札額（公開）に届いていて、この価格で締めれば売れる状態。落札の条件は「うりきり」と「権利」の両方
+  const urikiri = !!lot.urikiri;
+  const ended = lot.status === 'sold' || lot.status === 'unsold';
+  $('urikiri').className = urikiri ? 'lamp on' : 'lamp';
+  $('urikiri').textContent = urikiri ? 'うりきり' : 'うりきり前';
+  $('reserve').textContent = lot.reservePrice === null ? 'なし' : yen(lot.reservePrice);
+  $('hint').textContent = !ended && !urikiri
+    ? `最低落札額 ${yen(lot.reservePrice)} に届くまでは、最高入札者でも落札になりません。`
+    : '';
   if (lot.status === 'sold') {
     $('banner').textContent = `${lot.highestPaddle}番 落札（${yen(lot.currentPrice)}）`;
     if (mine) document.body.classList.add('won');
-  } else if (lot.status === 'unsold') $('banner').textContent = '流札';
+  } else if (lot.status === 'unsold') $('banner').textContent = lot.currentPrice !== null ? '流札（最低落札額に届きませんでした）' : '流札';
   else if (lot.status === 'suspended') $('banner').textContent = '中断しています。再開をお待ちください';
   else $('banner').textContent = '';
   const watching = S.mode !== 'bid';
@@ -476,7 +500,7 @@ function onMessage(msg, at) {
       const lot = S.lots.get(msg.lotId);
       if (!lot) break;
       const outbid = S.wasHighest && msg.paddle !== S.paddle && msg.lotId === S.focus;
-      Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle });
+      Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle, urikiri: msg.urikiri });
       if (msg.lotId === S.focus) S.history.push({ seq: msg.seq, amount: msg.amount, received_at: msg.receivedAt, valid: 1, paddle: msg.paddle });
       render(); renderHistory();
       if (outbid) notifyOutbid(msg);
@@ -518,7 +542,7 @@ $('bid').addEventListener('click', async () => {
   const shown = localNow();
   say(res.accepted ? `受理されました：${yen(res.amount)}` : (REJECT[res.code]?.(res) ?? res.code), res.accepted ? 'ok' : 'ng');
   Object.assign(lot, { currentPrice: res.currentPrice, minBid: res.minBid });
-  if (res.accepted) lot.highestPaddle = S.paddle;
+  if (res.accepted) { lot.highestPaddle = S.paddle; lot.urikiri = lot.reservePrice === null || res.currentPrice >= lot.reservePrice; }
   render();
   // ボタンを押してから、受理・拒否が画面に出るまで（P3-7）
   const ms = Math.round(shown - sent);

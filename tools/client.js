@@ -66,7 +66,7 @@ export class Client {
         break;
       case 'price': {
         const lot = this.lots.get(msg.lotId);
-        if (lot) Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle });
+        if (lot) Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle, urikiri: msg.urikiri });
         if (this.ack) this.send({ type: 'price_ack', seq: msg.seq, at: at + this.offset, net: this.net });
         break;
       }
