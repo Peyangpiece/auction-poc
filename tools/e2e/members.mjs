@@ -159,9 +159,12 @@ try {
   check(true, '認証番号の誤りは、残りの回数を出す');
   await phone.fill('[name=code]', lastCode());
   await phone.waitForSelector('#stepProfile:not([hidden])');
-  await phone.fill('[name=name]', '検証 太郎');
+  await phone.fill('[name=lastName]', '検証'); await phone.fill('[name=firstName]', '太郎');
+  await phone.fill('[name=lastKana]', 'ケンショウ'); await phone.fill('[name=firstKana]', 'タロウ');
+  await phone.type('[name=postalCode]', '1000001');
+  await phone.waitForFunction(() => document.querySelector('[name=prefecture]').value !== '');
+  await phone.type('[name=address1]', '1-1');
   await phone.fill('[name=email]', 'taro@example.com');
-  await phone.fill('[name=address]', '東京都千代田区1-1');
   await phone.click('#stepProfile button[type=submit]');
   await phone.waitForSelector('#adultRow [aria-invalid=true]');
   check(true, '個人は、18歳以上の確認がないと登録できない');
@@ -182,7 +185,7 @@ try {
   await phone.click('#nav >> text=ログアウト');
   await phone.waitForURL(sys.base + '/');
   await phone.click('#nav >> text=ログイン');
-  await phone.fill('[name=phone]', '09000001111');
+  await phone.fill('[name=id]', '09000001111');
   await phone.click('#stepPhone button[type=submit]');
   await phone.waitForSelector('#stepCode:not([hidden])');
   await phone.fill('[name=code]', lastCode());
@@ -237,9 +240,12 @@ try {
   await guest.waitForSelector('#stepCode:not([hidden])');
   await guest.fill('[name=code]', lastCode());
   await guest.waitForSelector('#stepProfile:not([hidden])');
-  await guest.fill('[name=name]', '会場 花子');
+  await guest.fill('[name=lastName]', '会場'); await guest.fill('[name=firstName]', '花子');
+  await guest.fill('[name=lastKana]', 'カイジョウ'); await guest.fill('[name=firstKana]', 'ハナコ');
+  await guest.type('[name=postalCode]', '3320012');
+  await guest.waitForFunction(() => document.querySelector('[name=prefecture]').value !== '');
+  await guest.type('[name=address1]', '4-5-6');
   await guest.fill('[name=email]', 'hanako@example.com');
-  await guest.fill('[name=address]', '埼玉県◯◯市4-5-6');
   await guest.check('[name=adult]');
   await guest.click('#stepProfile button[type=submit]');
   await guest.waitForSelector('#join:not([hidden])');
@@ -402,7 +408,7 @@ try {
   await guest.goto(sys.base + '/mypage.html');
   await guest.waitForSelector('#facts dd');
   await guest.click('#editBtn');
-  await guest.fill('#dlg [name=address]', '埼玉県◯◯市7-8-9');
+  await guest.fill('#dlg [name=address1]', '川口市本町7-8-9');
   await guest.click('#dlg button[type=submit]');
   await guest.waitForFunction(() => document.getElementById('facts')?.textContent.includes('7-8-9'));
   check(true, '会員が、登録内容を変えられる');

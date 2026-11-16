@@ -10,6 +10,19 @@ import {
 } from './security.js';
 import { Notifier, outboxSender } from './notify.js';
 import QRCode from 'qrcode';
+import { createRequire } from 'node:module';
+
+// 都道府県（住所の入力で選ぶ）
+const PREFECTURES = '北海道 青森県 岩手県 宮城県 秋田県 山形県 福島県 茨城県 栃木県 群馬県 埼玉県 千葉県 東京都 神奈川県 新潟県 富山県 石川県 福井県 山梨県 長野県 岐阜県 静岡県 愛知県 三重県 滋賀県 京都府 大阪府 兵庫県 奈良県 和歌山県 鳥取県 島根県 岡山県 広島県 山口県 徳島県 香川県 愛媛県 高知県 福岡県 佐賀県 長崎県 熊本県 大分県 宮崎県 鹿児島県 沖縄県'.split(' ');
+// 郵便番号から住所を引く辞書（日本郵便のデータを収めた部品）。最初に使うときに読み込む
+let postalDict = null;
+const lookupPostal = (code) => {
+  postalDict ??= createRequire(import.meta.url)('jp-zipcode-lookup').Oaza;
+  return postalDict.byZipcode(code).map((o) => ({ prefecture: o.pref.name, city: o.city.name, town: o.name }));
+};
+const toHalfDigits = (v) => String(v ?? '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+// フリガナ: ひらがなで入れても、カタカナに直す
+const toKatakana = (v) => String(v ?? '').replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
 import { createBilling } from './billing.js';
 
 const MIN = 60 * 1000;
@@ -43,7 +56,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     })();
   }
   db.exec(MVP_SCHEMA);
-  for (const [col, type] of [['withdrawn_at', 'REAL'], ['withdrawn_phone', 'TEXT'], ['agreed_at', 'REAL']]) {
+  for (const [col, type] of [['withdrawn_at', 'REAL'], ['withdrawn_phone', 'TEXT'], ['agreed_at', 'REAL'], ['name_kana', 'TEXT'], ['postal_code', 'TEXT'], ['prefecture', 'TEXT'], ['address1', 'TEXT'], ['address2', 'TEXT']]) {
     if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = ?").get(col)) db.exec(`ALTER TABLE member_accounts ADD COLUMN ${col} ${type}`);
   }
   // 以前の版のデータベースに、後から足した列を加える
@@ -123,6 +136,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   }
 
   // ------------------------------------------------------------ SMS の認証番号（FR-AUTH-004・010）
+  // 認証番号を送る。phone は、電話番号か「email:アドレス」（メールでのログイン）
   async function sendOtp(phone) {
     const now = nowMs();
     const sent = db.prepare('SELECT COUNT(*) AS n FROM otp_sends WHERE phone = ? AND at > ?').get(phone, now - HOUR).n;
@@ -132,7 +146,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       .run(phone, sha256(phone + ':' + code), now + OTP_TTL);
     db.prepare('INSERT INTO otp_sends (phone, at) VALUES (?, ?)').run(phone, now);
     // 送信の失敗による自動の再送（IF-EXT-003）は、上の回数に数えない（1回の送信として記録済み）
-    await notifier.sms(phone, 'otp', `【令和の競り】認証番号は ${code} です。5分以内に入力してください。`);
+    if (phone.startsWith('email:')) await notifier.email(phone.slice(6), 'otp', '【令和の競り】認証番号', `認証番号は ${code} です。5分以内に入力してください。\nお心当たりがない場合は、このメールを破棄してください。`);
+    else await notifier.sms(phone, 'otp', `【令和の競り】認証番号は ${code} です。5分以内に入力してください。`);
     return code;
   }
   function checkOtp(phone, code) {
@@ -152,9 +167,51 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return phone;
   };
 
+  // ログインの宛先: 携帯電話の番号か、確認済みのメールアドレス（発注者の指示。メールは、確認が済んだアドレスだけ）
+  const loginTarget = (body) => {
+    const raw = String(body.id ?? body.phone ?? '').trim();
+    if (raw.includes('@')) {
+      const email = raw.toLowerCase();
+      if (!isEmail(email)) throw bad('メールアドレスを正しく入力してください');
+      // 同じアドレスの会員が2人以上いる場合は、だれのことか決められないので、メールではログインさせない
+      const rows = db.prepare('SELECT * FROM member_accounts WHERE lower(email) = ? AND email_verified = 1 AND withdrawn_at IS NULL').all(email);
+      return { key: 'email:' + email, member: rows.length === 1 ? rows[0] : null };
+    }
+    const phone = normalizePhone(raw);
+    if (!phone) throw bad('携帯電話の番号（例: 090-1234-5678）か、メールアドレスを入力してください');
+    return { key: phone, member: db.prepare('SELECT * FROM member_accounts WHERE phone = ?').get(phone) ?? null };
+  };
+  // 氏名・フリガナ・住所を、入力から組み立てて確かめる（会員登録と、登録内容の変更で使う）。
+  // 姓名・郵便番号を分けた形（画面の入力）と、1つにまとめた形（name・address）の両方を受ける。
+  function personFrom(body, errors) {
+    const text = (v, max = 200) => String(v ?? '').trim().slice(0, max);
+    const out = { name: text(body.name), nameKana: null, address: text(body.address, 300), postalCode: null, prefecture: null, address1: null, address2: null };
+    if (body.lastName !== undefined || body.firstName !== undefined) {
+      const last = text(body.lastName, 50), first = text(body.firstName, 50);
+      if (!last || !first) errors.lastName = '氏名（姓と名）を入力してください';
+      out.name = `${last} ${first}`.trim();
+      const lk = toKatakana(text(body.lastKana, 50)), fk = toKatakana(text(body.firstKana, 50));
+      if (!lk || !fk) errors.lastKana = 'フリガナ（セイとメイ）を入力してください';
+      else if (!/^[ァ-ヶー・\s　]+$/.test(lk + fk)) errors.lastKana = 'フリガナは、カタカナで入力してください';
+      out.nameKana = `${lk} ${fk}`.trim();
+    } else if (!out.name) errors.name = '氏名を入力してください';
+    if (body.postalCode !== undefined || body.prefecture !== undefined || body.address1 !== undefined) {
+      const zip = toHalfDigits(body.postalCode).replace(/[^0-9]/g, '');
+      if (zip.length !== 7) errors.postalCode = '郵便番号を、7桁の数字で入力してください';
+      const pref = text(body.prefecture, 10);
+      if (!PREFECTURES.includes(pref)) errors.prefecture = '都道府県を選んでください';
+      const a1 = text(body.address1, 150), a2 = text(body.address2, 100);
+      if (!a1) errors.address1 = '市区町村と番地を入力してください';
+      else if (!/[0-9０-９一二三四五六七八九十]/.test(a1)) errors.address1 = '番地まで入力してください';
+      Object.assign(out, { postalCode: zip, prefecture: pref, address1: a1, address2: a2 || null, address: `〒${zip.slice(0, 3)}-${zip.slice(3)} ${pref}${a1}${a2 ? ' ' + a2 : ''}` });
+    } else if (!out.address) errors.address = '住所を入力してください';
+    return out;
+  }
+
   // ------------------------------------------------------------ 会員
   const memberView = (m) => ({
-    kind: m.kind, name: m.name, phone: m.phone, email: m.email, emailVerified: !!m.email_verified, address: m.address,
+    kind: m.kind, name: m.name, nameKana: m.name_kana, phone: m.phone, email: m.email, emailVerified: !!m.email_verified, address: m.address,
+    postalCode: m.postal_code, prefecture: m.prefecture, address1: m.address1, address2: m.address2,
     shipTo: m.ship_to, company: m.company, contactName: m.contact_name, billing: m.billing, suspended: !!billing.suspension(m.id), suspendedBy: billing.suspension(m.id),
   });
   async function sendEmailVerification(ctx, member) {
@@ -162,6 +219,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     db.prepare('INSERT INTO email_tokens (token_hash, member_id, expires_at) VALUES (?,?,?)').run(sha256(token), member.id, nowMs() + DAY);
     const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
     await notifier.email(member.email, 'verify_email', 'メールアドレスの確認', `次のリンクを開いて、メールアドレスを確認してください（24時間以内）。\n${origin}/api/email/verify?token=${token}`);
+    return `${origin}/api/email/verify?token=${token}`;
   }
 
   const routes = [];
@@ -203,9 +261,9 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const kind = body.kind === 'b2b' ? 'b2b' : body.kind === 'b2c' ? 'b2c' : null;
     const errors = {};
     if (!kind) errors.kind = '法人か個人かを選んでください';
-    const name = text(body.name); if (!name) errors.name = '氏名を入力してください';
+    const person = personFrom(body, errors);
+    const { name, address } = person;
     const email = text(body.email, 254); if (!isEmail(email)) errors.email = 'メールアドレスを正しく入力してください';
-    const address = text(body.address, 300); if (!address) errors.address = '住所を入力してください';
     const company = text(body.company), contactName = text(body.contactName), billing = text(body.billing, 300);
     if (kind === 'b2b') {
       if (!company) errors.company = '会社名を入力してください';
@@ -225,29 +283,33 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(kind, name, phone, email, address, text(body.shipTo, 300) || null,
       kind === 'b2b' ? company : null, kind === 'b2b' ? contactName : null, kind === 'b2b' ? billing : null, kind === 'b2c' ? 1 : 0, now, now);
     if (body.agreed === true) db.prepare('UPDATE member_accounts SET agreed_at = ? WHERE id = ?').run(now, info.lastInsertRowid);
+    db.prepare('UPDATE member_accounts SET name_kana = ?, postal_code = ?, prefecture = ?, address1 = ?, address2 = ? WHERE id = ?')
+      .run(person.nameKana, person.postalCode, person.prefecture, person.address1, person.address2, info.lastInsertRowid);
     const member = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(info.lastInsertRowid);
     endSession(ctx);
     startSession(ctx, 'member', member.id, MEMBER_IDLE);
     audit({ ...ctx, member }, 'member.register', { target: `member:${member.id}`, after: { kind } });
-    await sendEmailVerification(ctx, member); // 確認が済んでいなくても入札はできる（FR-AUTH-011）
-    return { ok: true, member: memberView(member) };
+    const verifyUrl = await sendEmailVerification(ctx, member); // 確認が済んでいなくても入札はできる（FR-AUTH-011）
+    return { ok: true, member: memberView(member), ...(config.devShowCodes ? { devVerifyUrl: verifyUrl } : {}) };
   });
 
   // 登録内容の変更（本人）。電話番号は、ここでは変えられない（主催者管理者の本人確認が要る。FR-AUTH-006）
   route('POST', '/api/my/profile', async (ctx, body) => {
     const m = needMember(ctx);
     const text = (v, max = 200) => String(v ?? '').trim().slice(0, max);
-    const next = { name: text(body.name), email: text(body.email, 254), address: text(body.address, 300), ship_to: text(body.shipTo, 300) || null,
-      company: m.kind === 'b2b' ? text(body.company) : null, contact_name: m.kind === 'b2b' ? text(body.contactName) : null, billing: m.kind === 'b2b' ? text(body.billing, 300) : null };
     const errors = {};
-    if (!next.name) errors.name = '氏名を入力してください';
+    const person = personFrom(body, errors);
+    const next = { name: person.name, email: text(body.email, 254), address: person.address, ship_to: text(body.shipTo, 300) || null,
+      company: m.kind === 'b2b' ? text(body.company) : null, contact_name: m.kind === 'b2b' ? text(body.contactName) : null, billing: m.kind === 'b2b' ? text(body.billing, 300) : null };
     if (!isEmail(next.email)) errors.email = 'メールアドレスを正しく入力してください';
-    if (!next.address) errors.address = '住所を入力してください';
     if (m.kind === 'b2b') { if (!next.company) errors.company = '会社名を入力してください'; if (!next.contact_name) errors.contactName = '担当者名を入力してください'; if (!next.billing) errors.billing = '請求先を入力してください'; }
     if (Object.keys(errors).length) throw bad('入力を確かめてください', { errors });
     const emailChanged = next.email !== m.email;
     db.prepare('UPDATE member_accounts SET name=?, email=?, email_verified=?, address=?, ship_to=?, company=?, contact_name=?, billing=?, updated_at=? WHERE id=?')
       .run(next.name, next.email, emailChanged ? 0 : m.email_verified, next.address, next.ship_to, next.company, next.contact_name, next.billing, nowMs(), m.id);
+    // 分けて入れた場合だけ、フリガナと住所の内訳を書き換える（まとめた形で届いたときは、前の内訳を消す）
+    db.prepare('UPDATE member_accounts SET name_kana = ?, postal_code = ?, prefecture = ?, address1 = ?, address2 = ? WHERE id = ?')
+      .run(person.nameKana ?? (body.lastName === undefined ? m.name_kana : null), person.postalCode, person.prefecture, person.address1, person.address2, m.id);
     audit(ctx, 'member.update', { target: `member:${m.id}`, after: { fields: Object.keys(next).filter((k) => next[k] !== m[k]) } });
     const fresh = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(m.id);
     if (emailChanged) await sendEmailVerification(ctx, fresh); // 新しいアドレスを、確認メールで確かめ直す
@@ -284,16 +346,16 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   // ログイン: 電話番号と SMS の認証番号。パスワードは使わない（FR-AUTH-010）
   route('POST', '/api/login/start', async (ctx, body) => {
     throttle(ctx);
-    const phone = phoneOf(body);
-    // 登録のない番号でも、同じ返事をする（どの番号が登録済みかを、外から調べられないようにする）
-    const code = db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone) ? await sendOtp(phone) : null;
-    return { ok: true, ...(config.devShowCodes && code ? { devCode: code } : {}) };
+    const target = loginTarget(body);
+    // 登録のない宛先でも、同じ返事をする（どの番号・アドレスが登録済みかを、外から調べられないようにする）
+    const code = target.member ? await sendOtp(target.key) : null;
+    return { ok: true, via: target.key.startsWith('email:') ? 'email' : 'sms', ...(config.devShowCodes && code ? { devCode: code } : {}) };
   });
   route('POST', '/api/login/verify', (ctx, body) => {
     throttle(ctx);
-    const phone = phoneOf(body);
-    checkOtp(phone, body.code);
-    const member = db.prepare('SELECT * FROM member_accounts WHERE phone = ?').get(phone);
+    const target = loginTarget(body);
+    checkOtp(target.key, body.code);
+    const member = target.member;
     if (!member) throw new HttpError(400, '認証番号が正しくないか、期限が切れています。番号を送り直してください', { resend: true });
     startSession(ctx, 'member', member.id, MEMBER_IDLE);
     return { ok: true, member: memberView(member) };
@@ -303,8 +365,15 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const member = needMember(ctx);
     if (member.email_verified) return { ok: true };
     throttle(ctx);
-    await sendEmailVerification(ctx, member);
-    return { ok: true };
+    const verifyUrl = await sendEmailVerification(ctx, member);
+    return { ok: true, ...(config.devShowCodes ? { devVerifyUrl: verifyUrl } : {}) };
+  });
+  // 郵便番号から住所を引く（会員登録の入力の手間を減らす）
+  route('GET', '/api/postal', (ctx) => {
+    throttle(ctx);
+    const code = toHalfDigits(ctx.url.searchParams.get('code')).replace(/[^0-9]/g, '');
+    if (code.length !== 7) throw bad('郵便番号を、7桁の数字で入力してください');
+    return { ok: true, results: lookupPostal(code).slice(0, 20) };
   });
   route('GET', '/api/email/verify', (ctx) => {
     const token = ctx.url.searchParams.get('token') ?? '';

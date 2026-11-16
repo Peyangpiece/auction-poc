@@ -37,6 +37,11 @@ $('#resend').addEventListener('click', async (ev) => {
   setTimeout(() => { ev.target.disabled = false; }, 10000); // 続けて押せないようにする
 });
 
+// お名前・フリガナ・ご住所の欄を置く
+$('#person').append(...personFields());
+// 配送先: 住所と同じなら、欄を出さない
+$('#shipSame').addEventListener('change', (ev) => { $('#shipRow').hidden = ev.target.checked; if (ev.target.checked) forms.profile.elements.shipTo.value = ''; });
+
 function syncKind() {
   const corp = forms.profile.elements.kind.value === 'b2b';
   $('#corp').hidden = !corp;
@@ -51,6 +56,7 @@ onSubmit(forms.profile, async (data) => {
   const res = await api('POST', '/api/register/complete', { ...data, adult: data.adult === '1', agreed: data.agreed === '1' });
   // 入札画面（会場の QR コードなど）から来た人は、登録のあと入札画面の参加手続きへ進める（FR-AUTH-007）
   if (res.ok) dirty = false;
+  if (res.ok && res.devVerifyUrl) sessionStorage.setItem('devVerifyUrl', res.devVerifyUrl); // お試し用: 確認のリンクを、マイページで出す
   if (res.ok) location.href = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/mypage.html?registered=1';
   else if (res.status === 401) { res.message = '時間が空いたため、電話番号の確認からやり直してください'; show('phone'); }
   return res;

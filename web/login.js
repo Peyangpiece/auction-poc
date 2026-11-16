@@ -1,4 +1,4 @@
-// ログイン: 電話番号と SMS の認証番号（パスワードは使わない）。
+// ログイン: 携帯電話の番号か、確認済みのメールアドレスに届く認証番号（パスワードは使わない）。
 'use strict';
 
 const phoneForm = $('#stepPhone');
@@ -8,10 +8,12 @@ let phone = '';
 const after = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/mypage.html';
 
 onSubmit(phoneForm, async (data) => {
-  phone = data.phone;
-  const res = await api('POST', '/api/login/start', { phone });
+  phone = data.id.trim();
+  const res = await api('POST', '/api/login/start', { id: phone });
   if (res.ok) {
-    $('#sentTo').textContent = `登録済みの番号であれば、${phone} に認証番号を送りました`;
+    $('#sentTo').textContent = res.via === 'email'
+      ? `確認済みのアドレスであれば、${phone} に認証番号を送りました。届かない場合は、携帯電話の番号でお試しください`
+      : `登録済みの番号であれば、${phone} に認証番号を送りました`;
     if (res.devCode) $('#sentTo').textContent += `　【お試し用】認証番号 ${res.devCode}`;
     phoneForm.hidden = true;
     codeForm.hidden = false;
@@ -20,14 +22,14 @@ onSubmit(phoneForm, async (data) => {
   return res;
 });
 onSubmit(codeForm, async (data) => {
-  const res = await api('POST', '/api/login/verify', { phone, code: data.code });
+  const res = await api('POST', '/api/login/verify', { id: phone, code: data.code });
   if (res.ok) location.href = after;
   else codeForm.elements.code.value = '';
   return res;
 });
 $('#resend').addEventListener('click', async (ev) => {
   ev.target.disabled = true;
-  const res = await api('POST', '/api/login/start', { phone });
+  const res = await api('POST', '/api/login/start', { id: phone });
   const msg = $('.msg', codeForm);
   msg.classList.toggle('ok', res.ok);
   msg.textContent = res.ok ? '認証番号を送り直しました' : res.message;
@@ -39,5 +41,5 @@ $('#resend').addEventListener('click', async (ev) => {
   if (after === '/bidder.html') for (const link of document.querySelectorAll('a[href="/register.html"]')) link.href = '/register.html?next=bidder';
   const me = await setupNav();
   if (me.member) location.replace(after);
-  else phoneForm.elements.phone.focus();
+  else phoneForm.elements.id.focus();
 })();

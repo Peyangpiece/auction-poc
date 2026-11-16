@@ -31,9 +31,9 @@
   <hr class="rule">
 </div>
 <form class="form" id="stepPhone" novalidate>
-  <label class="field">携帯電話の番号
-    <small>SMS で認証番号を送ります</small>
-    <input class="input" name="phone" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="090-1234-5678" required>
+  <label class="field">携帯電話の番号 または メールアドレス
+    <small>認証番号をお送りします（パスワードは使いません）</small>
+    <input class="input" name="id" type="text" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="090-1234-5678 / taro@example.com" required>
     <span class="err" role="alert"></span>
   </label>
   <p class="msg" role="alert" tabindex="-1"></p>

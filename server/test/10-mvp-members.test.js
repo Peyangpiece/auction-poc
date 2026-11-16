@@ -312,3 +312,49 @@ test('その場での登録（進行コンソール）: 登録を監査ログに
     assert.equal(JSON.parse(rows[0].after).title, '飯ごう');
   } finally { await srv.stop().catch(() => {}); cleanup(ctx); }
 });
+
+test('メールアドレスでもログインできる（確認済みのアドレスだけ。大文字と小文字は区別しない）', async () => {
+  const t = await setup();
+  try {
+    const phone = '09011113333';
+    assert.equal((await register(t, t.browser(), phone)).status, 200);
+    const b = t.browser();
+    const mails = () => t.outbox().filter((m) => m.channel === 'email' && m.to === 'taro@example.com');
+    const codeOf = () => /認証番号は (\d{6})/.exec(mails().at(-1).body)[1];
+    // 確認が済んでいないアドレスには、送らない（返事は同じ）
+    const before = mails().length;
+    const cold = await b.post('/api/login/start', { id: 'taro@example.com' });
+    assert.deepEqual([cold.status, cold.json.via], [200, 'email']);
+    assert.equal(mails().length, before);
+    // 確認のリンクを開くと、メールでログインできる
+    const token = /token=([\w-]+)/.exec(mails().at(-1).body)[1];
+    await t.browser().get(`/api/email/verify?token=${token}`);
+    assert.equal((await b.post('/api/login/start', { id: 'Taro@Example.com' })).status, 200);
+    assert.equal(mails().length, before + 1);
+    assert.equal((await b.post('/api/login/verify', { id: 'taro@example.com', code: '000000' === codeOf() ? '111111' : '000000' })).status, 400);
+    assert.equal((await b.post('/api/login/verify', { id: 'Taro@Example.com', code: codeOf() })).status, 200);
+    assert.equal((await b.get('/api/me')).json.member.phone, phone);
+    // 登録のないアドレス・形のおかしい入力
+    assert.equal((await b.post('/api/login/start', { id: 'nobody@example.com' })).status, 200);
+    assert.equal((await b.post('/api/login/start', { id: 'abc' })).status, 400);
+  } finally { await t.close(); }
+});
+
+test('会員登録: 姓名・フリガナ・郵便番号つきの住所を分けて受ける。郵便番号から住所が引ける', async () => {
+  const t = await setup();
+  try {
+    const b = t.browser();
+    const zip = await b.get('/api/postal?code=100-0001');
+    assert.deepEqual(zip.json.results[0], { prefecture: '東京都', city: '千代田区', town: '千代田' });
+    assert.equal((await b.get('/api/postal?code=123')).status, 400);
+    assert.deepEqual((await b.get('/api/postal?code=9999999')).json.results, []);
+    const input = { kind: 'b2c', lastName: '山田', firstName: '太郎', lastKana: 'やまだ', firstKana: 'タロウ', email: 'y@example.com',
+      postalCode: '１００-0001', prefecture: '東京都', address1: '千代田区千代田1-1', address2: '○○ビル 3階', adult: true };
+    const bad = await register(t, b, '09011114444', { ...input, lastKana: '山田', postalCode: '123', prefecture: '江戸', address1: '千代田区' });
+    assert.deepEqual(Object.keys(bad.json.errors).sort(), ['address1', 'lastKana', 'postalCode', 'prefecture']);
+    const done = await b.post('/api/register/complete', input);
+    assert.equal(done.status, 200);
+    const m = done.json.member;
+    assert.deepEqual([m.name, m.nameKana, m.postalCode, m.address], ['山田 太郎', 'ヤマダ タロウ', '1000001', '〒100-0001 東京都千代田区千代田1-1 ○○ビル 3階']);
+  } finally { await t.close(); }
+});

@@ -67,14 +67,14 @@
     <span class="err" role="alert"></span>
   </fieldset>
   <div class="form" id="corp" hidden>
-    <label class="field">会社名<input class="input" name="company" autocomplete="organization"><span class="err" role="alert"></span></label>
-    <label class="field">担当者名<input class="input" name="contactName" autocomplete="off"><span class="err" role="alert"></span></label>
-    <label class="field">請求先<small>請求書の宛名と送り先</small><textarea class="input" name="billing" rows="2" autocomplete="off"></textarea><span class="err" role="alert"></span></label>
+    <label class="field"><span class="field__label">会社名<span class="req">必須</span></span><input class="input" name="company" autocomplete="organization" placeholder="株式会社○○"><span class="err" role="alert"></span></label>
+    <label class="field"><span class="field__label">担当者名<span class="req">必須</span></span><input class="input" name="contactName" autocomplete="off"><span class="err" role="alert"></span></label>
+    <label class="field"><span class="field__label">請求先<span class="req">必須</span></span><small>請求書の宛名と送り先</small><textarea class="input" name="billing" rows="2" autocomplete="off"></textarea><span class="err" role="alert"></span></label>
   </div>
-  <label class="field">氏名<input class="input" name="name" autocomplete="name" required><span class="err" role="alert"></span></label>
-  <label class="field">メールアドレス<input class="input" name="email" type="email" inputmode="email" autocomplete="email" spellcheck="false" required><span class="err" role="alert"></span></label>
-  <label class="field">住所<textarea class="input" name="address" rows="2" autocomplete="street-address" required></textarea><span class="err" role="alert"></span></label>
-  <label class="field">配送先<small>住所と違う場合だけ</small><textarea class="input" name="shipTo" rows="2" autocomplete="off"></textarea><span class="err" role="alert"></span></label>
+  <label class="field"><span class="field__label">メールアドレス<span class="req">必須</span></span><small>請求書やお知らせをお送りします</small><input class="input" name="email" type="email" inputmode="email" autocomplete="email" spellcheck="false" placeholder="taro@example.com" required><span class="err" role="alert"></span></label>
+  <div class="form" id="person"></div>
+  <label class="check"><input type="checkbox" id="shipSame" checked><span>配送先は、上の住所と同じ</span></label>
+  <label class="field" id="shipRow" hidden><span class="field__label">配送先<span class="opt">任意</span></span><small>郵便番号から、建物名まで</small><textarea class="input" name="shipTo" rows="3" autocomplete="off"></textarea><span class="err" role="alert"></span></label>
   <label class="check" id="adultRow"><input type="checkbox" name="adult" value="1"><span>18歳以上です<span class="err" role="alert"></span></span></label>
   <label class="check" id="agreeRow" hidden><input type="checkbox" name="agreed" value="1"><span><a href="/legal.html#terms" target="_blank" rel="noopener">利用規約</a>と<a href="/legal.html#privacy" target="_blank" rel="noopener">プライバシーポリシー</a>に同意します<span class="err" role="alert"></span></span></label>
   <p class="msg" role="alert" tabindex="-1"></p>

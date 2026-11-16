@@ -21,6 +21,16 @@ main.narrow { max-width: 520px; }
 .form .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .form .btn-primary { flex: 1 1 200px; }
 /* 補足の文字は、ブラウザ任せ（約11px）にせず、読める大きさに決める */
+/* ---- 入力欄の「必須」「任意」の印、2つ並べる欄（姓・名）、住所の見出し */
+.field__label { display: flex; align-items: center; gap: 8px; }
+.req, .opt { font-size: 11px; font-weight: 700; line-height: 1; padding: 3px 6px; border-radius: 3px; letter-spacing: .04em; }
+.req { background: var(--red-text); color: #fff; }
+.opt { background: var(--ground-alt); color: var(--ink-2); }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.formhead { font-size: 16px; letter-spacing: .08em; color: var(--ink); margin-top: 16px; padding-top: 20px; border-top: 1px solid var(--line); }
+.picks { display: flex; flex-wrap: wrap; gap: 8px; }
+.picks:empty, .form .note:empty { display: none; }
+.picks .btn { min-height: 44px; padding: 6px 12px; font-size: 14px; }
 .field small { font-size: 13px; font-weight: 400; color: var(--ink-2); }
 .field .err { font-weight: 400; color: var(--danger); min-height: 0; }
 .field .err:empty { display: none; }
