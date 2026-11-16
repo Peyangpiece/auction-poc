@@ -170,12 +170,12 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       premium: { total: lines.reduce((s, l) => s + (l.premium ?? 0), 0), rate: premiumRate() },
       issuedOn: jst(inv.issued_at), paidOn: kind === 'cash' ? jst(inv.issued_at) : null,
       // 件名: 開催日と開催の名前
-      subject: (() => { const e = db.prepare('SELECT title, starts_at FROM events WHERE id = ?').get(first.event_id); return e ? `${Number(e.starts_at.slice(5, 7))}.${Number(e.starts_at.slice(8, 10))} レイワの競り ${e.title}` : 'レイワの競り'; })(),
+      subject: (() => { const e = db.prepare('SELECT title, starts_at FROM events WHERE id = ?').get(first.event_id); return e ? `${Number(e.starts_at.slice(5, 7))}.${Number(e.starts_at.slice(8, 10))} 令和の競り ${e.title}` : '令和の競り'; })(),
     });
     db.prepare('UPDATE invoices SET pdf_file = ?, xlsx_file = ? WHERE id = ?').run(files.pdf, files.xlsx, inv.id);
     // 送付用のメールの下書き（FR-INV-007）。送信は、利用会社の担当者が自分で行う。当日現金の精算では作らない
     if (draft) {
-      files.done.then(() => notifier.draft(a.email, `【${org.org_name}】ご請求書（${inv.number}）`, `${displayName(a)} 様\n\nレイワの競りのご請求書をお送りします。\n請求書番号: ${inv.number}\nご請求額: ${yen(total)}（税込）\n\nお振込の際は、依頼人名に請求書番号を入れてください。振込手数料は、お客様のご負担となります。\n落札価格に送料は含まれません。`, [files.pdf]))
+      files.done.then(() => notifier.draft(a.email, `【${org.org_name}】ご請求書（${inv.number}）`, `${displayName(a)} 様\n\n令和の競りのご請求書をお送りします。\n請求書番号: ${inv.number}\nご請求額: ${yen(total)}（税込）\n\nお振込の際は、依頼人名に請求書番号を入れてください。振込手数料は、お客様のご負担となります。\n落札価格に送料は含まれません。`, [files.pdf]))
         .then((ok) => db.prepare('UPDATE invoices SET draft_state = ? WHERE id = ?').run(ok ? 'made' : 'failed', inv.id))
         .catch(() => db.prepare("UPDATE invoices SET draft_state = 'failed' WHERE id = ?").run(inv.id));
     }

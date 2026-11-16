@@ -119,7 +119,7 @@ export function createApi({ store, config, nowMs }) {
       .run(phone, sha256(phone + ':' + code), now + OTP_TTL);
     db.prepare('INSERT INTO otp_sends (phone, at) VALUES (?, ?)').run(phone, now);
     // 送信の失敗による自動の再送（IF-EXT-003）は、上の回数に数えない（1回の送信として記録済み）
-    await notifier.sms(phone, 'otp', `【レイワの競り】認証番号は ${code} です。5分以内に入力してください。`);
+    await notifier.sms(phone, 'otp', `【令和の競り】認証番号は ${code} です。5分以内に入力してください。`);
   }
   function checkOtp(phone, code) {
     const row = db.prepare('SELECT * FROM otp_codes WHERE phone = ?').get(phone);

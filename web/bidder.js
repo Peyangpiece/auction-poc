@@ -112,7 +112,7 @@ function render() {
     : staff ? 'スタッフは入札できません'
     : watching ? '応札に切り替える'
     : mine ? 'あなたが最高入札者です' : `${yen(lot.minBid)} で入札`;
-  document.title = `${yen(price)} No.${lot.lotNo}｜レイワの競り`;
+  document.title = `${yen(price)} No.${lot.lotNo}｜令和の競り`;
   S.wasHighest = mine && st === 'open';
 }
 function renderHistory() {
