@@ -26,7 +26,11 @@ export async function boot({ port, env = {}, members = 3, withAgent = false }) {
     procs.push(spawn('node', ['src/agent.js'], { cwd: path.join(ROOT, 'agent'), stdio: 'ignore',
       env: { ...process.env, AGENT_SERVER_URL: `ws://127.0.0.1:${port}/agent`, AGENT_TOKEN: tokens.agent, OBS_URL: `ws://127.0.0.1:${obsPort}`, AGENT_LOG_DIR: path.join(dir, 'agent-logs') } }));
   }
-  await new Promise((r) => setTimeout(r, 900));
+  // サーバーが応答するまで待つ（決まった時間だけ待つ作りだと、遅い機械で先に進んでしまう）
+  for (let i = 0; i < 100; i++) {
+    try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) break; } catch { /* まだ起動していない */ }
+    await new Promise((r) => setTimeout(r, 100));
+  }
   return {
     dir, tokens, base: `http://127.0.0.1:${port}`,
     get server() { return server; },
