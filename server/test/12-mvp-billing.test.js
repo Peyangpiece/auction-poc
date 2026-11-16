@@ -365,3 +365,207 @@ test('印鑑の画像: 主催者管理者だけが登録できる。PNG か JPEG
     assert.equal((await t.admin.get('/api/settings/seal')).status, 404);
   } finally { await t.close(); }
 });
+
+test('送料: 金額をあとから手で入れる。まだ送っていない請求書に行を足して作り直す。なければ、送料だけの請求書を出す', async () => {
+  const t = await setup();
+  try {
+    const a = await t.member(1, { receive: 'ship' });
+    const b = await t.member(2, { venue: true, receive: 'ship' });
+    t.sold('飯ごう', [[a, 2000]]);
+    t.sold('寝袋', [[b, 3000]]);
+    await t.admin.post('/api/billing/settle', { lineIds: [(await t.line('寝袋')).id] });       // b は当日現金で精算済み
+    const [inv] = await t.endEvent();
+    assert.equal(inv.total, 2200);
+    const reception = await t.staffLogin('reception', 'uketsuke');
+    assert.equal((await reception.post('/api/billing/shipping', { accountId: 1, eventId: t.eventId, amount: 1500, label: 'ヤマト運輸 120サイズ' })).status, 403, '送料を入れられるのは、主催者管理者だけ');
+    assert.equal((await t.admin.post('/api/billing/shipping', { accountId: 1, eventId: t.eventId, amount: -1 })).status, 400);
+
+    // 送る前の請求書に、送料の行を足す
+    const added = await t.admin.post('/api/billing/shipping', { accountId: 1, eventId: t.eventId, amount: 1500, label: 'ヤマト運輸 120サイズ' });
+    assert.deepEqual([added.json.invoice.id, added.json.invoice.total], [inv.id, 3700], '同じ請求書に足し、合計が増える（落札 2,000＋買歩銭 200＋送料 1,500）');
+    const ship = (await t.lines()).find((l) => l.kind === 'shipping');
+    assert.deepEqual([ship.label, ship.amount, ship.premium], ['【送料】ヤマト運輸 120サイズ', 1500, 0], '送料には、買歩銭はかからない');
+    // 金額を直す → 行は増えない
+    assert.equal((await t.admin.post('/api/billing/shipping', { accountId: 1, eventId: t.eventId, amount: 2000, label: 'ヤマト運輸 180サイズ' })).json.invoice.total, 4200);
+    assert.equal((await t.lines()).filter((l) => l.kind === 'shipping').length, 1);
+    const list = (await t.admin.get('/api/billing/invoices')).json.invoices.find((i) => i.id === inv.id);
+    assert.deepEqual(list.shipping, { amount: 2000, label: '【送料】ヤマト運輸 180サイズ' });
+    // 0円で、行を消す
+    assert.equal((await t.admin.post('/api/billing/shipping', { accountId: 1, eventId: t.eventId, amount: 0 })).json.invoice.total, 2200);
+    await t.admin.post('/api/billing/shipping', { accountId: 1, eventId: t.eventId, amount: 2000, label: 'ヤマト運輸 180サイズ' });
+
+    // 送ったあとの請求書は変えない → 新しく、送料だけの請求書になる
+    await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);
+    const extra = await t.admin.post('/api/billing/shipping', { accountId: 1, eventId: t.eventId, amount: 300, label: '追加の箱' });
+    assert.notEqual(extra.json.invoice.id, inv.id);
+    assert.equal(extra.json.invoice.total, 300);
+    // 現金で精算済みの人（送る前の請求書がない）にも、送料だけの請求書を出せる
+    const cashShip = await t.admin.post('/api/billing/shipping', { accountId: 2, eventId: t.eventId, amount: 1800, label: '佐川急便 140サイズ' });
+    assert.equal(cashShip.json.invoice.total, 1800);
+    const pdf = await b.get(`/api/billing/invoices/${cashShip.json.invoice.id}/pdf`);
+    assert.equal(pdf.buf.subarray(0, 5).toString(), '%PDF-', '本人が、送料の請求書を開ける');
+
+    // 送料も、金額が一致すれば消し込める。引き渡しの対象ではない。開発・運営者の手数料の対象でもない
+    const first = (await t.lines()).find((l) => l.label === '【送料】ヤマト運輸 180サイズ');
+    assert.equal((await t.admin.post(`/api/billing/lines/${first.id}/clear`, { amount: 2000 })).status, 200);
+    assert.equal((await t.admin.post(`/api/billing/lines/${first.id}/deliver`)).status, 409);
+    assert.equal((await t.admin.get(`/api/billing/fees?month=${t.today().slice(0, 7)}`)).json.base, 3000, '手数料の対象は、消し込み済みの落札額（寝袋 3,000円）だけ');
+    assert.ok((await t.admin.get('/api/audit')).json.entries.some((e) => e.type === 'billing.shipping'));
+  } finally { await t.close(); }
+});
+
+// ---------------------------------------------------------------- そのほかの機能
+test('開発・運営者の役割: 手数料の集計・長く未払いの一覧・監査ログだけを見られる（8.14）', async () => {
+  const t = await setup();
+  try {
+    const op = await t.staffLogin('operator', 'unei');
+    for (const url of ['/api/billing/fees', '/api/billing/long-unpaid', '/api/audit']) assert.equal((await op.get(url)).status, 200, url);
+    for (const url of ['/api/members', '/api/billing/lines', '/api/billing/invoices', '/api/settings', '/api/staff/accounts', '/api/reception']) assert.equal((await op.get(url)).status, 403, url);
+    assert.equal((await op.post('/api/billing/fees/confirm', { month: '2026-11' })).status, 403, '確認済みにできるのは、主催者管理者だけ');
+    assert.equal((await t.admin.get('/api/staff/accounts')).json.staff.find((s) => s.loginId === 'unei').roleLabel, '開発・運営者');
+  } finally { await t.close(); }
+});
+
+test('会員: 登録内容の変更（メールは確かめ直す）、電話番号の変更は主催者管理者、退会（未払いがあればできない。FR-AUTH-014）', async () => {
+  const t = await setup();
+  try {
+    const a = await t.member(1, { venue: true });
+    assert.ok((await a.post('/api/my/profile', { name: '', email: 'x', address: '' })).json.errors.email);
+    const before = t.outbox().filter((m) => m.kind === 'verify_email').length;
+    const up = await a.post('/api/my/profile', { name: '検証 一郎', email: 'new@example.com', address: '東京都港区9-9', shipTo: '東京都港区1-1' });
+    assert.deepEqual([up.json.member.name, up.json.member.email, up.json.member.emailVerified, up.json.member.shipTo], ['検証 一郎', 'new@example.com', false, '東京都港区1-1']);
+    assert.equal(t.outbox().filter((m) => m.kind === 'verify_email').length, before + 1, '新しいアドレスに、確認メールを送る');
+    assert.equal(up.json.member.phone, '09066660001', '電話番号は、本人では変えられない');
+
+    assert.equal((await t.admin.post('/api/members/1/phone', { phone: '090-7777-0001' })).status, 400, '本人を確かめた方法が要る');
+    assert.equal((await t.admin.post('/api/members/1/phone', { phone: '090-7777-0001', reason: '会場で、運転免許証で確かめた' })).status, 200);
+    assert.equal((await a.get('/api/me')).json.member, null, '古い番号でのログインは切れる');
+
+    const b = await t.member(2, { venue: true });
+    t.sold('飯ごう', [[b, 2000]]);
+    const blocked = await b.post('/api/my/withdraw');
+    assert.equal(blocked.status, 409);
+    assert.match(blocked.json.message, /お支払いが済んでいない/);
+    await t.admin.post('/api/billing/settle', { lineIds: [(await t.line('飯ごう')).id] });
+    assert.equal((await b.post('/api/my/withdraw')).status, 200);
+    assert.equal((await b.get('/api/me')).json.member, null);
+    const row = (await t.admin.get('/api/members')).json.members.find((m) => m.id === 2);
+    assert.deepEqual([row.withdrawn, row.phone], [true, '09066660002'], '退会しても、記録は残る');
+    assert.equal((await t.line('飯ごう')).name, '検証 2郎', '取引の記録も残る');
+    // 同じ電話番号で、もう一度登録できる
+    const again = t.browser();
+    assert.equal((await again.post('/api/register/start', { phone: '09066660002' })).status, 200);
+  } finally { await t.close(); }
+});
+
+test('スタッフ: 認証アプリとパスワードの再発行（それまでのログインは切れる）。QR コードを返す', async () => {
+  const t = await setup();
+  try {
+    const made = (await t.admin.post('/api/staff/accounts', { loginId: 'shinko', name: '進行 次郎', role: 'auctioneer' })).json;
+    assert.match(made.qrSvg, /^<svg/, '認証アプリに読み取らせる QR コード');
+    const s = t.browser();
+    assert.equal((await s.post('/api/staff/login', { loginId: 'shinko', password: made.initialPassword, code: totp(made.totpSecret) })).status, 200);
+    const reset = (await t.admin.post(`/api/staff/accounts/${made.id}/reset`)).json;
+    assert.notEqual(reset.totpSecret, made.totpSecret);
+    assert.match(reset.qrSvg, /^<svg/);
+    assert.equal((await s.get('/api/me')).json.staff, null, '再発行すると、それまでのログインは切れる');
+    assert.equal((await t.browser().post('/api/staff/login', { loginId: 'shinko', password: made.initialPassword, code: totp(made.totpSecret) })).status, 401, '古い情報では入れない');
+    assert.equal((await t.browser().post('/api/staff/login', { loginId: 'shinko', password: reset.initialPassword, code: totp(reset.totpSecret) })).status, 200);
+  } finally { await t.close(); }
+});
+
+test('規約類: 主催者管理者が文面を入れると、だれでも読める。利用規約があれば、登録のときに同意が必須', async () => {
+  const t = await setup();
+  try {
+    assert.equal((await t.browser().get('/api/legal')).json.docs.terms.body, '');
+    const reception = await t.staffLogin('reception', 'uketsuke');
+    assert.equal((await reception.post('/api/settings/legal', { terms: 'x' })).status, 403);
+    const long = '第1条（検証用の文面）\n' + 'あ'.repeat(30000);
+    assert.equal((await t.admin.post('/api/settings/legal', { terms: long, privacy: '個人情報の取り扱い（検証用）' })).status, 200);
+    const docs = (await t.browser().get('/api/legal')).json.docs;
+    assert.deepEqual([docs.terms.title, docs.terms.body.length, docs.privacy.body, docs.tokushoho.body], ['利用規約', long.length, '個人情報の取り扱い（検証用）', '']);
+    // 同意なしでは登録できない
+    const b = t.browser();
+    await b.post('/api/register/start', { phone: '09088880001' });
+    await b.post('/api/register/verify', { phone: '09088880001', code: /(\d{6})/.exec(t.outbox().filter((m) => m.channel === 'sms' && m.to === '09088880001').at(-1).body)[1] });
+    const person = { kind: 'b2c', name: '検証 花子', email: 'h@example.com', address: '東京都千代田区1', adult: true };
+    assert.ok((await b.post('/api/register/complete', person)).json.errors.agreed);
+    assert.equal((await b.post('/api/register/complete', { ...person, agreed: true })).status, 200);
+  } finally { await t.close(); }
+});
+
+test('受付で、参加手続きを代わりに行う（会場参加・来場確認済みになる）', async () => {
+  const t = await setup();
+  try {
+    const reception = await t.staffLogin('reception', 'uketsuke');
+    // 会員登録だけ済ませた人
+    const b = t.browser();
+    await b.post('/api/register/start', { phone: '09088880002' });
+    await b.post('/api/register/verify', { phone: '09088880002', code: /(\d{6})/.exec(t.outbox().filter((m) => m.channel === 'sms' && m.to === '09088880002').at(-1).body)[1] });
+    await b.post('/api/register/complete', { kind: 'b2c', name: '検証 三郎', email: 's@example.com', address: '東京都千代田区3', adult: true });
+    assert.equal((await reception.post('/api/reception/join', { phone: '09099999999', receive: 'pickup', payment: 'cash' })).status, 404);
+    assert.equal((await reception.post('/api/reception/join', { phone: '09088880002', receive: 'pickup' })).status, 400, '受け取り方法と支払方法の両方が要る');
+    const joined = await reception.post('/api/reception/join', { phone: '090-8888-0002', receive: 'pickup', payment: 'cash' });
+    assert.deepEqual([joined.status, joined.json.paddle], [200, 1]);
+    const p = (await b.get('/api/participation')).json;
+    assert.deepEqual([p.joined, p.mode, p.checkedIn, p.payment, p.paddle], [true, 'venue', true, 'cash', 1]);
+    assert.equal((await reception.post('/api/reception/join', { phone: '09088880002', receive: 'ship', payment: 'transfer' })).status, 409, '2度はできない');
+    assert.equal(t.api.proxyTarget(1).paddle_no, 1, '代理入札の対象になる');
+  } finally { await t.close(); }
+});
+
+test('個人の上限額（FR-AUTH-008）: 落札済み＋ほかの品で最高の額＋これから入れる額が、上限を超えると OVER_LIMIT', async () => {
+  const t = await setup();
+  try {
+    const a = await t.member(1);
+    const lot1 = t.sold('飯ごう', [[a, 6000]]);                        // 落札済み 6,000円
+    const m = t.store.db.prepare('SELECT id, account_id, event_id FROM members WHERE id = ?').get(a.pid);
+    const open = (title, bids) => {
+      const id = t.store.db.prepare("INSERT INTO lots (lot_no, event_id, title, start_price, status, updated_at) VALUES ((SELECT MAX(lot_no) + 1 FROM lots), ?, ?, 1000, 'open', 0)").run(t.eventId, title).lastInsertRowid;
+      for (const amount of bids) {
+        const seq = t.store.db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM bids').get().n;
+        t.store.db.prepare("INSERT INTO bids (seq, lot_id, member_id, amount, received_at, result) VALUES (?,?,?,?,0,'ACCEPTED')").run(seq, id, a.pid, amount);
+        t.store.db.prepare('UPDATE lots SET current_bid_seq = ? WHERE id = ?').run(seq, id);
+      }
+      return Number(id);
+    };
+    const lot2 = open('寝袋', [3000]);                                  // ほかの品で最高 3,000円
+    const lot3 = open('水筒', []);
+    assert.equal(t.api.bidGate(m, { lotId: lot3, amount: 5000 }), null, '上限額が設定されていなければ、判定しない');
+    await t.admin.post('/api/settings', { orgName: '株式会社レイワ', returnPolicy: '仮', shippingNotice: '仮', b2cLimit: '10000' });
+    assert.equal(t.api.bidGate(m, { lotId: lot3, amount: 1000 }), null, '6,000＋3,000＋1,000 = 10,000 は、上限ちょうどなので通る');
+    assert.equal(t.api.bidGate(m, { lotId: lot3, amount: 1500 }), 'OVER_LIMIT');
+    assert.equal(t.api.bidGate(m, { lotId: lot2, amount: 4000 }), null, '同じ品の自分の入札は、二重に数えない（6,000＋4,000）');
+    assert.ok(lot1);
+  } finally { await t.close(); }
+});
+
+test('違約金・遅延損害金の金額の案、帳簿の出力、請求書の一覧（Excel）', async () => {
+  const t = await setup();
+  try {
+    const a = await t.member(1), b = await t.member(2, { venue: true });
+    t.sold('飯ごう', [[a, 10000]]);
+    t.sold('寝袋', [[b, 3000]]);
+    const sleeping = await t.line('寝袋');
+    await t.admin.post('/api/billing/settle', { lineIds: [sleeping.id] });
+    await t.admin.post(`/api/billing/lines/${sleeping.id}/deliver`);
+    const [inv] = await t.endEvent();
+    await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);            // 期限 12/11
+    const l = await t.line('飯ごう');
+    assert.equal((await t.admin.get(`/api/billing/lines/${l.id}/penalty-suggest`)).json.amount, null, '率が設定されていなければ、案は出さない');
+    await t.admin.post('/api/settings', { orgName: '株式会社レイワ', returnPolicy: '仮', shippingNotice: '仮', penaltyRateB2c: '10', lateRateB2c: '14.6' });
+    await t.advance(15);                                                   // 12/22: 期限から11日
+    await t.admin.post(`/api/billing/lines/${l.id}/cancel`, { reason: '未払い' });
+    assert.equal((await t.admin.get(`/api/billing/lines/${l.id}/penalty-suggest`)).json.amount, 1000, '違約金の案: 落札額 10,000円 × 10%');
+    const late = (await t.admin.get(`/api/billing/lines/${l.id}/penalty-suggest?kind=late`)).json;
+    assert.deepEqual([late.days, late.amount], [11, Math.floor(11000 * 14.6 / 100 * 11 / 365)], '遅延損害金の案: 期限の翌日から解除の日までを日割りし、1円未満は切り捨て');
+
+    const ledger = await t.admin.get('/api/billing/ledger.csv?month=2026-12');
+    assert.match(ledger.buf.toString('utf8'), /"2026-12-07","No\.2 寝袋","1","","3000","検証 2郎","東京都千代田区2","09066660002"/, '引き渡した品だけが、帳簿に出る');
+    assert.equal(ledger.buf.toString('utf8').includes('飯ごう'), false);
+    const xlsx = await t.admin.get('/api/billing/invoices.xlsx?month=2026-12');
+    assert.equal(xlsx.buf.subarray(0, 2).toString(), 'PK');
+    const reception = await t.staffLogin('reception', 'uketsuke');
+    assert.equal((await reception.get('/api/billing/ledger.csv')).status, 403);
+  } finally { await t.close(); }
+});

@@ -1,6 +1,7 @@
 // マイページ: 登録した内容の確認と、メールアドレスの確認の状態。
 'use strict';
 
+let profile = null;
 (async () => {
   const me = await setupNav();
   const m = me.member;
@@ -24,6 +25,7 @@
     ['メールアドレス', m.email + (m.emailVerified ? '（確認済み）' : '（未確認）')],
     ['住所', m.address], ['配送先', m.shipTo], ['請求先', m.billing],
   ];
+  profile = m;
   $('#facts').replaceChildren(...rows.filter(([, v]) => v).flatMap(([k, v]) => [el('dt', { text: k }), el('dd', { class: 'pre dyn', text: v })]));
 })();
 
@@ -57,3 +59,33 @@ async function loadBilling() {
     ].filter(Boolean).join('　') }),
     l.invoice && el('a', { href: `/api/billing/invoices/${l.invoice.id}/pdf`, text: `請求書 ${l.invoice.number}（PDF）` }))));
 }
+
+// ---- 登録内容の変更と、退会
+const dlg = $('#dlg');
+$('#editBtn').addEventListener('click', () => {
+  const m = profile;
+  const corp = m.kind === 'b2b';
+  const form = el('form', { class: 'form', novalidate: true },
+    corp && field('会社名', 'company', { value: m.company, required: true }),
+    corp && field('担当者名', 'contactName', { value: m.contactName, required: true }),
+    corp && field('請求先', 'billing', { value: m.billing, rows: 2, required: true }),
+    field('氏名', 'name', { value: m.name, required: true, autocomplete: 'name' }),
+    field('メールアドレス', 'email', { value: m.email, type: 'email', required: true, autocomplete: 'email' }, '変えると、新しいアドレスに確認のメールを送ります'),
+    field('住所', 'address', { value: m.address, rows: 2, required: true }),
+    field('配送先', 'shipTo', { value: m.shipTo ?? '', rows: 2 }, '住所と違う場合だけ'),
+    el('p', { class: 'note', text: '電話番号の変更は、本人の確認が要るため、会場の受付にお申し出ください。' }),
+    el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
+    el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '保存する' }), el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() })));
+  onSubmit(form, async (data) => { const res = await api('POST', '/api/my/profile', data); if (res.ok) location.reload(); return res; });
+  dlg.replaceChildren(el('h2', { text: '登録内容の変更' }), form);
+  dlg.showModal();
+});
+$('#withdrawBtn').addEventListener('click', () => {
+  const msg = el('p', { class: 'msg', role: 'alert' });
+  dlg.replaceChildren(el('h2', { text: '退会しますか？' }),
+    el('p', { text: '退会すると、ログインできなくなります。お取引の記録は、法令で定められた期間、保管します。' }), msg,
+    el('div', { class: 'actions' },
+      el('button', { class: 'btn btn-danger', type: 'button', text: '退会する', onclick: async () => { const res = await api('POST', '/api/my/withdraw'); if (res.ok) location.href = '/'; else msg.textContent = res.message; } }),
+      el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() })));
+  dlg.showModal();
+});

@@ -43,7 +43,7 @@ function syncKind() {
 }
 forms.profile.addEventListener('change', syncKind);
 onSubmit(forms.profile, async (data) => {
-  const res = await api('POST', '/api/register/complete', { ...data, adult: data.adult === '1' });
+  const res = await api('POST', '/api/register/complete', { ...data, adult: data.adult === '1', agreed: data.agreed === '1' });
   // 入札画面（会場の QR コードなど）から来た人は、登録のあと入札画面の参加手続きへ進める（FR-AUTH-007）
   if (res.ok) location.href = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/mypage.html?registered=1';
   else if (res.status === 401) { res.message = '時間が空いたため、電話番号の確認からやり直してください'; show('phone'); }
@@ -56,4 +56,7 @@ onSubmit(forms.profile, async (data) => {
   if (me.member) location.replace('/mypage.html');
   else if (me.registering) show('profile'); // 認証まで済ませて、読み込み直した場合
   syncKind();
+  // 利用規約が登録されていれば、同意の欄を出す
+  const legal = await api('GET', '/api/legal');
+  if (legal.ok && legal.docs.terms.body) $('#agreeRow').hidden = false;
 })();

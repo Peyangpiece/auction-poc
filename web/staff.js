@@ -3,6 +3,7 @@
 'use strict';
 
 const toConsole = new URLSearchParams(location.search).get('next') === 'console';
+const toMonitor = new URLSearchParams(location.search).get('next') === 'monitor';
 const dlg = $('#dlg');
 const panel = $('#panel');
 let me = null;
@@ -85,11 +86,14 @@ async function membersPanel() {
     el('td', { text: m.kind === 'b2b' ? '法人' : '個人' }),
     el('td', { class: 'n', text: m.phone }),
     el('td', { class: 'dyn', text: m.email + (m.emailVerified ? '' : '（未確認）') }),
-    el('td', { class: 'dyn' }, m.suspended ? el('span', { class: 'warn', text: `停止中: ${m.suspendReason}` }) : '利用中'),
-    act(m.suspended
+    el('td', { class: 'dyn' }, m.withdrawn ? '退会' : m.suspendedBy === 'manual' ? el('span', { class: 'warn', text: `停止中: ${m.suspendReason}` })
+      : m.suspendedBy === 'unpaid' ? el('span', { class: 'warn', text: '未払いによる停止（消し込むと、自動で解ける）' }) : '利用中'),
+    act(!m.withdrawn && smallBtn('電話番号を変更', () => askForm(`会員 ${m.id} の電話番号を変更`, '本人を確かめたうえで、変更してください。変更すると、古い番号でのログインは切れます。',
+        [field('新しい電話番号', 'phone', { type: 'tel', inputMode: 'tel', required: true }), field('本人を確かめた方法', 'reason', { required: true, placeholder: '会場で、運転免許証で確かめた' })], (d) => api('POST', `/api/members/${m.id}/phone`, d), '変更する')),
+      m.suspendedBy === 'manual'
       ? smallBtn('停止を解く', async () => { await api('POST', `/api/members/${m.id}/unsuspend`); show('members'); })
-      : smallBtn('停止', () => askReason(`会員 ${m.id} を停止`, '停止の理由', true, (reason) => api('POST', `/api/members/${m.id}/suspend`, { reason })), 'btn-danger'))));
-  return [table(['会員番号', '名前', '区分', '電話番号', 'メール', '状態', ''], rows, '会員はまだいません。')];
+      : !m.withdrawn && m.suspendedBy !== 'unpaid' && smallBtn('停止', () => askReason(`会員 ${m.id} を停止`, '停止の理由', true, (reason) => api('POST', `/api/members/${m.id}/suspend`, { reason })), 'btn-danger'))));
+  return [el('p', { class: 'msg', id: 'line', role: 'alert' }), table(['会員番号', '名前', '区分', '電話番号', 'メール', '状態', ''], rows, '会員はまだいません。')];
 }
 
 // ------------------------------------------------------------ 受付: 来場確認（FR-MODE-002・004）と、会場の QR コード
@@ -112,7 +116,13 @@ async function receptionPanel() {
   return [
     el('div', { class: 'toolbar' },
       el('p', { class: 'dyn', text: `${res.event.title}　確認待ち ${waiting} 人` }),
-      el('div', {}, smallBtn('更新', () => show('reception')), ' ', smallBtn('会場の QR コード', () => qrDialog(res.event), 'btn-primary'))),
+      el('div', {}, smallBtn('更新', () => show('reception')), ' ',
+        smallBtn('参加手続きを代わりに行う', () => askForm('参加手続きを、代わりに行う', '会員登録は済んでいるが、端末で手続きできない人に使います。受け取り方法と支払方法を、本人に聞いて選んでください。会場参加・来場確認済みになります。',
+          [field('会員の電話番号', 'phone', { type: 'tel', inputMode: 'tel', required: true }),
+            field('受け取り方法', 'receive', { options: [['', '選んでください'], ['pickup', '現地受け取り'], ['ship', '配送']] }),
+            field('支払方法', 'payment', { options: [['', '選んでください'], ['cash', '当日現金'], ['transfer', '銀行振込']] })],
+          async (d) => { const r = await api('POST', '/api/reception/join', d); if (r.ok) alertLine(`参加番号 ${r.paddle} を振りました。この番号の札を渡してください。`); return r; }, '参加番号を振る')), ' ',
+        smallBtn('会場の QR コード', () => qrDialog(res.event), 'btn-primary'))),
     el('p', { class: 'note', text: '本人と参加番号を確かめてから「来場を確認」を押し、その番号の札を渡してください。' }),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['参加番号', '名前', '参加', '受け取り・支払', '来場', ''], rows, '参加手続きを済ませた人は、まだいません。'),
@@ -145,6 +155,21 @@ function qrDialog(event) {
 const LINE_STATE = { unsettled: '未精算', billed: '請求済み', unpaid: '未払い', cleared: '消し込み済み', delivered: '引き渡し済み', cancelled: '解除' };
 const INV_KIND = { cash: '現金の精算', transfer: '振込', promote: '繰り上げ', penalty: '違約金など' };
 const isAdmin = () => me.role === 'admin';
+// 送料: 金額と内容（運送会社・大きさなど）を、あとから手で入れる。まだ送っていない請求書があれば、その請求書に足す
+const shippingForm = (accountId, eventId, name, now = null) => askForm('送料を入力', `${name}。金額は、あとから直せます（請求書を「送付済み」にするまで）。0円で、送料の行を消します。`,
+  [field('送料（円・税込）', 'amount', { inputMode: 'numeric', required: true, value: now?.amount ?? '' }), field('内容', 'label', { value: (now?.label ?? '').replace('【送料】', ''), placeholder: 'ヤマト運輸 120サイズ' }, '請求書に「【送料】」に続けて載ります')],
+  (d) => api('POST', '/api/billing/shipping', { accountId, eventId, amount: Number(d.amount), label: d.label }), '請求書に反映する');
+// 認証アプリに読み取らせる QR コード（画像として出す）
+const qrImg = (svg) => el('img', { class: 'qr', alt: '認証アプリ用の QR コード', width: 200, height: 200, src: 'data:image/svg+xml;base64,' + btoa(svg) });
+const secretsDialog = (title, res) => openDialog(title,
+  el('p', { text: '次の内容は、この画面を閉じると二度と表示できません。本人に、安全な方法で渡してください。' }),
+  el('dl', { class: 'facts' },
+    el('dt', { text: 'ログイン ID' }), el('dd', { text: res.loginId }),
+    el('dt', { text: '仮のパスワード' }), el('dd', {}, el('div', { class: 'secret', text: res.initialPassword })),
+    el('dt', { text: '認証アプリの鍵' }), el('dd', {}, el('div', { class: 'secret', text: res.totpSecret }))),
+  qrImg(res.qrSvg),
+  el('p', { class: 'note', text: '認証アプリ（Google Authenticator など）で、QR コードを読み取ります。読み取れないときは「セットアップキーを入力」で鍵を入れます（種類は「時間ベース」）。' }),
+  el('div', { class: 'actions' }, closeBtn('渡したので閉じる')));
 const post = async (url, body) => { const r = await api('POST', url, body); if (!r.ok) alertLine(r.message); show(current); return r; };
 /** 入力を1つ（または2つ）聞いてから実行する */
 function askForm(title, note, fields, run, okText = '実行する') {
@@ -189,15 +214,22 @@ async function billingPanel() {
         a && l.state === 'cleared' && smallBtn('消し込みを取り消す', () => askReason('消し込みを取り消す', '取り消しの理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/unclear`, { reason }))),
         a && l.state === 'delivered' && smallBtn('引き渡しを取り消す', () => askReason('引き渡しの記録を取り消す', '取り消しの理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/undeliver`, { reason }))),
         a && l.state === 'cancelled' && l.kind === 'lot' && !l.offer && smallBtn('繰り上げを打診', () => post(`/api/billing/lines/${l.id}/offer`)),
-        a && l.state === 'cancelled' && smallBtn('違約金', () => askForm('違約金の請求', '金額を確かめて、確定してください。別の請求書を発行します。',
-          [field('金額（円）', 'amount', { inputMode: 'numeric', required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/penalty`, { kind: 'penalty', amount: Number(d.amount) }), '請求書を発行')),
+        a && ['lot', 'promote'].includes(l.kind) && l.receive === 'ship' && l.state !== 'cancelled' && smallBtn('送料', () => shippingForm(l.accountId, l.eventId, l.name)),
+        // 違約金・遅延損害金: 設定の率から計算した案を初めに入れておく。金額は、確かめてから確定する
+        ...(a && l.state === 'cancelled' || a && ['cleared', 'delivered'].includes(l.state) && l.invoice?.dueDate && l.clearedOn > l.invoice.dueDate ? [l.state === 'cancelled' ? ['penalty', '違約金'] : ['late', '遅延損害金']].map(([kind, name]) => smallBtn(name, async () => {
+          const hint = await api('GET', `/api/billing/lines/${l.id}/penalty-suggest?kind=${kind}`);
+          askForm(`${name}の請求`, `金額を確かめて、確定してください。別の請求書を発行します。${hint.basis ? `（${hint.basis}）` : ''}`,
+            [field('金額（円）', 'amount', { inputMode: 'numeric', required: true, value: hint.amount ?? '' })], (d) => api('POST', `/api/billing/lines/${l.id}/penalty`, { kind, amount: Number(d.amount) }), '請求書を発行');
+        })) : []),
         a && ['cancelled', 'cleared', 'delivered'].includes(l.state) && smallBtn('返金', () => askForm('返金の記録', `${l.name}　${l.label}`,
           [field('返金額（円）', 'amount', { inputMode: 'numeric', required: true }), field('返金日', 'date', { type: 'date', value: res.today, required: true }),
             field('方法', 'method', { options: [['transfer', '振込'], ['cash', '現金']] }), field('理由', 'reason', { rows: 2, required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/refund`, { ...d, amount: Number(d.amount) }), '記録する'))));
   });
   const nodes = [
     el('div', { class: 'toolbar' }, el('p', { class: 'note', text: '当日現金は、明細を選んで「精算」。振込は、入金を確かめて「消し込み」。引き渡しは、消し込みのあとにだけ記録できます。' }),
-      el('div', {}, settleBtn, ' ', isAdmin() && el('a', { class: 'btn', href: '/api/billing/shipping.csv', text: '配送の一覧（CSV）' }))),
+      el('div', {}, settleBtn, ' ', isAdmin() && el('a', { class: 'btn', href: '/api/billing/shipping.csv', text: '配送の一覧（CSV）' }), ' ',
+        isAdmin() && el('a', { class: 'btn', href: `/api/billing/ledger.csv?month=${res.today.slice(0, 7)}`, text: '帳簿用の記録（CSV）' }), ' ',
+        isAdmin() && el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（Excel）' }))),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['', '参加番号', '落札者・品', '金額', '受け取り・支払', '状態', ''], rows, '落札した品は、まだありません。'),
   ];
@@ -209,6 +241,7 @@ async function billingPanel() {
         el('td', { class: 'n', text: i.number }), el('td', { class: 'dyn', text: i.name }), el('td', { text: INV_KIND[i.kind] }), el('td', { class: 'n', text: yen(i.total) }), el('td', { class: 'n', text: i.issuedOn }),
         el('td', {}, i.kind === 'cash' ? 'その場で渡した' : i.sentOn ? `送付 ${i.sentOn}　期限 ${i.dueDate}` : el('span', { class: i.stale ? 'warn' : '', text: i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付' })),
         act(el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: 'PDF' }), el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/xlsx`, text: 'Excel' }),
+          !['cash', 'penalty'].includes(i.kind) && !i.sentOn && smallBtn(i.shipping ? `送料 ${yen(i.shipping.amount)}` : '送料を入力', () => shippingForm(i.accountId, i.eventId, i.name, i.shipping)),
           i.kind !== 'cash' && (i.sentOn ? smallBtn('送付を取り消す', () => post(`/api/billing/invoices/${i.id}/unsent`)) : smallBtn('送付済みにする', () => post(`/api/billing/invoices/${i.id}/sent`), 'btn-primary'))))), '請求書は、まだありません。'));
   }
   return nodes;
@@ -227,7 +260,7 @@ async function feesPanel() {
   const pick = el('input', { class: 'input', type: 'month', value: f.month, 'aria-label': '月', onchange: (ev) => { feeMonth = ev.target.value; show('fees'); } });
   return [
     el('div', { class: 'toolbar' }, el('div', { class: 'monthpick' }, pick),
-      f.confirmedOn ? el('p', { text: `確認済み（${f.confirmedOn}）` }) : smallBtn('この月の明細を、確認済みにする', () => post('/api/billing/fees/confirm', { month: f.month }), 'btn-primary')),
+      f.confirmedOn ? el('p', { text: `確認済み（${f.confirmedOn}）` }) : isAdmin() && smallBtn('この月の明細を、確認済みにする', () => post('/api/billing/fees/confirm', { month: f.month }), 'btn-primary')),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     el('dl', { class: 'facts' },
       el('dt', { text: '対象の落札額（消し込み済み・税込）' }), el('dd', { class: 'n', text: yen(f.base) }),
@@ -265,7 +298,8 @@ async function staffPanel() {
   const rows = res.staff.map((s) => el('tr', {},
     el('td', { text: s.loginId }), el('td', { class: 'dyn', text: s.name }), el('td', { text: s.roleLabel }),
     el('td', { text: s.active ? '利用中' : '停止' }),
-    act(s.active && s.loginId !== me.loginId && smallBtn('停止', async () => { const r = await api('POST', `/api/staff/accounts/${s.id}/stop`); if (!r.ok) alertLine(r.message); else show('staff'); }, 'btn-danger'))));
+    act(s.active && smallBtn('再発行', async () => { const r = await api('POST', `/api/staff/accounts/${s.id}/reset`); if (r.ok) secretsDialog('パスワードと認証アプリを再発行しました', r); else alertLine(r.message); }),
+      s.active && s.loginId !== me.loginId && smallBtn('停止', async () => { const r = await api('POST', `/api/staff/accounts/${s.id}/stop`); if (!r.ok) alertLine(r.message); else show('staff'); }, 'btn-danger'))));
   return [
     el('div', { class: 'toolbar' }, smallBtn('パスワードを変える', passwordDialog), smallBtn('スタッフを作る', staffDialog, 'btn-primary')),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
@@ -276,7 +310,7 @@ function staffDialog() {
   const form = el('form', { class: 'form', novalidate: true },
     field('ログイン ID', 'loginId', { required: true, autocapitalize: 'none', spellcheck: false }, '半角の英小文字・数字で 3〜32 文字'),
     field('名前', 'name', { required: true }),
-    field('役割', 'role', { options: [['auctioneer', '進行役'], ['reception', '受付係'], ['admin', '主催者管理者']] }),
+    field('役割', 'role', { options: [['auctioneer', '進行役'], ['reception', '受付係'], ['admin', '主催者管理者'], ['operator', '開発・運営者（手数料と記録を見るだけ）']] }),
     field('電話番号', 'phone', { type: 'tel', inputMode: 'tel' }, '任意。この番号では会員登録できなくなります'),
     msgLine(),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '作る' }), closeBtn()));
@@ -284,14 +318,7 @@ function staffDialog() {
     const res = await api('POST', '/api/staff/accounts', data);
     if (res.ok) {
       show('staff');
-      openDialog('スタッフを作りました',
-        el('p', { text: '次の内容は、この画面を閉じると二度と表示できません。本人に、安全な方法で渡してください。' }),
-        el('dl', { class: 'facts' },
-          el('dt', { text: 'ログイン ID' }), el('dd', { text: res.loginId }),
-          el('dt', { text: '仮のパスワード' }), el('dd', {}, el('div', { class: 'secret', text: res.initialPassword })),
-          el('dt', { text: '認証アプリの鍵' }), el('dd', {}, el('div', { class: 'secret', text: res.totpSecret }))),
-        el('p', { class: 'note', text: '認証アプリ（Google Authenticator など）で「セットアップキーを入力」を選び、鍵を入れます。種類は「時間ベース」です。' }),
-        el('div', { class: 'actions' }, closeBtn('渡したので閉じる')));
+      secretsDialog('スタッフを作りました', res);
     }
     return res;
   });
@@ -331,6 +358,23 @@ function sealBox() {
   return el('div', { class: 'sealbox' }, preview, el('div', {}, note, input, el('label', { class: 'btn', htmlFor: 'sealInput', text: '画像を選ぶ' }), ' ',
     el('button', { class: 'btn', type: 'button', text: '登録を消す', onclick: async () => { await api('POST', '/api/settings/seal', { image: null }); refresh(); } })));
 }
+// 規約類（利用規約・特定商取引法に基づく表示・プライバシーポリシー）の文面
+async function legalBox() {
+  const res = await api('GET', '/api/legal');
+  const form = el('form', { class: 'form', novalidate: true },
+    el('p', { class: 'note' }, '文面を入れると、', el('a', { href: '/legal.html', text: '規約のページ' }), 'に出ます。利用規約を入れると、会員登録のときに同意が必須になります。'),
+    field('利用規約', 'terms', { value: res.docs.terms.body, rows: 8 }),
+    field('特定商取引法に基づく表示', 'tokushoho', { value: res.docs.tokushoho.body, rows: 8 }),
+    field('プライバシーポリシー', 'privacy', { value: res.docs.privacy.body, rows: 8 }),
+    el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
+    el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '規約類を保存する' })));
+  onSubmit(form, async (data) => {
+    const r = await api('POST', '/api/settings/legal', data);
+    if (r.ok) { const m = $('.msg', form); m.classList.add('ok'); m.textContent = '保存しました'; return null; }
+    return r;
+  });
+  return el('div', {}, el('h2', { class: 'subhead', text: '規約類' }), form);
+}
 async function settingsPanel() {
   const s = await api('GET', '/api/settings');
   const form = el('form', { class: 'form', novalidate: true },
@@ -347,6 +391,14 @@ async function settingsPanel() {
     sealBox(),
     el('h2', { class: 'subhead', text: '買歩銭' }),
     field('買歩銭の割合（%）', 'buyerPremiumRate', { value: s.buyerPremiumRate, inputMode: 'numeric' }, '落札者が、落札額に上乗せして払う手数料。変えても、すでに落札した品の金額は変わりません'),
+    el('h2', { class: 'subhead', text: '個人の上限額・違約金' }),
+    field('個人（B2C）の、開催ごとの上限額（円）', 'b2cLimit', { value: s.b2cLimit, inputMode: 'numeric' }, '空なら、上限なし。落札済み＋最高入札中＋これから入れる額が超えると、入札できません'),
+    el('div', { class: 'grid2' },
+      field('解除の違約金（法人。落札額の %）', 'penaltyRateB2b', { value: s.penaltyRateB2b, inputMode: 'decimal' }),
+      field('解除の違約金（個人。落札額の %）', 'penaltyRateB2c', { value: s.penaltyRateB2c, inputMode: 'decimal' }),
+      field('遅延損害金（法人。年率 %）', 'lateRateB2b', { value: s.lateRateB2b, inputMode: 'decimal' }),
+      field('遅延損害金（個人。年率 %）', 'lateRateB2c', { value: s.lateRateB2c, inputMode: 'decimal' })),
+    el('p', { class: 'note', text: '率を入れると、違約金・遅延損害金を請求するときに、金額の案が出ます（確定は、金額を確かめてから）。空なら、金額を手で入れます。' }),
     el('h2', { class: 'subhead', text: '手数料の集計' }),
     el('div', { class: 'grid2' },
       field('消費税の扱い', 'feeTaxMode', { options: [['exclusive', '外税（手数料に消費税を足す）'], ['inclusive', '内税（手数料に含む）']], value: s.feeTaxMode || 'exclusive' }),
@@ -358,7 +410,7 @@ async function settingsPanel() {
     if (res.ok) { const m = $('.msg', form); m.classList.add('ok'); m.textContent = '保存しました'; return null; }
     return res;
   });
-  return [el('div', { class: 'narrowcol' }, form)];
+  return [el('div', { class: 'narrowcol' }, form, await legalBox())];
 }
 
 // ------------------------------------------------------------ 記録（監査ログ・知らせ）
@@ -366,7 +418,7 @@ async function auditPanel() {
   const [audit, notices] = await Promise.all([api('GET', '/api/audit'), api('GET', '/api/notices')]);
   const who = (e) => (e.actor_kind === 'staff' ? `スタッフ ${e.actor_id}` : e.actor_kind === 'member' ? `会員 ${e.actor_id}` : e.actor_kind === 'system' ? 'システム' : '');
   return [
-    notices.notices.length ? el('div', { class: 'banner', role: 'alert' }, el('span', { text: `送信に失敗した知らせが ${notices.notices.length} 件あります（SMS・メール）。` })) : null,
+    (notices.notices ?? []).length ? el('div', { class: 'banner', role: 'alert' }, el('span', { text: `送信に失敗した知らせが ${notices.notices.length} 件あります（SMS・メール）。` })) : null,
     table(['日時', '操作', '誰が', '対象', '前', '後', '理由'], audit.entries.map((e) => el('tr', {},
       el('td', { class: 'n', text: dateFmt.format(e.at) }), el('td', { text: e.type }), el('td', { text: who(e) }), el('td', { text: e.target }),
       el('td', { class: 'dyn', text: e.before ?? '' }), el('td', { class: 'dyn', text: e.after ?? '' }), el('td', { class: 'dyn', text: e.reason ?? '' }))), '記録はまだありません。'),
@@ -378,13 +430,13 @@ const PANELS = {
   reception: ['受付', receptionPanel, ['admin', 'auctioneer', 'reception']],
   billing: ['請求', billingPanel, ['admin', 'reception']],
   pickup: ['未引き取り', pickupPanel, ['admin', 'auctioneer', 'reception']],
-  fees: ['手数料', feesPanel, ['admin']],
+  fees: ['手数料', feesPanel, ['admin', 'operator']],
   events: ['開催', eventsPanel, ['admin']],
   members: ['会員', membersPanel, ['admin']],
   sms: ['SMS の制限', smsPanel, ['admin', 'auctioneer', 'reception']],
   staff: ['スタッフ', staffPanel, ['admin']],
   settings: ['設定', settingsPanel, ['admin']],
-  audit: ['記録', auditPanel, ['admin']],
+  audit: ['記録', auditPanel, ['admin', 'operator']],
 };
 async function show(key) {
   current = key;
@@ -396,7 +448,7 @@ async function show(key) {
 onSubmit($('#loginForm'), async (data) => {
   const res = await api('POST', '/api/staff/login', data);
   // 進行コンソールから来た人は、ログインのあと進行コンソールへ戻す
-  if (res.ok) { if (toConsole && ['admin', 'auctioneer'].includes(res.staff.role)) location.href = '/console.html'; else location.href = '/staff.html'; }
+  if (res.ok) { if (toMonitor) location.href = '/monitor.html'; else if (toConsole && ['admin', 'auctioneer'].includes(res.staff.role)) location.href = '/console.html'; else location.href = '/staff.html'; }
   else $('#loginForm').elements.code.value = '';
   return res;
 });
@@ -409,6 +461,7 @@ onSubmit($('#loginForm'), async (data) => {
   $('#who').textContent = `${me.name}（${me.roleLabel}）`;
   // 競りの進行は、主催者管理者と進行役（8.14）
   $('#toConsole').hidden = !['admin', 'auctioneer'].includes(me.role);
+  $('#toMonitor').hidden = me.role === 'operator'; // 会場の大型モニターは、会場にいるスタッフが開く
   const keys = Object.keys(PANELS).filter((k) => PANELS[k][2].includes(me.role));
   $('#tabs').replaceChildren(...keys.map((k) => el('button', { type: 'button', role: 'tab', 'data-key': k, text: PANELS[k][0], onclick: () => show(k) })));
   show(keys[0]);

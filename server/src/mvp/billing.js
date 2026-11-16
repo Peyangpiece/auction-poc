@@ -3,13 +3,13 @@
 // 送料は一切扱わない（FR-SHIP-001）。請求書に載せるのは、落札代金と、違約金・遅延損害金だけ。
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeInvoiceFiles } from './invoice-files.js';
+import { makeInvoiceFiles, makeInvoiceList } from './invoice-files.js';
 
 export const BILLING_SCHEMA = `
 -- 明細: 落札した品1つにつき1行（FR-INV-003）。違約金・遅延損害金・繰り上げも、同じ形の行として持つ
 CREATE TABLE IF NOT EXISTS bill_lines (
   id INTEGER PRIMARY KEY,
-  kind TEXT NOT NULL CHECK (kind IN ('lot','promote','penalty','late')),
+  kind TEXT NOT NULL CHECK (kind IN ('lot','promote','penalty','late','shipping')),   -- shipping: 送料（金額は、主催者管理者があとから手で入れる）
   event_id INTEGER NOT NULL, lot_id INTEGER, participant_id INTEGER, account_id INTEGER NOT NULL,
   label TEXT NOT NULL,                     -- 請求書に載せる名前（No. と品名）
   amount INTEGER NOT NULL CHECK (amount > 0),   -- 税込。落札の明細では、落札額
@@ -63,6 +63,16 @@ const FEE_RATE = 5; // 手数料 5%（FR-FEE-001。決定）
 export const addDays = (date, n) => new Date(Date.parse(date + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
 
 export function createBilling({ db, config, nowMs, audit, notifier, setting, route, needStaff, needMember, HttpError, bad }) {
+  // 以前の版のデータベース: 明細の種類に「送料」を足すには、表を作り直すしかない（SQLite の制約）。行の id は変えない
+  const oldLines = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bill_lines'").get();
+  if (oldLines && !oldLines.sql.includes("'shipping'")) {
+    db.transaction(() => {
+      const cols = db.prepare("SELECT name FROM pragma_table_info('bill_lines')").all().map((c) => c.name).join(', ');
+      db.exec('DROP INDEX IF EXISTS bill_lines_lot; ALTER TABLE bill_lines RENAME TO bill_lines_old;');
+      db.exec(BILLING_SCHEMA);
+      db.exec(`INSERT INTO bill_lines (${cols}) SELECT ${cols} FROM bill_lines_old; DROP TABLE bill_lines_old;`);
+    })();
+  }
   db.exec(BILLING_SCHEMA);
   if (!db.prepare("SELECT 1 FROM pragma_table_info('bill_lines') WHERE name = 'premium'").get()) db.exec('ALTER TABLE bill_lines ADD COLUMN premium INTEGER NOT NULL DEFAULT 0');
   const invoiceDir = path.join(config.dataDir, 'invoices');
@@ -160,27 +170,67 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       for (const l of lines) db.prepare('UPDATE bill_lines SET invoice_id = ? WHERE id = ?').run(r.lastInsertRowid, l.id);
       return { id: Number(r.lastInsertRowid), number };
     })();
-    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(info.id);
-    const a = account(first.account_id);
-    // PDF と Excel を作る（内容は同じ。正本は PDF）。ファイルは作り直さずに残す
+    return renderInvoice(info.id, { draft });
+  }
+  /**
+   * 請求書のファイル（PDF・Excel）を、いまの明細から作る。送料を足したり直したりしたときは、作り直す
+   * （作り直せるのは、送付済みにする前だけ。送ったあとの請求書は、変えない）。
+   */
+  function renderInvoice(invoiceId, { draft = false } = {}) {
+    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
+    const all = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ? ORDER BY id').all(invoiceId);
+    const lines = all.filter((l) => l.kind !== 'shipping'), shipping = all.filter((l) => l.kind === 'shipping');
+    const a = account(inv.account_id);
     const org = Object.fromEntries(['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'].map((k) => [k, setting(k)]));
     const files = makeInvoiceFiles({
-      dir: invoiceDir, invoice: inv, lines, org, to: { name: displayName(a), address: a.kind === 'b2b' && a.billing ? a.billing : a.address },
+      dir: invoiceDir, invoice: inv, lines, shipping, org, to: { name: displayName(a), address: a.kind === 'b2b' && a.billing ? a.billing : a.address },
       seal: sealFile(),
       premium: { total: lines.reduce((s, l) => s + (l.premium ?? 0), 0), rate: premiumRate() },
-      issuedOn: jst(inv.issued_at), paidOn: kind === 'cash' ? jst(inv.issued_at) : null,
+      issuedOn: jst(inv.issued_at), paidOn: inv.kind === 'cash' ? jst(inv.issued_at) : null,
       // 件名: 開催日と開催の名前
-      subject: (() => { const e = db.prepare('SELECT title, starts_at FROM events WHERE id = ?').get(first.event_id); return e ? `${Number(e.starts_at.slice(5, 7))}.${Number(e.starts_at.slice(8, 10))} 令和の競り ${e.title}` : '令和の競り'; })(),
+      subject: (() => { const e = db.prepare('SELECT title, starts_at FROM events WHERE id = ?').get(inv.event_id); return e ? `${Number(e.starts_at.slice(5, 7))}.${Number(e.starts_at.slice(8, 10))} 令和の競り ${e.title}` : '令和の競り'; })(),
     });
     db.prepare('UPDATE invoices SET pdf_file = ?, xlsx_file = ? WHERE id = ?').run(files.pdf, files.xlsx, inv.id);
     // 送付用のメールの下書き（FR-INV-007）。送信は、利用会社の担当者が自分で行う。当日現金の精算では作らない
     if (draft) {
-      files.done.then(() => notifier.draft(a.email, `【${org.org_name}】ご請求書（${inv.number}）`, `${displayName(a)} 様\n\n令和の競りのご請求書をお送りします。\n請求書番号: ${inv.number}\nご請求額: ${yen(total)}（税込）\n\nお振込の際は、依頼人名に請求書番号を入れてください。振込手数料は、お客様のご負担となります。\n落札価格に送料は含まれません。`, [files.pdf]))
+      files.done.then(() => notifier.draft(a.email, `【${org.org_name}】ご請求書（${inv.number}）`, `${displayName(a)} 様\n\n令和の競りのご請求書をお送りします。\n請求書番号: ${inv.number}\nご請求額: ${yen(inv.total)}（税込）\n\nお振込の際は、依頼人名に請求書番号を入れてください。振込手数料は、お客様のご負担となります。`, [files.pdf]))
         .then((ok) => db.prepare('UPDATE invoices SET draft_state = ? WHERE id = ?').run(ok ? 'made' : 'failed', inv.id))
         .catch(() => db.prepare("UPDATE invoices SET draft_state = 'failed' WHERE id = ?").run(inv.id));
     }
     return { ...inv, done: files.done };
   }
+
+  // ------------------------------------------------------------ 送料（発注者の決定: 請求書に送料の行を載せる。金額は、あとから手で入れる）
+  // 配送の落札者について、主催者管理者が金額と内容（運送会社・大きさなど）を入れる。まだ送っていない請求書があれば、
+  // その請求書に行を足して作り直す。なければ、送料だけの請求書を新しく出す。送料には、買歩銭も、開発・運営者の手数料もかからない
+  route('POST', '/api/billing/shipping', async (ctx, body) => {
+    needStaff(ctx, 'admin');
+    const accountId = Number(body.accountId), eventId = Number(body.eventId), amount = Number(body.amount);
+    const label = `【送料】${text(body.label, 80)}`.trim();
+    if (!account(accountId)) throw new HttpError(404, '落札者が見つかりません');
+    if (!Number.isSafeInteger(amount) || amount < 0) throw bad('送料を、0円以上の整数で入力してください（0円で、送料の行を消します）');
+    const open = db.prepare("SELECT * FROM invoices WHERE account_id = ? AND event_id = ? AND kind IN ('transfer','promote') AND sent_at IS NULL ORDER BY id DESC LIMIT 1").get(accountId, eventId);
+    const existing = open && db.prepare("SELECT * FROM bill_lines WHERE invoice_id = ? AND kind = 'shipping'").get(open.id);
+    if (existing?.cleared_at) throw new HttpError(409, 'この請求書の送料は、消し込み済みです。変えるには、先に消し込みを取り消してください');
+    let inv;
+    if (open) {
+      db.transaction(() => {
+        if (existing && amount === 0) db.prepare('DELETE FROM bill_lines WHERE id = ?').run(existing.id);
+        else if (existing) db.prepare('UPDATE bill_lines SET amount = ?, label = ? WHERE id = ?').run(amount, label, existing.id);
+        else if (amount > 0) db.prepare("INSERT INTO bill_lines (kind, event_id, account_id, label, amount, invoice_id, created_at) VALUES ('shipping',?,?,?,?,?,?)").run(eventId, accountId, label, amount, open.id, nowMs());
+        const sum = db.prepare('SELECT COALESCE(SUM(amount + premium), 0) AS n FROM bill_lines WHERE invoice_id = ?').get(open.id).n;
+        db.prepare('UPDATE invoices SET total = ? WHERE id = ?').run(sum, open.id);
+      })();
+      inv = renderInvoice(open.id, { draft: true }); // 請求書と下書きを、送料入りで作り直す
+    } else {
+      if (amount === 0) throw new HttpError(409, '消せる送料の行がありません');
+      const r = db.prepare("INSERT INTO bill_lines (kind, event_id, account_id, label, amount, created_at) VALUES ('shipping',?,?,?,?,?)").run(eventId, accountId, label, amount, nowMs());
+      inv = issueInvoice('transfer', [Number(r.lastInsertRowid)], { dueDays: 5, shiftHoliday: true, draft: true });
+    }
+    await inv.done;
+    audit(ctx, 'billing.shipping', { target: `invoice:${inv.number}`, after: { amount, label } });
+    return { ok: true, invoice: { id: inv.id, number: inv.number, total: db.prepare('SELECT total FROM invoices WHERE id = ?').get(inv.id).total } };
+  });
 
   /** 開催終了（FR-EVT-003）: まだ精算していない明細を、落札者ごとに1通の振込の請求書にまとめる（FR-INV-004） */
   function onEventEnd(eventId, ctx) {
@@ -293,7 +343,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   route('POST', '/api/billing/lines/:id/deliver', (ctx, body, id) => {
     const me = needStaff(ctx, 'admin', 'reception');
     const l = getLine(id);
-    if (l.kind === 'penalty' || l.kind === 'late') throw new HttpError(409, '違約金・遅延損害金には、引き渡しはありません');
+    if (l.kind === 'penalty' || l.kind === 'late' || l.kind === 'shipping') throw new HttpError(409, '違約金・遅延損害金・送料には、引き渡しはありません');
     if (l.cancelled_at) throw new HttpError(409, '解除した明細は、引き渡せません');
     if (!l.cleared_at) throw new HttpError(409, '消し込みが済んでいない明細は、引き渡せません');
     if (l.delivered_at) return { ok: true };
@@ -326,7 +376,8 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const a = account(i.account_id);
     return {
       id: i.id, number: i.number, kind: i.kind, name: displayName(a), email: a.email, total: i.total, issuedOn: jst(i.issued_at),
-      sentOn: i.sent_at ? jst(i.sent_at) : null, dueDate: i.due_date, draft: i.draft_state,
+      sentOn: i.sent_at ? jst(i.sent_at) : null, dueDate: i.due_date, draft: i.draft_state, accountId: i.account_id, eventId: i.event_id,
+      shipping: db.prepare("SELECT amount, label FROM bill_lines WHERE invoice_id = ? AND kind = 'shipping'").get(i.id) ?? null,
       // 下書きを作ってから1日たっても送付済みにならない請求書は、強調する
       stale: i.kind !== 'cash' && !i.sent_at && nowMs() - i.issued_at > DAY,
     };
@@ -414,6 +465,22 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     audit(ctx, 'billing.penalty', { target: `line:${id}`, after: { kind, amount, invoice: inv.number } });
     return { ok: true, invoice: inv.number };
   });
+  // 違約金・遅延損害金の金額の案（FR-PEN-001・002）。主催者設定の率から計算した値を示し、主催者管理者が確かめて確定する
+  route('GET', '/api/billing/lines/:id/penalty-suggest', (ctx, body, id) => {
+    needStaff(ctx, 'admin');
+    const l = getLine(id);
+    const a = account(l.account_id);
+    const kind = ctx.url.searchParams.get('kind') === 'late' ? 'late' : 'penalty';
+    const rate = Number(setting(`${kind}_rate_${a.kind}`)); // 法人と個人で、別の率を持つ
+    if (!(rate > 0)) return { amount: null, basis: '率が設定されていないため、金額を手で入力してください' };
+    if (kind === 'penalty') return { amount: Math.floor(l.amount * rate / 100), basis: `落札額 ${yen(l.amount)} × ${rate}%` };
+    // 遅延損害金: 支払期限の翌日から、消し込みの日（または解除の日。どちらもまだなら今日）までの日数で日割りし、1円未満は切り捨てる
+    const inv = l.invoice_id ? db.prepare('SELECT due_date FROM invoices WHERE id = ?').get(l.invoice_id) : null;
+    if (!inv?.due_date) return { amount: null, basis: '支払期限が決まっていない（未送付の）請求です' };
+    const end = l.cleared_at ? jst(l.cleared_at) : l.cancelled_at ? jst(l.cancelled_at) : today();
+    const days = Math.max(0, Math.round((Date.parse(end) - Date.parse(inv.due_date)) / DAY));
+    return { amount: Math.floor(payable(l) * rate / 100 * days / 365), days, basis: `${yen(payable(l))} × 年${rate}% × ${days}日 ÷ 365` };
+  });
   /** 次点: 落札者を除いた参加者のうち、その品で最も高い有効な入札をした人。停止中の会員は除く（FR-PAY-007） */
   function runnerUp(l) {
     const rows = db.prepare(`SELECT b.amount, m.id AS participant_id, m.account_id FROM bids b JOIN members m ON m.id = b.member_id
@@ -481,6 +548,31 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     return { file: { body: Buffer.from('﻿' + lines.join('\r\n') + '\r\n'), type: 'text/csv; charset=utf-8', name: 'shipping.csv' } };
   });
 
+  // 古物営業法16条の帳簿に使うための、取引の記録（FR-LEG-001）。引き渡した品を、日付・品目・数量・特徴・相手方で出す
+  route('GET', '/api/billing/ledger.csv', (ctx) => {
+    needStaff(ctx, 'admin');
+    const month = ctx.url.searchParams.get('month') ?? today().slice(0, 7);
+    const rows = db.prepare("SELECT * FROM bill_lines WHERE kind IN ('lot','promote') AND delivered_at IS NOT NULL ORDER BY delivered_at").all().filter((l) => jst(l.delivered_at).startsWith(month));
+    const esc = (v) => `"${String(v ?? '').replaceAll('"', '""')}"`;
+    const out = [['引き渡しの日', '品目', '数量', '特徴', '代金（税込）', '相手方の氏名・名称', '相手方の住所', '相手方の電話番号'].map(esc).join(',')];
+    for (const l of rows) { const a = account(l.account_id); out.push([jst(l.delivered_at), l.label, 1, '', l.amount, displayName(a), a.address, a.withdrawn_phone ?? a.phone].map(esc).join(',')); }
+    audit(ctx, 'billing.ledger_export', { target: `ledger:${month}`, after: { rows: rows.length } });
+    return { file: { body: Buffer.from('\ufeff' + out.join('\r\n') + '\r\n'), type: 'text/csv; charset=utf-8', name: `ledger-${month}.csv` } };
+  });
+  // 月ごとに、全請求書を1つの Excel にまとめた一覧（FR-INV-007）
+  route('GET', '/api/billing/invoices.xlsx', async (ctx) => {
+    needStaff(ctx, 'admin');
+    const month = ctx.url.searchParams.get('month') ?? today().slice(0, 7);
+    const list = db.prepare('SELECT * FROM invoices ORDER BY id').all().filter((i) => jst(i.issued_at).startsWith(month));
+    const KIND = { cash: '現金の精算', transfer: '振込', promote: '繰り上げ', penalty: '違約金など' };
+    const rows = list.map((i) => {
+      const lines = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ?').all(i.id);
+      const paid = lines.filter((l) => l.cleared_at).reduce((s, l) => s + payable(l), 0);
+      return [i.number, KIND[i.kind], displayName(account(i.account_id)), jst(i.issued_at), i.sent_at ? jst(i.sent_at) : '', i.due_date ?? '', i.total, paid, paid === i.total ? '支払済み' : paid > 0 ? '一部支払済み' : '未払い'];
+    });
+    return { file: { body: await makeInvoiceList(month, rows), type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: `invoices-${month}.xlsx` } };
+  });
+
   // ------------------------------------------------------------ 手数料の集計（FR-FEE-001〜010）
   const ceilFee = (amount) => Math.ceil(amount * FEE_RATE / 100);
   function feeSummary(month) {
@@ -513,7 +605,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     };
   }
   route('GET', '/api/billing/fees', (ctx) => {
-    needStaff(ctx, 'admin');
+    needStaff(ctx, 'admin', 'operator'); // 手数料の集計と明細は、開発・運営者も見られる（8.14）
     return feeSummary(ctx.url.searchParams.get('month') ?? today().slice(0, 7));
   });
   route('POST', '/api/billing/fees/confirm', (ctx, body) => {
@@ -526,7 +618,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   });
   // 長く未払いのままの明細: 支払期限の翌日から30日以上、消し込みも解除もされていない（FR-FEE-007）
   route('GET', '/api/billing/long-unpaid', (ctx) => {
-    needStaff(ctx, 'admin');
+    needStaff(ctx, 'admin', 'operator');
     const limit = addDays(today(), -30);
     const rows = db.prepare(`SELECT l.* FROM bill_lines l JOIN invoices i ON i.id = l.invoice_id
       WHERE l.cleared_at IS NULL AND l.cancelled_at IS NULL AND i.due_date IS NOT NULL AND i.due_date <= ? AND l.kind IN ('lot','promote') ORDER BY i.due_date`).all(limit);

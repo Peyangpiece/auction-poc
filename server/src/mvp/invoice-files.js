@@ -19,7 +19,7 @@ const clean = (v) => String(v ?? '').replace(/[\u2010-\u2015\u2212\uFE63\uFF0D]/
 const TITLE = { cash: '請求書 兼 領収書', transfer: '請求書', promote: '請求書', penalty: '請求書' };
 
 /** 請求書に書く内容を、PDF と Excel で共通の形にまとめる */
-function content({ invoice, lines, org: rawOrg, to: rawTo, issuedOn, paidOn, subject: rawSubject, premium, seal }) {
+function content({ invoice, lines, shipping = [], org: rawOrg, to: rawTo, issuedOn, paidOn, subject: rawSubject, premium, seal }) {
   const org = Object.fromEntries(Object.entries(rawOrg).map(([k, v]) => [k, clean(v)]));
   const to = { ...rawTo, name: clean(rawTo.name), address: clean(rawTo.address) };
   const subject = clean(rawSubject);
@@ -32,7 +32,8 @@ function content({ invoice, lines, org: rawOrg, to: rawTo, issuedOn, paidOn, sub
     notes.push(`お振込の際は、依頼人名に請求番号（${invoice.number}）を入れてください。振込手数料は、お客様のご負担となります。`);
   }
   if (invoice.receive_note) notes.push(`受け取り方法: ${invoice.receive_note}`);
-  if (invoice.kind !== 'penalty') notes.push('落札価格に送料は含まれません。配送の場合、送料は後日、別にご請求します。');
+  // 送料の行がない請求書にだけ、送料は別に請求することを書く
+  if (invoice.kind !== 'penalty' && !shipping.length && lines.length) notes.push('落札価格に送料は含まれません。配送の場合、送料は後日、別にご請求します。');
   return {
     title: TITLE[invoice.kind], number: invoice.number, date: jpDate(issuedOn), to, subject, total,
     // 支払期限は、送付日から数える（FR-INV-005）。請求書を作る時点では送付日が決まっていないので、数え方を書く
@@ -40,7 +41,9 @@ function content({ invoice, lines, org: rawOrg, to: rawTo, issuedOn, paidOn, sub
       : `お支払い期限 : 送付日の翌日から${invoice.due_days}日目${invoice.shift_holiday ? '（金融機関の休業日は前営業日）' : ''}`,
     issuer: { name: org.org_name, lines: [...String(org.org_address ?? '').split('\n').filter(Boolean), org.org_tel && `TEL: ${org.org_tel}`, org.org_email, `登録番号: ${org.invoice_reg_no || '（未設定）'}`].filter(Boolean) },
     // 落札した品を1行ずつ。そのあとに、買歩銭を1行（発注者から示された見本と同じ並び）
-    rows: [...lines.map((l) => [clean(l.label), 1, l.amount, l.amount]), ...(premium?.total ? [['買歩銭', 1, premium.total, premium.total]] : [])],
+    rows: [...lines.map((l) => [clean(l.label), 1, l.amount, l.amount]), ...(premium?.total ? [['買歩銭', 1, premium.total, premium.total]] : []),
+      // 最後に、送料（主催者管理者が手で入れた金額と内容）
+      ...shipping.map((l) => [clean(l.label), 1, l.amount, l.amount])],
     taxLabel: taxable ? '消費税 (10% 内税)' : '消費税', taxValue: taxable ? `(${num(tax)})` : '対象外',
     bank: invoice.kind === 'cash' ? null : (org.bank_account || '（未設定）'),
     seal, // 印鑑の画像（主催者設定で登録したもの。なければ押さない）
@@ -155,9 +158,19 @@ async function writeXlsx(file, c) {
 }
 
 /** PDF と Excel を作る。ファイルの場所はすぐに返し、書き終わりは done で待てる */
-export function makeInvoiceFiles({ dir, invoice, lines, org, to, issuedOn, paidOn, subject, premium, seal = null }) {
-  const c = content({ invoice, lines, org, to, issuedOn, paidOn, subject, premium, seal });
+export function makeInvoiceFiles({ dir, invoice, lines, shipping = [], org, to, issuedOn, paidOn, subject, premium, seal = null }) {
+  const c = content({ invoice, lines, shipping, org, to, issuedOn, paidOn, subject, premium, seal });
   const pdf = path.join(dir, `${invoice.number}.pdf`);
   const xlsx = path.join(dir, `${invoice.number}.xlsx`);
   return { pdf, xlsx, done: Promise.all([writePdf(pdf, c), writeXlsx(xlsx, c)]) };
+}
+
+/** 月ごとの請求書の一覧（Excel）。請求書の状態は、明細の消し込みから導く（FR-INV-003） */
+export async function makeInvoiceList(month, rows) {
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet(`請求書 ${month}`);
+  sheet.columns = [{ width: 16 }, { width: 12 }, { width: 28 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 14 }];
+  sheet.addRow(['請求番号', '種類', '宛先', '発行日', '送付日', '支払期限', '合計', '消し込み済み', '状態']).font = { bold: true };
+  for (const r of rows) { const row = sheet.addRow(r.map((v) => (typeof v === 'string' ? clean(v) : v))); row.getCell(7).numFmt = '#,##0'; row.getCell(8).numFmt = '#,##0'; }
+  return Buffer.from(await book.xlsx.writeBuffer());
 }

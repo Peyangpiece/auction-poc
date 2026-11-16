@@ -23,6 +23,7 @@ const REJECT = {
   // 停止の理由で、言葉を分ける（FR-BID-012）
   SUSPENDED: () => (S.unpaid ? 'お支払いの確認が取れていない請求があるため、参加が停止されています' : '参加が停止されています'),
   NOT_JOINED: () => '参加手続きを済ませてください',
+  OVER_LIMIT: () => '上限額を超えるため入札できません',
 };
 function say(text, kind = '') { $('msg').textContent = text; $('msg').dataset.kind = kind; }
 

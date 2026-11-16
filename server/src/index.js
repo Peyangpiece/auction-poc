@@ -292,6 +292,15 @@ function onClient(ws, req) {
           return ws.close(4403, found.code);
         }
         staff = found.staff;
+      } else if (msg.as === 'monitor') {
+        // 会場の大型モニター: スタッフのログインで名乗る。見るだけで、操作も入札もできない
+        const found = api.viewerFromCookie(req);
+        if (!found.staff) {
+          send({ type: 'error', code: found.code, message: found.message });
+          return ws.close(4403, found.code);
+        }
+        staff = found.staff;
+        conn.viewer = true;
       } else {
         const found = api.participantFromCookie(req);
         if (!found.member) {
@@ -311,7 +320,7 @@ function onClient(ws, req) {
       userConnections.set(userKey, open + 1);
       conn.userKey = userKey;
       clearTimeout(helloTimer);
-      conn.role = member ? 'member' : 'auctioneer';
+      conn.role = member ? 'member' : conn.viewer ? 'viewer' : 'auctioneer';
       conn.member = member ?? null;
       conn.staff = staff ?? null;
       clients.add(conn);

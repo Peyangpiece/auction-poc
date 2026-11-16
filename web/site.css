@@ -152,3 +152,7 @@ td .note { font-size: 12px; }
 .seal { width: 96px; height: 96px; object-fit: contain; background: #fff; border: 1px solid var(--line); border-radius: var(--r); }
 @media (max-width: 560px) { .brand__logo { height: 40px; } }
 @media (max-width: 370px) { .brand__logo { height: 34px; } }
+.legal-links { display: flex; gap: 4px 24px; flex-wrap: wrap; margin-top: 32px; font-size: 14px; }
+.legal-links a, .check a { color: var(--action); font-weight: 700; text-underline-offset: 4px; }
+.legaldoc { margin-bottom: 48px; scroll-margin-top: 16px; }
+.legaldoc h2 { font-size: 20px; color: var(--ink); margin-bottom: 12px; }

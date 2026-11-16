@@ -286,6 +286,19 @@ try {
   await admin.waitForFunction(() => document.querySelectorAll('#panel .state[data-on="1"]').length === 2);
   check(true, 'オンライン参加の人を、支払方法を選び直して、会場参加に切り替えられる');
 
+  console.log('会場の大型モニター');
+  const mon = await admin.context().newPage();
+  mon.on('pageerror', (e) => errors.push(`monitor: ${e.message}`));
+  await mon.setViewportSize({ width: 1600, height: 900 });
+  await mon.goto(sys.base + '/monitor.html');
+  await mon.waitForFunction(() => document.getElementById('price').textContent.includes('10,000'));
+  check((await mon.textContent('#who')).includes('最高入札者 2番') && (await mon.textContent('#title')).includes('防水シート'), '会場モニターに、品名・現在価格・最高入札者の参加番号が大きく出る');
+  check((await mon.locator('#history li').count()) === 2, '会場モニターに、入札の履歴が出る');
+  await shot(mon, 'mvp-28-monitor');
+  const anonMon = await open('/monitor.html');
+  await anonMon.waitForURL(/staff\.html\?next=monitor/);
+  check(true, 'ログインしていない人が会場モニターを開くと、スタッフのログインへ進む');
+
   console.log('進行: 代理入札・取り消し・締め・休憩・開催終了');
   check((await con.textContent('#evPhase')) === '進行中', '競りを始めると、開催が「進行中」になる');
   await con.click('#proxyBox summary');
@@ -376,6 +389,35 @@ try {
   await admin.waitForFunction(() => ['member.suspend', 'lot.create'].every((t) => document.querySelector('#panel').textContent.includes(t)));
   check(true, '会員の停止と、その場での商品登録が、記録に残る');
   await shot(admin, 'mvp-12-audit');
+
+  console.log('規約・登録内容の変更・スタッフの再発行');
+  await admin.click('#tabs [data-key=settings]');
+  await admin.waitForSelector('#panel [name=terms]');
+  await admin.fill('#panel [name=terms]', '第1条（検証用）\nこの文面は、画面の確認のための仮のものです。');
+  await admin.click('#panel >> text=規約類を保存する');
+  await admin.waitForFunction(() => [...document.querySelectorAll('#panel .msg.ok')].some((m) => m.textContent.includes('保存しました')));
+  const legal = await open('/legal.html#terms', devices['iPhone 13']);
+  await legal.waitForFunction(() => document.getElementById('terms')?.textContent.includes('第1条（検証用）'));
+  check((await legal.textContent('#tokushoho')).includes('準備中'), '規約のページに、入れた文面が出る。まだ入れていないものは「準備中」と出る');
+  await shot(legal, 'mvp-29-legal');
+  const reg = await open('/register.html', devices['iPhone 13']);
+  await reg.waitForSelector('#agreeRow', { state: 'attached' });
+  await reg.waitForFunction(() => !document.getElementById('agreeRow').hidden);
+  check(true, '利用規約を入れると、会員登録に同意の欄が出る');
+  // 退会していない方の会員（会場 花子）が、登録内容を変える
+  await guest.goto(sys.base + '/mypage.html');
+  await guest.waitForSelector('#facts dd');
+  await guest.click('#editBtn');
+  await guest.fill('#dlg [name=address]', '埼玉県◯◯市7-8-9');
+  await guest.click('#dlg button[type=submit]');
+  await guest.waitForFunction(() => document.getElementById('facts')?.textContent.includes('7-8-9'));
+  check(true, '会員が、登録内容を変えられる');
+  await admin.click('#tabs [data-key=staff]');
+  await admin.waitForSelector('#panel td.act >> text=再発行');
+  await admin.click('#panel tr:has-text("shinko") td.act >> text=再発行');
+  await admin.waitForFunction(() => { const i = document.querySelector('#dlg img.qr'); return i && i.complete && i.naturalWidth > 0; });
+  check((await admin.textContent('#dlg')).includes('認証アプリの鍵'), 'スタッフの認証アプリを再発行でき、QR コードが出る');
+  await admin.click('#dlg >> text=渡したので閉じる');
 
   // 幅の確認（横にはみ出さない）
   for (const url of ['/', '/register.html', '/login.html']) {

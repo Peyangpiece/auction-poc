@@ -23,7 +23,7 @@ const STAFF_LIFETIME = 12 * HOUR;   // スタッフ: 12時間（FR-AUTH-012）
 const REGISTER_LIFETIME = 15 * MIN; // SMS 認証から登録の完了まで
 const LOCK_AFTER = 5;               // パスワードの誤り5回で
 const LOCK_FOR = 15 * MIN;          // 15分ロック
-const ROLE_LABEL = { admin: '主催者管理者', auctioneer: '進行役', reception: '受付係' };
+const ROLE_LABEL = { admin: '主催者管理者', auctioneer: '進行役', reception: '受付係', operator: '開発・運営者' };
 
 class HttpError extends Error {
   constructor(status, message, extra = {}) { super(message); this.status = status; this.extra = extra; }
@@ -32,7 +32,20 @@ const bad = (message, extra) => new HttpError(400, message, extra);
 
 export function createApi({ store, config, nowMs }) {
   const db = store.db;
+  // 以前の版のデータベース: スタッフの役割に「開発・運営者」を足すには、表を作り直すしかない（SQLite の制約）。行の id は変えない
+  const oldStaff = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'staff_accounts'").get();
+  if (oldStaff && !oldStaff.sql.includes("'operator'")) {
+    db.transaction(() => {
+      const cols = db.prepare("SELECT name FROM pragma_table_info('staff_accounts')").all().map((c) => c.name).join(', ');
+      db.exec('ALTER TABLE staff_accounts RENAME TO staff_accounts_old;');
+      db.exec(MVP_SCHEMA);
+      db.exec(`INSERT INTO staff_accounts (${cols}) SELECT ${cols} FROM staff_accounts_old; DROP TABLE staff_accounts_old;`);
+    })();
+  }
   db.exec(MVP_SCHEMA);
+  for (const [col, type] of [['withdrawn_at', 'REAL'], ['withdrawn_phone', 'TEXT'], ['agreed_at', 'REAL']]) {
+    if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = ?").get(col)) db.exec(`ALTER TABLE member_accounts ADD COLUMN ${col} ${type}`);
+  }
   // 以前の版のデータベースに、後から足した列を加える
   for (const col of ['phase', 'resume_at']) if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = ?").get(col)) db.exec(`ALTER TABLE events ADD COLUMN ${col} TEXT`);
   if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'venue_code'").get()) db.exec('ALTER TABLE events ADD COLUMN venue_code TEXT');
@@ -197,6 +210,8 @@ export function createApi({ store, config, nowMs }) {
     }
     // 個人は、18歳以上であることの申告が必須（FR-AUTH-003）
     if (kind === 'b2c' && body.adult !== true) errors.adult = '18歳以上であることを確認してください';
+    // 利用規約が登録されていれば、同意が必須（文面は、主催者設定で入れる）
+    if (setting('legal_terms') && body.agreed !== true) errors.agreed = '利用規約とプライバシーポリシーをお読みのうえ、同意してください';
     if (Object.keys(errors).length) throw bad('入力を確かめてください', { errors });
     if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone) || db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) {
       throw new HttpError(409, 'この電話番号では登録できません');
@@ -205,12 +220,61 @@ export function createApi({ store, config, nowMs }) {
     const info = db.prepare(`INSERT INTO member_accounts (kind, name, phone, email, address, ship_to, company, contact_name, billing, adult_declared, created_at, updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(kind, name, phone, email, address, text(body.shipTo, 300) || null,
       kind === 'b2b' ? company : null, kind === 'b2b' ? contactName : null, kind === 'b2b' ? billing : null, kind === 'b2c' ? 1 : 0, now, now);
+    if (body.agreed === true) db.prepare('UPDATE member_accounts SET agreed_at = ? WHERE id = ?').run(now, info.lastInsertRowid);
     const member = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(info.lastInsertRowid);
     endSession(ctx);
     startSession(ctx, 'member', member.id, MEMBER_IDLE);
     audit({ ...ctx, member }, 'member.register', { target: `member:${member.id}`, after: { kind } });
     await sendEmailVerification(ctx, member); // 確認が済んでいなくても入札はできる（FR-AUTH-011）
     return { ok: true, member: memberView(member) };
+  });
+
+  // 登録内容の変更（本人）。電話番号は、ここでは変えられない（主催者管理者の本人確認が要る。FR-AUTH-006）
+  route('POST', '/api/my/profile', async (ctx, body) => {
+    const m = needMember(ctx);
+    const text = (v, max = 200) => String(v ?? '').trim().slice(0, max);
+    const next = { name: text(body.name), email: text(body.email, 254), address: text(body.address, 300), ship_to: text(body.shipTo, 300) || null,
+      company: m.kind === 'b2b' ? text(body.company) : null, contact_name: m.kind === 'b2b' ? text(body.contactName) : null, billing: m.kind === 'b2b' ? text(body.billing, 300) : null };
+    const errors = {};
+    if (!next.name) errors.name = '氏名を入力してください';
+    if (!isEmail(next.email)) errors.email = 'メールアドレスを正しく入力してください';
+    if (!next.address) errors.address = '住所を入力してください';
+    if (m.kind === 'b2b') { if (!next.company) errors.company = '会社名を入力してください'; if (!next.contact_name) errors.contactName = '担当者名を入力してください'; if (!next.billing) errors.billing = '請求先を入力してください'; }
+    if (Object.keys(errors).length) throw bad('入力を確かめてください', { errors });
+    const emailChanged = next.email !== m.email;
+    db.prepare('UPDATE member_accounts SET name=?, email=?, email_verified=?, address=?, ship_to=?, company=?, contact_name=?, billing=?, updated_at=? WHERE id=?')
+      .run(next.name, next.email, emailChanged ? 0 : m.email_verified, next.address, next.ship_to, next.company, next.contact_name, next.billing, nowMs(), m.id);
+    audit(ctx, 'member.update', { target: `member:${m.id}`, after: { fields: Object.keys(next).filter((k) => next[k] !== m[k]) } });
+    const fresh = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(m.id);
+    if (emailChanged) await sendEmailVerification(ctx, fresh); // 新しいアドレスを、確認メールで確かめ直す
+    return { ok: true, member: memberView(fresh) };
+  });
+  // 退会（FR-AUTH-014）。お支払いが済んでいない明細があるあいだは、退会できない。請求・取引・監査の記録は残す
+  route('POST', '/api/my/withdraw', (ctx) => {
+    const m = needMember(ctx);
+    const open = db.prepare('SELECT COUNT(*) AS n FROM bill_lines WHERE account_id = ? AND cleared_at IS NULL AND cancelled_at IS NULL').get(m.id).n;
+    if (open) throw new HttpError(409, 'お支払いが済んでいない落札があるため、退会できません。お支払いのあとに、もう一度お手続きください');
+    db.transaction(() => {
+      // 電話番号を空けて、同じ番号でもう一度登録できるようにする。元の番号は、記録として残す
+      db.prepare('UPDATE member_accounts SET withdrawn_at = ?, withdrawn_phone = phone, phone = ?, updated_at = ? WHERE id = ?').run(nowMs(), `退会:${m.id}`, nowMs(), m.id);
+      db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ?").run(m.id);
+    })();
+    audit(ctx, 'member.withdraw', { target: `member:${m.id}` });
+    ctx.res.setHeader('set-cookie', 'sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+    return { ok: true };
+  });
+  // 電話番号の変更（主催者管理者が、本人を確かめたうえで行う。FR-AUTH-006）
+  route('POST', '/api/members/:id/phone', (ctx, body, id) => {
+    needStaff(ctx, 'admin');
+    const m = db.prepare('SELECT * FROM member_accounts WHERE id = ? AND withdrawn_at IS NULL').get(id);
+    if (!m) throw new HttpError(404, '会員が見つかりません');
+    const phone = phoneOf(body), reason = String(body.reason ?? '').trim().slice(0, 500);
+    if (!reason) throw bad('本人を確かめた方法を、入力してください');
+    if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ? AND id <> ?').get(phone, id) || db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号は、すでに使われています');
+    db.prepare('UPDATE member_accounts SET phone = ?, updated_at = ? WHERE id = ?').run(phone, nowMs(), id);
+    db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ?").run(id); // 古い番号でのログインを切る
+    audit(ctx, 'member.phone_change', { target: `member:${id}`, reason });
+    return { ok: true };
   });
 
   // ログイン: 電話番号と SMS の認証番号。パスワードは使わない（FR-AUTH-010）
@@ -290,12 +354,24 @@ export function createApi({ store, config, nowMs }) {
     needStaff(ctx, 'admin');
     return { staff: db.prepare('SELECT * FROM staff_accounts ORDER BY id').all().map(staffView) };
   });
-  route('POST', '/api/staff/accounts', (ctx, body) => {
+  route('POST', '/api/staff/accounts', async (ctx, body) => {
     needStaff(ctx, 'admin');
     const created = createStaff({ loginId: body.loginId, name: body.name, role: body.role, phone: body.phone });
     audit(ctx, 'staff.create', { target: `staff:${created.id}`, after: { loginId: created.loginId, role: created.role } });
     // 仮のパスワードと、認証アプリに登録する情報は、この1回だけ返す（あとからは見られない）
-    return { ok: true, ...created };
+    return { ok: true, ...created, qrSvg: await QRCode.toString(created.otpauthUrl, { type: 'svg', margin: 2 }) };
+  });
+  // パスワードと認証アプリの再発行（端末をなくした・忘れたとき）。それまでのログインは、すべて切る
+  route('POST', '/api/staff/accounts/:id/reset', async (ctx, body, id) => {
+    needStaff(ctx, 'admin');
+    const target = db.prepare('SELECT * FROM staff_accounts WHERE id = ?').get(id);
+    if (!target) throw new HttpError(404, 'スタッフが見つかりません');
+    const password = randomToken(12), secret = newTotpSecret();
+    db.prepare('UPDATE staff_accounts SET password_hash = ?, totp_secret = ?, failed_count = 0, locked_until = 0 WHERE id = ?').run(hashPassword(password), secret, id);
+    db.prepare("DELETE FROM sessions WHERE kind = 'staff' AND subject_id = ? AND id_hash <> ?").run(id, ctx.sessionHash);
+    audit(ctx, 'staff.reset', { target: `staff:${id}` });
+    const url = otpauthUrl(secret, target.login_id);
+    return { ok: true, loginId: target.login_id, initialPassword: password, totpSecret: secret, qrSvg: await QRCode.toString(url, { type: 'svg', margin: 2 }) };
   });
   route('POST', '/api/staff/accounts/:id/stop', (ctx, body, id) => {
     const me = needStaff(ctx, 'admin');
@@ -328,7 +404,7 @@ export function createApi({ store, config, nowMs }) {
   // 会員の一覧・停止（主催者管理者だけ。FR-AUTH-009）
   route('GET', '/api/members', (ctx) => {
     needStaff(ctx, 'admin');
-    return { members: db.prepare('SELECT * FROM member_accounts ORDER BY id DESC LIMIT 500').all().map((m) => ({ id: m.id, ...memberView(m), suspendReason: m.suspend_reason })) };
+    return { members: db.prepare('SELECT * FROM member_accounts ORDER BY id DESC LIMIT 500').all().map((m) => ({ id: m.id, ...memberView(m), suspendReason: m.suspend_reason, withdrawn: !!m.withdrawn_at, phone: m.withdrawn_at ? m.withdrawn_phone : m.phone })) };
   });
   route('POST', '/api/members/:id/suspend', (ctx, body, id) => {
     needStaff(ctx, 'admin');
@@ -507,6 +583,25 @@ export function createApi({ store, config, nowMs }) {
     if (!event) throw new HttpError(404, '本日の開催はありません');
     return { svg: await QRCode.toString(venueUrl(ctx, ensureVenueCode(event)), { type: 'svg', errorCorrectionLevel: 'M', margin: 2 }) };
   });
+  // 参加手続きを、受付で代わりに行う（会員登録は済んでいるが、端末で手続きできない人。FR-CON-005 の代理入札の前提にもなる）
+  route('POST', '/api/reception/join', (ctx, body) => {
+    needStaff(ctx, 'admin', 'auctioneer', 'reception');
+    const event = activeEvent();
+    if (!event) throw new HttpError(409, '本日の開催はありません');
+    const m = db.prepare('SELECT * FROM member_accounts WHERE phone = ?').get(phoneOf(body));
+    if (!m) throw new HttpError(404, 'この電話番号の会員が見つかりません。先に、会員登録をしてもらってください');
+    if (!RECEIVE[body.receive] || !PAYMENT[body.payment]) throw bad('受け取り方法と支払方法を、本人に聞いて選んでください');
+    const existing = participant(m.id, event.id);
+    if (existing) throw new HttpError(409, `この会員は、参加番号 ${existing.paddle_no} で参加手続きが済んでいます`);
+    const paddle = db.transaction(() => {
+      const next = db.prepare('SELECT COALESCE(MAX(paddle_no), 0) + 1 AS n FROM members WHERE event_id = ?').get(event.id).n;
+      db.prepare("INSERT INTO members (paddle_no, name, token_hash, account_id, event_id, receive, payment, mode, joined_at, checked_in_at) VALUES (?,?,?,?,?,?,?,'venue',?,?)")
+        .run(next, m.name, sha256(randomToken()), m.id, event.id, body.receive, body.payment, nowMs(), nowMs());
+      return next;
+    })();
+    audit(ctx, 'reception.join', { target: `member:${m.id}`, after: { paddle, receive: body.receive, payment: body.payment, mode: 'venue', checkedIn: true } });
+    return { ok: true, paddle };
+  });
   route('POST', '/api/reception/:id/checkin', (ctx, body, id) => {
     needStaff(ctx, 'admin', 'auctioneer', 'reception');
     const event = activeEvent();
@@ -539,12 +634,25 @@ export function createApi({ store, config, nowMs }) {
     return { member: p };
   }
   /** 入札してよいか。停止中の会員は SUSPENDED（FR-AUTH-009）。停止の前に受理された入札は、有効のまま */
-  const bidGate = (m) => {
+  // 個人（B2C）の、開催ごとの上限額（FR-AUTH-008）。主催者設定で金額を入れたときだけ判定する（金額は未決。OQ-06）
+  const limitStmts = {
+    kind: db.prepare('SELECT kind FROM member_accounts WHERE id = ?'),
+    won: db.prepare("SELECT COALESCE(SUM(b.amount), 0) AS n FROM lots l JOIN bids b ON b.seq = l.winner_bid_seq WHERE l.status = 'sold' AND l.event_id = ? AND b.member_id = ?"),
+    leading: db.prepare("SELECT COALESCE(SUM(b.amount), 0) AS n FROM lots l JOIN bids b ON b.seq = l.current_bid_seq WHERE l.status IN ('open','suspended') AND l.event_id = ? AND b.member_id = ? AND l.id <> ?"),
+  };
+  const bidGate = (m, bid = null) => {
     if (!m.account_id) return null; // 検証用の参加者（合言葉の URL）
     // つないだあとで開催が切り替わったら、前の開催の参加番号では入札できない（新しい開催で、参加手続きをやり直す）
     if (m.event_id !== (activeEvent()?.id ?? null)) return 'NOT_JOINED';
     // 手動の停止か、未払いによる自動の停止（FR-AUTH-009・015）。どちらか一方でもかかっていれば、入札できない
-    return billing.suspension(m.account_id) ? 'SUSPENDED' : null;
+    if (billing.suspension(m.account_id)) return 'SUSPENDED';
+    const limit = Number(setting('b2c_limit'));
+    if (bid && limit > 0 && limitStmts.kind.get(m.account_id)?.kind === 'b2c') {
+      // すでに落札した額 ＋ ほかの品で最高入札者になっている額 ＋ これから入れる額（同じ品の自分の入札は、二重に数えない）
+      const total = limitStmts.won.get(m.event_id, m.id).n + limitStmts.leading.get(m.event_id, m.id, bid.lotId).n + bid.amount;
+      if (total > limit) return 'OVER_LIMIT';
+    }
+    return null;
   };
 
   // ------------------------------------------------------------ 表示する文言
@@ -554,7 +662,8 @@ export function createApi({ store, config, nowMs }) {
 
   // ------------------------------------------------------------ 主催者設定（FR-ORG-001 の一部）・監査ログ・知らせ
   // 請求書・手数料に使う設定（FR-ORG-001 の一部）。未入力でも動くが、請求書には「（未設定）」と出る
-  const BILLING_KEYS = { orgAddress: ['org_address', 200], orgTel: ['org_tel', 40], orgEmail: ['org_email', 254], invoiceRegNo: ['invoice_reg_no', 20], bankAccount: ['bank_account', 200], bankHolidays: ['bank_holidays', 4000], feeMinimum: ['fee_minimum', 12], feeTaxMode: ['fee_tax_mode', 12], buyerPremiumRate: ['buyer_premium_rate', 5] };
+  const BILLING_KEYS = { orgAddress: ['org_address', 200], orgTel: ['org_tel', 40], orgEmail: ['org_email', 254], invoiceRegNo: ['invoice_reg_no', 20], bankAccount: ['bank_account', 200], bankHolidays: ['bank_holidays', 4000], feeMinimum: ['fee_minimum', 12], feeTaxMode: ['fee_tax_mode', 12], buyerPremiumRate: ['buyer_premium_rate', 5], b2cLimit: ['b2c_limit', 12],
+    penaltyRateB2b: ['penalty_rate_b2b', 6], penaltyRateB2c: ['penalty_rate_b2c', 6], lateRateB2b: ['late_rate_b2b', 6], lateRateB2c: ['late_rate_b2c', 6] };
   route('GET', '/api/settings', (ctx) => {
     needStaff(ctx, 'admin');
     return { orgName: setting('org_name'), returnPolicy: setting('return_policy'), shippingNotice: setting('shipping_notice'), ...Object.fromEntries(Object.entries(BILLING_KEYS).map(([k, [key]]) => [k, setting(key)])) };
@@ -573,8 +682,26 @@ export function createApi({ store, config, nowMs }) {
     audit(ctx, 'settings.update', { target: 'settings', before, after: next });
     return { ok: true };
   });
-  route('GET', '/api/audit', (ctx) => {
+  // 規約類（利用規約・特定商取引法に基づく表示・プライバシーポリシー。FR-ORG-001）。文面は、主催者管理者が入れる
+  const LEGAL = { terms: ['legal_terms', '利用規約'], tokushoho: ['legal_tokushoho', '特定商取引法に基づく表示'], privacy: ['legal_privacy', 'プライバシーポリシー'] };
+  route('GET', '/api/legal', () => ({
+    orgName: setting('org_name'),
+    docs: Object.fromEntries(Object.entries(LEGAL).map(([k, [key, title]]) => [k, { title, body: setting(key) }])),
+  }));
+  route('POST', '/api/settings/legal', (ctx, body) => {
     needStaff(ctx, 'admin');
+    const changed = [];
+    for (const [k, [key]] of Object.entries(LEGAL)) {
+      if (body[k] === undefined) continue;
+      const v = String(body[k] ?? '').trim().slice(0, 60000);
+      if (v !== setting(key)) changed.push(k);
+      db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, v);
+    }
+    audit(ctx, 'settings.legal', { target: 'legal', after: { changed } });
+    return { ok: true };
+  });
+  route('GET', '/api/audit', (ctx) => {
+    needStaff(ctx, 'admin', 'operator');
     return { entries: db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT 300').all() };
   });
   route('GET', '/api/notices', (ctx) => {
@@ -620,7 +747,7 @@ export function createApi({ store, config, nowMs }) {
           if (host !== req.headers.host && !config.allowedOrigins.includes(origin)) throw new HttpError(403, 'このページからは操作できません');
         }
         // 印鑑の画像だけは、大きさの上限を広げる（2MB まで）
-        const raw = await readBody(req, url.pathname === '/api/settings/seal' ? 3 * 1024 * 1024 : 64 * 1024);
+        const raw = await readBody(req, url.pathname === '/api/settings/seal' ? 3 * 1024 * 1024 : url.pathname === '/api/settings/legal' ? 512 * 1024 : 64 * 1024);
         if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) throw new HttpError(415, 'JSON で送ってください');
         try { body = raw.length ? JSON.parse(raw.toString('utf8')) : {}; } catch { throw bad('JSON として読めません'); }
         if (body === null || typeof body !== 'object' || Array.isArray(body)) throw bad('JSON のオブジェクトで送ってください');
@@ -647,6 +774,12 @@ export function createApi({ store, config, nowMs }) {
     if (ctx.staff.role !== 'admin' && ctx.staff.role !== 'auctioneer') return { code: 'FORBIDDEN', message: '競りの進行は、主催者管理者と進行役だけができます' };
     return { staff: { id: ctx.staff.id, name: ctx.staff.name, role: ctx.staff.role, account: true } };
   }
+  /** 会場の大型モニター（FR-CON-007）の接続。スタッフのログインがあれば、どの役割でも見られる（見るだけ） */
+  function viewerFromCookie(req) {
+    const ctx = { req };
+    loadSession(ctx);
+    return ctx.staff ? { staff: { id: ctx.staff.id, name: ctx.staff.name, role: ctx.staff.role, account: true } } : { code: 'LOGIN', message: 'スタッフのログインが必要です' };
+  }
   /** 開催の進み具合（参加者の画面と進行コンソールに送る）。phase: null（開始前）/ running（進行中）/ break（休憩）*/
   const eventState = () => {
     const e = activeEvent();
@@ -671,6 +804,6 @@ export function createApi({ store, config, nowMs }) {
   }
   return {
     handle, createStaff, audit, participantFromCookie, bidGate, eventId: () => activeEvent()?.id ?? null,
-    staffFromCookie, eventState, setPhase, proxyTarget, billing,
+    staffFromCookie, viewerFromCookie, eventState, setPhase, proxyTarget, billing,
   };
 }
