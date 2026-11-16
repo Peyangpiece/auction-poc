@@ -12,7 +12,10 @@ before(async () => {
 after(async () => { await srv.stop(); cleanup(ctx); });
 
 test('最低落札額は全員に見え、届いたときに「うりきり」になる。届いて締めれば落札', async () => {
+  // ロットの追加は全員に知らせる。会員の接続に届くのを待ってから確かめる（進行役への応答とは別の接続なので、順序は保証されない）
+  const seen = m[0].waitFor((x) => x.type === 'lot' && x.lot.reservePrice === 11000);
   const lot = await createLot(A, 9500, null, 'テスト品', 11000);
+  await seen;
   // 会員の画面にも、最低落札額の金額そのものが届いている（隠さない）
   assert.equal(m[0].lots.get(lot.id).reservePrice, 11000);
   assert.equal(m[0].lots.get(lot.id).urikiri, false);
