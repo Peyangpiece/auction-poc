@@ -93,10 +93,10 @@
 
 <main>
   <div class="col">
-    <section aria-label="進行中のロット">
+    <section aria-label="進行中の品">
       <div class="board" id="board">
         <div class="board-top">
-          <span><span class="digits" id="lotNo"></span><span class="dyn" id="title">進行中のロットはありません</span></span>
+          <span><span class="digits" id="lotNo"></span><span class="dyn" id="title">進行中の品はありません</span></span>
           <span class="state" id="status">待機中</span>
         </div>
         <div class="pricewrap">
@@ -110,7 +110,7 @@
         </div>
       </div>
       <div class="actions">
-        <button class="btn btn-primary btn-lg" id="b_next" type="button" hidden>次のロットを開始</button>
+        <button class="btn btn-primary btn-lg" id="b_next" type="button" hidden>次を開始</button>
         <button class="btn btn-primary btn-lg" id="b_close" data-act="close" type="button">締め</button>
         <button class="btn" id="b_suspend" data-act="suspend" type="button">中断</button>
         <button class="btn btn-primary" id="b_resume" data-act="resume" type="button">再開</button>
@@ -129,15 +129,15 @@
     </section>
 
     <section aria-labelledby="lotsTitle">
-      <h2 id="lotsTitle">ロット一覧</h2>
+      <h2 id="lotsTitle">出品一覧</h2>
       <div class="tablewrap">
-        <table><thead><tr><th scope="col">番号</th><th scope="col">商品</th><th scope="col">開始価格</th><th scope="col">最低落札額</th><th scope="col">状態</th><th scope="col">結果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="lots"></tbody></table>
+        <table><thead><tr><th scope="col">No.</th><th scope="col">品名</th><th scope="col">開始価格</th><th scope="col">最低落札額</th><th scope="col">状態</th><th scope="col">結果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="lots"></tbody></table>
       </div>
       <form class="addlot" id="addLot">
-        <label class="field">商品名<input class="input" id="newTitle" name="title" value="テスト品" autocomplete="off" required></label>
+        <label class="field">品名<input class="input" id="newTitle" name="title" value="テスト品" autocomplete="off" required></label>
         <label class="field">開始価格（税込）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" value="9500" autocomplete="off" required></label>
         <label class="field">最低落札額（任意・非公開）<input class="input num" id="newReserve" name="reserve" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="なし"></label>
-        <button class="btn" id="create" type="submit">ロットを追加</button>
+        <button class="btn" id="create" type="submit">品を追加</button>
       </form>
     </section>
   </div>
@@ -232,16 +232,16 @@ function render() {
   $('status').textContent = lot ? STATE_LABEL[st] + (lot.noVideo && st === 'open' ? '（映像なし）' : '') : '待機中';
   $('status').dataset.on = st === 'open' ? '1' : '';
   $('lotNo').textContent = lot ? `No.${lot.lotNo}` : '';
-  $('title').textContent = lot ? lot.title : '進行中のロットはありません';
+  $('title').textContent = lot ? lot.title : '進行中の品はありません';
   $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札価格' : lot.currentPrice === null ? '開始価格' : '現在価格';
   $('price').textContent = lot ? yen(lot.currentPrice ?? lot.startPrice) : '';
   // 落札の条件は、うりきり（最低落札額に届いている）と、最高入札者がいることの両方
   setLamp('urikiri', !!lot?.urikiri, !lot || lot.reservePrice === null ? '' : `最低落札額 ${yen(lot.reservePrice)}`);
   setLamp('right', !!lot?.highestPaddle && st !== 'unsold', lot?.highestPaddle ? `${lot.highestPaddle}番` : '');
   const ended = st === 'sold' || st === 'unsold' || st === 'not_held';
-  const next = [...S.lots.values()].find((l) => l.status === 'waiting'); // 出品順でいちばん先の、待機中のロット
+  const next = [...S.lots.values()].find((l) => l.status === 'waiting'); // 出品順でいちばん先の、待機中の品
   // 板の案内は、進行役の判断に要ることだけ: 締めたらどうなるか、結果、配信が始まらないとき
-  $('result').textContent = !lot ? (next ? '' : 'ロットを追加してください')
+  $('result').textContent = !lot ? (next ? '' : '品を追加してください')
     : st === 'sold' ? `${lot.highestPaddle}番 落札`
     : st === 'unsold' ? '流札'
     : st === 'open' ? (lot.urikiri && lot.currentPrice !== null ? `締めると ${lot.highestPaddle}番が落札` : '締めると流札')
@@ -249,9 +249,9 @@ function render() {
     : '';
   // その状態でできる操作だけを出す
   const show = (id, on) => { $(id).hidden = !on; };
-  // 締めた後・最初は、次にやることが1つだけ（次のロットを開始）。板から目を離さずに進められる
+  // 締めた後・最初は、次にやることが1つだけ（次の品を開始）。板から目を離さずに進められる
   show('b_next', (!lot || ended) && !!next);
-  if (next) { $('b_next').textContent = `次のロットを開始（No.${next.lotNo}）`; $('b_next').onclick = () => lotCmd('start', next.id); }
+  if (next) { $('b_next').textContent = `No.${next.lotNo} を開始`; $('b_next').onclick = () => lotCmd('start', next.id); }
   show('b_close', st === 'open');
   show('b_suspend', st === 'open'); show('b_resume', st === 'suspended'); show('b_cancel', st === 'suspended');
   show('b_nv', st === 'preparing_warn'); show('b_back', st === 'preparing' || st === 'preparing_warn');
@@ -275,11 +275,11 @@ function render() {
     const td = document.createElement('td');
     if (l.status === 'waiting') {
       const b1 = document.createElement('button'); b1.type = 'button'; b1.textContent = '競り開始'; b1.className = 'btn'; b1.disabled = busy;
-      if (busy) b1.title = '進行中のロットを締めてから開始できます';
-      b1.setAttribute('aria-label', `ロット ${l.lotNo} の競りを開始`);
+      if (busy) b1.title = '進行中の品を締めてから開始できます';
+      b1.setAttribute('aria-label', `No.${l.lotNo} の競りを開始`);
       b1.onclick = () => lotCmd('start', l.id);
       const b2 = document.createElement('button'); b2.type = 'button'; b2.textContent = '除外…'; b2.className = 'btn';
-      b2.setAttribute('aria-label', `ロット ${l.lotNo} を除外`);
+      b2.setAttribute('aria-label', `No.${l.lotNo} を除外`);
       b2.onclick = () => lotCmd('exclude', l.id, true);
       td.append(b1, ' ', b2);
     }
@@ -332,8 +332,8 @@ function ask({ title, body, needReason = false, okLabel = '実行する', danger
   });
 }
 const CONFIRM = {
-  cancel: (l) => ({ title: `ロット ${l.lotNo} を取りやめますか？`, body: 'このロットのすべての入札を無効にして、待機に戻します。入札の記録は残ります。', okLabel: '取りやめる', danger: true }),
-  exclude: (l) => ({ title: `ロット ${l.lotNo} を除外しますか？`, body: 'このロットは「未実施」になり、この開催では競りにかけられなくなります。', okLabel: '除外する', danger: true }),
+  cancel: (l) => ({ title: `No.${l.lotNo} を取りやめますか？`, body: 'この品のすべての入札を無効にして、待機に戻します。入札の記録は残ります。', okLabel: '取りやめる', danger: true }),
+  exclude: (l) => ({ title: `No.${l.lotNo} を除外しますか？`, body: 'この品は「未実施」になり、この開催では競りにかけられなくなります。', okLabel: '除外する', danger: true }),
 };
 async function lotCmd(action, lotId, needReason = false) {
   let reason = '';
@@ -352,7 +352,7 @@ document.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click
 }));
 document.querySelectorAll('[data-cmd]').forEach((b) => b.addEventListener('click', () => cmd(b.dataset.cmd)));
 document.querySelectorAll('[data-crash]').forEach((b) => b.addEventListener('click', async () => {
-  const ans = await ask({ title: 'サーバーを強制終了しますか？', body: `${b.textContent.replace('…', '')}。参加者の画面は「再接続中」になり、受付中のロットは復旧の規則に従って中断または確定になります。`, okLabel: '強制終了する', danger: true });
+  const ans = await ask({ title: 'サーバーを強制終了しますか？', body: `${b.textContent.replace('…', '')}。参加者の画面は「再接続中」になり、受付中の品は復旧の規則に従って中断または確定になります。`, okLabel: '強制終了する', danger: true });
   if (ans) cmd('crash', { point: b.dataset.crash });
 }));
 document.querySelectorAll('[data-mark]').forEach((b) => b.addEventListener('click', () => cmd('mark', { label: $('markLabel').value || 'unnamed', phase: b.dataset.mark })));
@@ -375,7 +375,7 @@ function onMessage(msg, at) {
       S.lots.set(msg.lot.id, msg.lot);
       if (msg.lot.status !== 'waiting' && msg.lot.status !== 'not_held' && S.focus !== msg.lot.id) { S.focus = msg.lot.id; S.history = []; }
       if (prev && prev.status === 'suspended' && msg.lot.status === 'waiting') S.history.forEach((h) => { h.valid = 0; });
-      if (prev && prev.status !== msg.lot.status) log(`ロット ${msg.lot.lotNo}: ${STATE_LABEL[prev.status]} → ${STATE_LABEL[msg.lot.status]}`);
+      if (prev && prev.status !== msg.lot.status) log(`No.${msg.lot.lotNo}: ${STATE_LABEL[prev.status]} → ${STATE_LABEL[msg.lot.status]}`);
       render(); break;
     }
     case 'price': {

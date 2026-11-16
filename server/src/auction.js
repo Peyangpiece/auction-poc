@@ -186,7 +186,7 @@ export class Auction {
       item.reply({ type: 'cmd_result', reqId: item.reqId, ok: false, action: item.action, lotId: item.lotId, message });
       this.metrics.write('cmd', { seq: item.seq, lotId: item.lotId, action: item.action, ok: false, message, receivedAt: item.receivedAt });
     };
-    if (!lot) return fail('ロットがありません');
+    if (!lot) return fail('その No. の品がありません');
     const s = lot.status;
     const needReason = () => (item.reason.trim() ? null : '理由を入力してください');
     const stateName = STATE_LABEL[s];
@@ -194,13 +194,13 @@ export class Auction {
 
     switch (item.action) {
       case 'start': {
-        if (s !== 'waiting') return fail(`「${stateName}」のロットは競りを開始できません`);
-        if (q.busyLot.get(lot.id)) return fail('進行中のロットがほかにあります（同時に1つまで）');
+        if (s !== 'waiting') return fail(`「${stateName}」の品は競りを開始できません`);
+        if (q.busyLot.get(lot.id)) return fail('進行中の品がほかにあります（同時に1つまで）');
         this.#beginOrPrepare(lot, 'waiting', item.actor.name);
         break;
       }
       case 'close': {
-        if (s !== 'open') return fail(`「${stateName}」のロットは締められません`);
+        if (s !== 'open') return fail(`「${stateName}」の品は締められません`);
         this.crashPoint('before_close_record');
         // ① まず「締め」という出来事そのものを記録する（ここまで済めば、落ちても復旧時に確定できる）
         q.insertEvent.run(item.seq, lot.id, 'close', item.receivedAt, item.actor.name, '{}');
@@ -210,18 +210,18 @@ export class Auction {
         break;
       }
       case 'suspend': {
-        if (s !== 'open') return fail(`「${stateName}」のロットは中断できません`);
+        if (s !== 'open') return fail(`「${stateName}」の品は中断できません`);
         this.#transition(lot, 'suspended', item.actor.name, {}, item.seq);
         break;
       }
       case 'resume': {
-        if (s !== 'suspended') return fail(`「${stateName}」のロットは再開できません`);
+        if (s !== 'suspended') return fail(`「${stateName}」の品は再開できません`);
         // 中断の間に配信が自動で止まっていたら、「競り開始」と同じ手順で映像が届くのを待つ（FR-STR-003）
         this.#beginOrPrepare(lot, 'suspended', item.actor.name);
         break;
       }
       case 'cancel': {
-        if (s !== 'suspended') return fail(`「${stateName}」のロットは取りやめできません（先に中断してください）`);
+        if (s !== 'suspended') return fail(`「${stateName}」の品は取りやめできません（先に中断してください）`);
         const err = needReason();
         if (err) return fail(err);
         this.store.tx(() => {
@@ -232,7 +232,7 @@ export class Auction {
         break;
       }
       case 'exclude': {
-        if (s !== 'waiting') return fail(`「${stateName}」のロットは除外できません`);
+        if (s !== 'waiting') return fail(`「${stateName}」の品は除外できません`);
         const err = needReason();
         if (err) return fail(err);
         this.#transition(lot, 'not_held', item.actor.name, { reason: item.reason }, item.seq);

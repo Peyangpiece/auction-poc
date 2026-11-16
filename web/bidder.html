@@ -11,7 +11,7 @@
 <link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 <style>
-  /* スマホ: 上から ロット名 → 映像(4:3) → 履歴 → コメント。表示板は画面の下に固定する（価格・ランプ・入札が常に見える） */
+  /* スマホ: 上から 品名 → 映像(4:3) → 履歴 → コメント。表示板は画面の下に固定する（価格・ランプ・入札が常に見える） */
   body { padding-bottom: calc(256px + env(safe-area-inset-bottom)); transition: background-color .2s var(--ease); }
   .brandbar { padding-top: env(safe-area-inset-top); }
   .brandbar > div, .top, main { max-width: 560px; margin: 0 auto; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
@@ -188,7 +188,7 @@
   </div>
 </header>
 <div class="top">
-  <h1><span class="digits" id="lotNo"></span><span class="dyn" id="title">次のロットをお待ちください</span></h1>
+  <h1><span class="digits" id="lotNo"></span><span class="dyn" id="title">次の品をお待ちください</span></h1>
 </div>
 
 <main>
@@ -278,7 +278,7 @@ let link, audioCtx = null, wakeLock = null, player = null, playerLoading = false
 
 // ---- 文言（FR-BID-012）
 const REJECT = {
-  LOT_NOT_OPEN: () => 'このロットは入札を受け付けていません',
+  LOT_NOT_OPEN: () => 'この品は入札を受け付けていません',
   AFTER_CLOSE: () => '締めに間に合いませんでした',
   BELOW_MINIMUM: (r) => `価格が更新されました：最低入札額 ${yen(r.minBid)}`,
   OFF_LADDER: () => '入札できる金額ではありません',
@@ -326,11 +326,11 @@ function render() {
   const lot = focusLot();
   $('board').classList.toggle('idle', !lot);
   if (!lot) {
-    $('lotNo').textContent = ''; $('title').textContent = '次のロットをお待ちください';
+    $('lotNo').textContent = ''; $('title').textContent = '次の品をお待ちください';
     $('status').textContent = '待機中'; $('status').dataset.on = '';
     $('priceLabel').textContent = '現在価格'; $('price').textContent = ''; $('result').textContent = '';
     setLamp('urikiri', '', 'うりきり', ''); setLamp('right', '', '権利', '');
-    $('bid').disabled = true; $('bid').textContent = '次のロットをお待ちください'; S.shownPrice = null; return;
+    $('bid').disabled = true; $('bid').textContent = '次の品をお待ちください'; S.shownPrice = null; return;
   }
   const st = lot.status;
   const mine = lot.highestPaddle !== null && lot.highestPaddle === S.paddle;
@@ -368,7 +368,7 @@ function render() {
   bid.dataset.action = canJoin ? 'join' : 'bid';
   bid.disabled = !(canBid || canJoin) || locked;
   bid.classList.toggle('locked', locked);
-  bid.textContent = st !== 'open' ? (ended ? '次のロットをお待ちください' : st === 'suspended' ? '中断しています' : '受付の開始をお待ちください')
+  bid.textContent = st !== 'open' ? (ended ? '次の品をお待ちください' : st === 'suspended' ? '中断しています' : '受付の開始をお待ちください')
     : staff ? 'スタッフは入札できません'
     : watching ? '応札に切り替える'
     : mine ? 'あなたが最高入札者です' : `${yen(lot.minBid)} で入札`;
