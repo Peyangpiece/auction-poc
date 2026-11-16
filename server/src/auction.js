@@ -28,7 +28,7 @@ export class Auction {
    * @param {import('./stream.js').StreamControl} deps.stream
    * @param {(point: string) => void} deps.crashPoint 障害の模擬用（本番では何もしない）
    */
-  constructor({ store, config, metrics, broadcast, stream, crashPoint = () => {} }) {
+  constructor({ store, config, metrics, broadcast, stream, crashPoint = () => {}, eventId = () => null, bidGate = () => null }) {
     validateTable(config.incrementTable);
     this.store = store;
     this.config = config;
@@ -36,6 +36,8 @@ export class Auction {
     this.broadcast = broadcast;
     this.stream = stream;
     this.crashPoint = crashPoint;
+    this.eventId = eventId;   // いまの開催（なければ null）
+    this.bidGate = bidGate;   // 入札してよい参加者か（だめなら理由コードを返す）
     this.queues = new Map(); // lotId -> 処理待ちの出来事
     this.draining = new Set();
     this.seq = store.q.maxSeq.get().s ?? 0;
@@ -126,7 +128,9 @@ export class Auction {
     if (!lot) return 'LOT_NOT_OPEN';
     if (lot.status === 'sold' || lot.status === 'unsold') return 'AFTER_CLOSE'; // 締めの後に処理された（FR-CLS-002）
     if (lot.status !== 'open') return 'LOT_NOT_OPEN';
-    // PoC では SUSPENDED・OVER_LIMIT・NOT_JOINED は判定しない（POC-SRV-002）
+    // 参加の停止（FR-AUTH-009）。参加手続き（NOT_JOINED）は、接続のときに確かめる。上限額（OVER_LIMIT）は金額が未決（OQ-06）なので判定しない
+    const blocked = this.bidGate(item.member);
+    if (blocked) return blocked;
     if (lot.highest_member_id === item.member.id) return 'ALREADY_HIGHEST';
     const table = this.config.incrementTable;
     const min = minimumBid(lot.start_price, lot.current_price, table, lot.unit_override);
@@ -365,7 +369,7 @@ export class Auction {
 
   /** 最新の状態（再接続のときに取り直す。FR-UI-002）。入札の履歴は全件・受付順・全員に同じものを返す。 */
   snapshot() {
-    const lots = this.store.q.lots.all().map((l) => this.#view(l));
+    const lots = this.store.q.lots.all(this.eventId()).map((l) => this.#view(l)); // いまの開催の品だけ
     const focus = lots.find((l) => !TERMINAL.has(l.status) && l.status !== 'waiting') ?? null;
     const last = focus ?? [...lots].reverse().find((l) => l.status === 'sold' || l.status === 'unsold') ?? null;
     return {
@@ -384,7 +388,7 @@ export class Auction {
       if (!isOnLadder(reserve, start, this.config.incrementTable, unitOverride)) throw new Error('最低落札額は、入札できる金額（価格の段）に合わせてください');
       if (reserve === start) reserve = null; // 開始価格と同じなら、最初の入札で必ず届くので、設定なしと同じ
     }
-    const info = this.store.q.insertLot.run(String(title), start, unitOverride, reserve, nowMs());
+    const info = this.store.q.insertLot.run({ event: this.eventId(), title: String(title), start, unit: unitOverride, reserve, at: nowMs() });
     const lot = this.lotView(Number(info.lastInsertRowid));
     this.broadcast({ type: 'lot', lot });
     return lot;

@@ -4,6 +4,8 @@
 const phoneForm = $('#stepPhone');
 const codeForm = $('#stepCode');
 let phone = '';
+// 入札画面から来た人は、ログインのあと入札画面へ戻す（行き先は決まった2つだけ。外のサイトへは飛ばさない）
+const after = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/mypage.html';
 
 onSubmit(phoneForm, async (data) => {
   phone = data.phone;
@@ -18,7 +20,7 @@ onSubmit(phoneForm, async (data) => {
 });
 onSubmit(codeForm, async (data) => {
   const res = await api('POST', '/api/login/verify', { phone, code: data.code });
-  if (res.ok) location.href = '/mypage.html';
+  if (res.ok) location.href = after;
   else codeForm.elements.code.value = '';
   return res;
 });
@@ -33,6 +35,6 @@ $('#resend').addEventListener('click', async (ev) => {
 
 (async () => {
   const me = await setupNav();
-  if (me.member) location.replace('/mypage.html');
+  if (me.member) location.replace(after);
   else phoneForm.elements.phone.focus();
 })();

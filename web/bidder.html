@@ -18,6 +18,21 @@
     <img class="mark" src="emblem-400.webp" width="96" height="96" alt="NEWS 3R">
     <p class="co">株式会社NEWS</p>
     <h1>ライブオークション</h1>
+    <p id="gateEvent"></p>
+    <form id="join" hidden novalidate>
+      <fieldset class="pick">
+        <legend>受け取り方法</legend>
+        <label><input type="radio" name="receive" value="pickup">現地受け取り</label>
+        <label><input type="radio" name="receive" value="ship">配送</label>
+      </fieldset>
+      <fieldset class="pick">
+        <legend>支払方法</legend>
+        <label><input type="radio" name="payment" value="transfer">銀行振込</label>
+        <label class="off"><input type="radio" name="payment" value="cash" disabled>当日現金<small>会場参加のみ</small></label>
+      </fieldset>
+      <p class="note" id="joinTerms"></p>
+      <button class="btn btn-primary btn-lg" type="submit">参加手続きを済ませる</button>
+    </form>
     <button class="btn btn-primary btn-lg" id="enter" type="button">参加する</button>
     <p id="gateMsg" role="alert"></p>
   </div>

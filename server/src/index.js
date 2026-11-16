@@ -110,12 +110,11 @@ function onComment(conn, msg, send) {
 }
 
 const stream = new StreamControl({ config, metrics, broadcast });
-const auction = new Auction({ store, config, metrics, broadcast, stream, crashPoint });
+// 会員登録・ログイン・スタッフ・開催・参加手続き。商品は、進行コンソールからその場で登録する
+const api = createApi({ store, config, nowMs });
+const auction = new Auction({ store, config, metrics, broadcast, stream, crashPoint, eventId: api.eventId, bidGate: api.bidGate });
 const recovered = auction.recover();
 if (recovered.length) console.log('[recovery]', JSON.stringify(recovered));
-
-// 会員登録・ログイン・スタッフ・開催・設定（MVP の 1）。商品は、進行コンソールからその場で登録する
-const api = createApi({ store, config, nowMs });
 
 // ---------------------------------------------------------------- HTTP
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png' };
@@ -270,12 +269,23 @@ function onClient(ws, req) {
     if (msg.type === 'time') return send({ type: 'time', t0: msg.t0, ts: nowMs() });
 
     if (msg.type === 'hello') {
-      const hash = hashToken(msg.token ?? '');
-      const member = store.q.memberByToken.get(hash);
-      const staff = member ? null : store.q.staffByToken.get(hash);
-      if (!member && !(staff && staff.role === 'auctioneer')) {
-        send({ type: 'error', message: '合言葉（トークン）が正しくありません' });
-        return ws.close(4401, 'unauthorized');
+      // 合言葉（検証用の URL と、進行役）で名乗るか、合言葉なしで、ログインのクッキーと参加手続きで名乗る
+      let member = null, staff = null;
+      if (msg.token) {
+        const hash = hashToken(msg.token);
+        member = store.q.memberByToken.get(hash) ?? null;
+        staff = member ? null : store.q.staffByToken.get(hash) ?? null;
+        if (!member && !(staff && staff.role === 'auctioneer')) {
+          send({ type: 'error', message: '合言葉（トークン）が正しくありません' });
+          return ws.close(4401, 'unauthorized');
+        }
+      } else {
+        const found = api.participantFromCookie(req);
+        if (!found.member) {
+          send({ type: 'error', code: found.code, message: found.message });
+          return ws.close(4403, found.code);
+        }
+        member = found.member;
       }
       if (conn.role) return; // 名乗り直しは受け付けない
       // 同じ人の同時接続に上限を置く（合言葉が漏れたときに、際限なくつながれないようにする）

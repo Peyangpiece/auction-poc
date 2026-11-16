@@ -20,6 +20,8 @@ const REJECT = {
   OFF_LADDER: () => '入札できる金額ではありません',
   ALREADY_HIGHEST: () => 'あなたが最高入札者です',
   RATE_LIMITED: () => '入札が速すぎます。少し待ってから押してください',
+  SUSPENDED: () => '参加が停止されています',
+  NOT_JOINED: () => '参加手続きを済ませてください',
 };
 function say(text, kind = '') { $('msg').textContent = text; $('msg').dataset.kind = kind; }
 
@@ -361,9 +363,42 @@ setInterval(() => {
 }, 50);
 
 // ---- 入場（最初の1回のタップで、音を有効にする。FR-UI-004）
+// 検証用の URL（合言葉つき）で開いたときは、そのまま入れる。合言葉がなければ、ログインと参加手続きを確かめる
+const token = takeToken('auction-member');
+let ready = !!token;
+const getJson = async (url, body) => {
+  try {
+    const res = await fetch(url, body ? { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : { credentials: 'same-origin' });
+    return { status: res.status, ...(await res.json().catch(() => ({}))) };
+  } catch { return { status: 0, message: 'サーバーにつながりません。通信の状態を確かめて、開き直してください' }; }
+};
+const showPaddle = (title, paddle) => {
+  $('gateEvent').replaceChildren(title, document.createElement('br'), '参加番号', Object.assign(document.createElement('b'), { textContent: String(paddle) }));
+  $('join').hidden = true; $('enter').hidden = false; ready = true;
+};
+if (!token) (async () => {
+  $('enter').hidden = true;
+  const p = await getJson('/api/participation');
+  if (p.status === 401) return location.replace('/login.html?next=bidder');
+  if (p.status !== 200) { $('gateMsg').textContent = p.message ?? '開けませんでした。開き直してください'; return; }
+  if (!p.event) { $('gateMsg').textContent = '開催中の競りはありません。'; return; }
+  if (p.joined) return showPaddle(p.event.title, p.paddle);
+  // 参加手続き: 受け取り方法と支払方法を、どちらも選ばれていない状態で聞く（FR-MODE-005）
+  $('gateEvent').textContent = p.event.title;
+  $('join').hidden = false;
+  getJson('/api/terms').then((t) => { if (t.status === 200) $('joinTerms').textContent = `${t.shippingNotice}\n${t.returnPolicy}`; });
+  $('join').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const data = new FormData($('join'));
+    $('gateMsg').textContent = '';
+    const res = await getJson('/api/join', { receive: data.get('receive'), payment: data.get('payment') });
+    if (res.status === 200) showPaddle(p.event.title, res.paddle);
+    else $('gateMsg').textContent = res.message ?? 'うまくいきませんでした。やり直してください';
+  });
+})();
+
 $('enter').addEventListener('click', async () => {
-  const token = takeToken('auction-member');
-  if (!token) { $('gateMsg').textContent = '参加用の URL が正しくありません。受付で受け取った URL を開き直してください。'; return; }
+  if (!ready) return;
   try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); await audioCtx.resume(); beep(); } catch {}
   $('audio').textContent = audioCtx ? audioCtx.state : '使えない';
   $('vib').textContent = 'vibrate' in navigator ? '対応' : '非対応';

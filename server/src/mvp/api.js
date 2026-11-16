@@ -391,6 +391,62 @@ export function createApi({ store, config, nowMs }) {
     return { ok: true };
   });
 
+  // ------------------------------------------------------------ 参加手続き（FR-MODE-005、FR-SHIP-007、FR-PAY-009、FR-NUM-001）
+  /** いまの開催: 公開中の開催のうち、開始がいちばん早いもの【前提】。開催終了（FR-EVT-003）は MVP の 5 で足す */
+  const activeEvent = () => db.prepare("SELECT * FROM events WHERE status = 'published' ORDER BY starts_at, id LIMIT 1").get() ?? null;
+  const participant = (accountId, eventId) => db.prepare('SELECT id, paddle_no, name, account_id, event_id, receive, payment FROM members WHERE account_id = ? AND event_id = ?').get(accountId, eventId) ?? null;
+  const RECEIVE = { pickup: '現地受け取り', ship: '配送' };
+  route('GET', '/api/participation', (ctx) => {
+    const member = needMember(ctx);
+    const event = activeEvent();
+    const p = event ? participant(member.id, event.id) : null;
+    return {
+      event: event ? { title: event.title, venueName: event.venue_name } : null,
+      joined: !!p, paddle: p?.paddle_no ?? null, receive: p?.receive ?? null, payment: p?.payment ?? null,
+      suspended: !!member.suspended,
+    };
+  });
+  route('POST', '/api/join', (ctx, body) => {
+    const member = needMember(ctx);
+    const event = activeEvent();
+    if (!event) throw new HttpError(409, '開催中の競りはありません');
+    const errors = {};
+    if (!RECEIVE[body.receive]) errors.receive = '受け取り方法を選んでください';
+    // オンライン参加の人は、銀行振込だけを選べる（FR-PAY-002）。当日現金は、会場参加（MVP の 4）で選べるようにする
+    if (body.payment !== 'transfer') errors.payment = body.payment === 'cash' ? '当日現金は、会場で参加する方だけが選べます' : '支払方法を選んでください';
+    if (Object.keys(errors).length) throw bad('受け取り方法と支払方法の両方に、お答えください', { errors });
+    const existing = participant(member.id, event.id);
+    if (existing) return { ok: true, paddle: existing.paddle_no };
+    // 参加番号は、開催ごとに1から。番号を取るのと書き込むのを、1つの処理にまとめる（2人に同じ番号を振らない）
+    const paddle = db.transaction(() => {
+      const next = db.prepare('SELECT COALESCE(MAX(paddle_no), 0) + 1 AS n FROM members WHERE event_id = ?').get(event.id).n;
+      db.prepare('INSERT INTO members (paddle_no, name, token_hash, account_id, event_id, receive, payment, mode, joined_at) VALUES (?,?,?,?,?,?,?,?,?)')
+        .run(next, member.name, sha256(randomToken()), member.id, event.id, body.receive, 'transfer', 'online', nowMs());
+      return next;
+    })();
+    audit(ctx, 'event.join', { target: `event:${event.id}`, after: { paddle, receive: body.receive, payment: 'transfer', mode: 'online' } });
+    return { ok: true, paddle };
+  });
+  /** 入札画面の接続（WebSocket）を、ログインのクッキーで確かめる。参加手続きが済んでいれば、その参加者を返す */
+  function participantFromCookie(req) {
+    const ctx = { req };
+    loadSession(ctx);
+    if (!ctx.member) return { code: 'LOGIN', message: 'ログインしてください' };
+    const event = activeEvent();
+    if (!event) return { code: 'NO_EVENT', message: '開催中の競りはありません' };
+    const p = participant(ctx.member.id, event.id);
+    if (!p) return { code: 'NOT_JOINED', message: '参加手続きを済ませてください' };
+    return { member: p };
+  }
+  /** 入札してよいか。停止中の会員は SUSPENDED（FR-AUTH-009）。停止の前に受理された入札は、有効のまま */
+  const suspendedStmt = db.prepare('SELECT suspended FROM member_accounts WHERE id = ?');
+  const bidGate = (m) => {
+    if (!m.account_id) return null; // 検証用の参加者（合言葉の URL）
+    // つないだあとで開催が切り替わったら、前の開催の参加番号では入札できない（新しい開催で、参加手続きをやり直す）
+    if (m.event_id !== (activeEvent()?.id ?? null)) return 'NOT_JOINED';
+    return suspendedStmt.get(m.account_id)?.suspended ? 'SUSPENDED' : null;
+  };
+
   // ------------------------------------------------------------ 表示する文言
   // 商品は、競りの最中に進行コンソールからその場で登録する（発注者の決定）。事前の登録・審査・カタログは持たない。
   // 送料が含まれないことの表示（FR-SHIP-003）と、返品特約の表示（FR-LEG-002）。だれでも見られる
@@ -475,5 +531,5 @@ export function createApi({ store, config, nowMs }) {
     }
   }
 
-  return { handle, createStaff, audit };
+  return { handle, createStaff, audit, participantFromCookie, bidGate, eventId: () => activeEvent()?.id ?? null };
 }

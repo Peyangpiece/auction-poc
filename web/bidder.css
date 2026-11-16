@@ -151,3 +151,17 @@ details dd { overflow-wrap: anywhere; }
 }
 #cmtCount { font-size: 12px; color: var(--ink-3); justify-self: end; }
 #bid.locked { opacity: .6; }
+
+/* ---- 参加手続き（受け取り方法と支払方法。両方に答えるまで、入札画面に進めない） */
+#gateEvent { font-weight: 700; }
+#gateEvent:empty { display: none; }
+#gateEvent b { font-family: var(--digits); font-size: 28px; color: var(--action); margin-left: 8px; }
+#join { display: grid; gap: 16px; text-align: left; }
+#join[hidden], #enter[hidden] { display: none; }
+.pick { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.pick legend { font-size: 13px; font-weight: 700; padding: 0; margin-bottom: 4px; }
+.pick label { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; min-height: 48px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: var(--r); font-weight: 700; cursor: pointer; }
+.pick label:has(input:checked) { border-color: var(--action); border-width: 2px; padding: 7px 11px; color: var(--action); }
+.pick label.off { color: var(--ink-2); cursor: not-allowed; border-style: dashed; }
+.pick small { font-size: 12px; font-weight: 400; flex-basis: 100%; padding-left: 24px; }
+#joinTerms { white-space: pre-line; }

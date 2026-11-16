@@ -10,9 +10,15 @@ export const hashToken = (token) => crypto.createHash('sha256').update(String(to
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS members (
   id INTEGER PRIMARY KEY,
-  paddle_no INTEGER NOT NULL UNIQUE,      -- 参加番号（画面にはこの番号だけを出す。FR-BID-008）
-  name TEXT NOT NULL,                     -- 架空の名前（本物の個人データは使わない）
-  token_hash TEXT NOT NULL UNIQUE
+  paddle_no INTEGER NOT NULL,             -- 参加番号（画面にはこの番号だけを出す。FR-BID-008）。開催ごとに1から振る（FR-NUM-001）
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,        -- 検証用の合言葉。会員の参加（account_id あり）では使わない乱数を入れる
+  account_id INTEGER,                     -- 登録した会員（member_accounts.id）。検証用の参加者では NULL
+  event_id INTEGER,                       -- 参加した開催（events.id）。検証用の参加者では NULL
+  receive TEXT,                           -- 受け取り方法: pickup（現地受け取り）/ ship（配送）（FR-SHIP-007）
+  payment TEXT,                           -- 支払方法: transfer（銀行振込）/ cash（当日現金）（FR-PAY-009）
+  mode TEXT NOT NULL DEFAULT 'online',    -- 参加モード（FR-MODE-001）。会場参加は MVP の 4
+  joined_at REAL
 );
 CREATE TABLE IF NOT EXISTS staff (
   id INTEGER PRIMARY KEY,
@@ -22,7 +28,8 @@ CREATE TABLE IF NOT EXISTS staff (
 );
 CREATE TABLE IF NOT EXISTS lots (
   id INTEGER PRIMARY KEY,
-  lot_no INTEGER NOT NULL UNIQUE,
+  lot_no INTEGER NOT NULL,                -- 開催ごとに、登録の順に1から振る（FR-NUM-001）
+  event_id INTEGER,                       -- 開催（events.id）。開催なしで動かす検証では NULL
   title TEXT NOT NULL,
   start_price INTEGER NOT NULL CHECK (start_price > 0),   -- 税込（FR-BID-010）
   unit_override INTEGER,                                    -- 商品ごとの入札単位の上書き（FR-BID-005）
@@ -75,6 +82,38 @@ CREATE TRIGGER IF NOT EXISTS bids_no_delete BEFORE DELETE ON bids
   BEGIN SELECT RAISE(ABORT, 'bids は削除できない'); END;
 `;
 
+const INDEXES = `
+CREATE UNIQUE INDEX IF NOT EXISTS members_event_paddle ON members(COALESCE(event_id, 0), paddle_no);
+CREATE UNIQUE INDEX IF NOT EXISTS members_event_account ON members(event_id, account_id);
+CREATE UNIQUE INDEX IF NOT EXISTS lots_event_no ON lots(COALESCE(event_id, 0), lot_no);
+`;
+
+/**
+ * 以前の版のデータベースを、いまの形に直す。
+ * members.paddle_no と lots.lot_no に付いていた「全体で1つ」の制約を外すには、表を作り直すしかない（SQLite の制約）。
+ * 行の id は変えないので、入札などからの参照はそのまま生きる。
+ */
+function migrate(db) {
+  const has = (table, col) => !!db.prepare(`SELECT 1 FROM pragma_table_info('${table}') WHERE name = ?`).get(col);
+  const defs = Object.fromEntries([...SCHEMA.matchAll(/CREATE TABLE IF NOT EXISTS (\w+) \(([\s\S]*?)\n\);/g)].map((m) => [m[1], m[2]]));
+  const rebuild = (table, keep) => {
+    db.exec(`CREATE TABLE ${table}_new (${defs[table]}\n);
+      INSERT INTO ${table}_new (${keep}) SELECT ${keep} FROM ${table};
+      DROP TABLE ${table};
+      ALTER TABLE ${table}_new RENAME TO ${table};`);
+  };
+  const todo = [];
+  if (!has('lots', 'reserve_price')) db.exec('ALTER TABLE lots ADD COLUMN reserve_price INTEGER');
+  if (!has('members', 'account_id')) todo.push(['members', 'id, paddle_no, name, token_hash']);
+  if (!has('lots', 'event_id')) todo.push(['lots', 'id, lot_no, title, start_price, unit_override, reserve_price, status, prep_from, no_video, current_bid_seq, close_seq, winner_bid_seq, updated_at']);
+  if (!todo.length) return;
+  db.pragma('foreign_keys = OFF');
+  db.pragma('legacy_alter_table = ON'); // 名前を戻すときに、ほかの表からの参照を書き換えさせない
+  db.transaction(() => { for (const [table, keep] of todo) rebuild(table, keep); })();
+  db.pragma('legacy_alter_table = OFF');
+  db.pragma('foreign_keys = ON');
+}
+
 export function openDb(dbPath) {
   if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
@@ -82,10 +121,8 @@ export function openDb(dbPath) {
   db.pragma('synchronous = FULL'); // コミットごとに fsync する。電源断でも受理済みの入札を失わない
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
-  // 以前の版で作ったデータベースに、後から足した列を加える
-  if (!db.prepare(`SELECT 1 FROM pragma_table_info('lots') WHERE name = 'reserve_price'`).get()) {
-    db.exec('ALTER TABLE lots ADD COLUMN reserve_price INTEGER');
-  }
+  migrate(db);
+  db.exec(INDEXES);
 
   const q = {
     lot: db.prepare(`
@@ -99,6 +136,7 @@ export function openDb(dbPath) {
       FROM lots l
       LEFT JOIN bids b ON b.seq = l.current_bid_seq
       LEFT JOIN members m ON m.id = b.member_id
+      WHERE l.event_id IS ?
       ORDER BY l.lot_no`),
     busyLot: db.prepare(
       `SELECT id FROM lots WHERE status IN ('preparing','preparing_warn','open','suspended') AND id <> ? LIMIT 1`),
@@ -125,11 +163,11 @@ export function openDb(dbPath) {
     lastEvent: db.prepare(`SELECT seq, type FROM lot_events WHERE lot_id = ? ORDER BY seq DESC LIMIT 1`),
     maxSeq: db.prepare(
       `SELECT MAX(s) AS s FROM (SELECT MAX(seq) AS s FROM bids UNION ALL SELECT MAX(seq) AS s FROM lot_events)`),
-    memberByToken: db.prepare(`SELECT id, paddle_no, name FROM members WHERE token_hash = ?`),
+    memberByToken: db.prepare(`SELECT id, paddle_no, name, account_id FROM members WHERE token_hash = ? AND account_id IS NULL`),
     staffByToken: db.prepare(`SELECT id, role, name FROM staff WHERE token_hash = ?`),
     insertLot: db.prepare(
-      `INSERT INTO lots (lot_no, title, start_price, unit_override, reserve_price, updated_at)
-       VALUES ((SELECT COALESCE(MAX(lot_no), 0) + 1 FROM lots), ?, ?, ?, ?, ?)`),
+      `INSERT INTO lots (lot_no, event_id, title, start_price, unit_override, reserve_price, updated_at)
+       VALUES ((SELECT COALESCE(MAX(lot_no), 0) + 1 FROM lots WHERE event_id IS @event), @event, @title, @start, @unit, @reserve, @at)`),
     insertMember: db.prepare(`INSERT INTO members (paddle_no, name, token_hash) VALUES (?, ?, ?)`),
     insertComment: db.prepare(`INSERT INTO comments (lot_id, member_id, body, at) VALUES (?, ?, ?, ?)`),
     hideComment: db.prepare(`UPDATE comments SET hidden = 1 WHERE id = ?`),

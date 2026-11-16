@@ -151,6 +151,32 @@ try {
   await phone.waitForURL(/mypage\.html/);
   check(true, '電話番号と認証番号で、ログインできる');
 
+  console.log('参加手続きと入札');
+  await phone.click('text=競りに参加する');
+  await phone.waitForSelector('#join:not([hidden])');
+  check((await phone.locator('#join input:checked').count()) === 0, '受け取り方法と支払方法は、どちらも選ばれていない状態で聞く');
+  check(await phone.isHidden('#enter'), '答えるまで、入札画面に進むボタンは出ない');
+  await phone.check('#join [name=receive][value=ship]');
+  await phone.click('#join button[type=submit]');
+  await phone.waitForFunction(() => document.getElementById('gateMsg').textContent.includes('両方'));
+  check(true, '片方だけでは進めない（理由を出す）');
+  await shot(phone, 'mvp-13-join');
+  await phone.check('#join [name=payment][value=transfer]');
+  await phone.click('#join button[type=submit]');
+  await phone.waitForSelector('#enter:not([hidden])');
+  check((await phone.textContent('#gateEvent')).includes('参加番号1'), '手続きが済むと、参加番号 1 が振られる');
+  await shot(phone, 'mvp-14-paddle');
+  await phone.click('#enter');
+  await con.click('#b_next');
+  await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
+  await phone.waitForFunction(() => document.getElementById('bid').textContent === '応札に切り替える');
+  await phone.click('#bid');
+  await phone.waitForFunction(() => document.getElementById('bid').textContent.includes('で入札'));
+  await phone.click('#bid');
+  await con.waitForFunction(() => document.getElementById('history').textContent.includes('9,500'));
+  check(true, '登録した会員が、参加番号で入札できる');
+  await shot(phone, 'mvp-15-bid');
+
   // 会員の停止と、記録
   await admin.click('#tabs [data-key=members]');
   await admin.click('#panel >> text=停止');
@@ -158,7 +184,7 @@ try {
   await admin.click('#dlg button[type=submit]');
   await admin.waitForSelector('#panel .warn');
   await shot(admin, 'mvp-11-members');
-  await phone.reload();
+  await phone.goto(sys.base + '/mypage.html');
   await phone.waitForSelector('#suspended:not([hidden])');
   check(true, '主催者管理者が会員を停止でき、本人の画面に出る');
   await admin.click('#tabs [data-key=audit]');

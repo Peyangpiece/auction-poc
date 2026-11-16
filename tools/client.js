@@ -6,7 +6,8 @@ import WebSocket from 'ws';
 export const localNow = () => performance.timeOrigin + performance.now();
 
 export class Client {
-  constructor(url, token, { label = null, ack = true, net = null, autoReconnect = false } = {}) {
+  constructor(url, token, { label = null, ack = true, net = null, autoReconnect = false, headers = undefined } = {}) {
+    this.headers = headers; // ログインのクッキーで名乗るとき（合言葉なし）に使う
     this.autoReconnect = autoReconnect;
     this.reconnects = 0;
     this.url = url;
@@ -30,7 +31,7 @@ export class Client {
 
   connect() {
     return new Promise((resolve, reject) => {
-      const ws = (this.ws = new WebSocket(this.url, { perMessageDeflate: false }));
+      const ws = (this.ws = new WebSocket(this.url, { perMessageDeflate: false, headers: this.headers }));
       ws.on('error', reject);
       ws.on('open', () => { this.closed = false; ws.send(JSON.stringify({ type: 'hello', token: this.token, label: this.label })); });
       ws.on('close', () => {
