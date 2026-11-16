@@ -44,6 +44,16 @@ export class AuctionApp extends DurableObject {
 
   async startAndWait() {
     const container = this.ctx.container;
+    // 配り直したあとは、動いているコンテナ（前の版）を止めて、新しい版で立ち上げ直す。
+    // 止める合図（SIGTERM）を送ると、アプリは、まだ送っていないデータを R2 へ送ってから終わる。
+    const build = this.env.BUILD || '';
+    if (container.running && build && (await this.ctx.storage.get('build')) !== build) {
+      container.signal(15);
+      const exited = container.monitor().catch(() => {});
+      const timeout = scheduler.wait(60000).then(() => 'timeout');
+      if ((await Promise.race([exited, timeout])) === 'timeout') await container.destroy('新しい版への入れ替え');
+      for (let i = 0; i < 50 && container.running; i++) await scheduler.wait(200);
+    }
     if (!container.running) {
       const demo = this.env.DEMO === '1';
       const env = {
@@ -58,6 +68,7 @@ export class AuctionApp extends DurableObject {
       };
       // コンテナごとに、登録し直す決まり
       await container.interceptOutboundHttp(STORE_HOST, this.ctx.exports.DataStore);
+      if (build) await this.ctx.storage.put('build', build);
       container.start({ image: container.images.base, instance: this.env.INSTANCE_TYPE || 'standard-1', enableInternet: false, env });
     }
     await container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS);

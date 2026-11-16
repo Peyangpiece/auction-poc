@@ -31,6 +31,7 @@ jobs:
       - name: データの保存先（R2 のバケット）を作る（すでにあれば、そのまま）
         run: $WRANGLER r2 bucket create reiwa-no-seri-data || echo "すでにあるか、作れませんでした（次の段で分かる）"
       - name: コンテナを組み立てて、配る
-        run: $WRANGLER deploy
+        # BUILD（この版の印）が変わると、入口の Worker が、動いているコンテナを新しい版に入れ替える
+        run: $WRANGLER deploy --var BUILD:${{ github.sha }}
       - name: 管理者の最初のパスワードを入れる
         run: printf '%s' "$ADMIN_PASSWORD" | $WRANGLER secret put ADMIN_PASSWORD
