@@ -12,10 +12,13 @@ fs.mkdirSync(config.dataDir, { recursive: true });
 const store = openDb(config.dbPath);
 const api = createApi({ store, config, nowMs: () => Date.now() });
 if (!store.db.prepare('SELECT 1 FROM staff_accounts LIMIT 1').get()) {
-  const s = api.createStaff({ loginId: 'admin', name: '管理者', role: 'admin' });
+  // 置き場が消える環境（Cloudflare のコンテナなど）では、ファイルを読みに行けないので、最初のパスワードを環境変数で受け取れる
+  const password = process.env.POC_ADMIN_PASSWORD || undefined;
+  if (password && password.length < 12) { console.error('POC_ADMIN_PASSWORD は、12文字以上にしてください'); process.exit(1); }
+  const s = api.createStaff({ loginId: 'admin', name: '管理者', role: 'admin', password });
   api.audit({ system: true }, 'staff.create', { target: `staff:${s.id}`, after: { loginId: s.loginId, role: s.role, by: 'tools/setup-first.js' } });
   const file = path.join(config.dataDir, 'staff-initial-admin.txt');
-  fs.writeFileSync(file, [`ログイン ID: ${s.loginId}`, `仮のパスワード: ${s.initialPassword}`, `認証アプリの鍵: ${s.totpSecret}`, `認証アプリ用の URL: ${s.otpauthUrl}`, ''].join('\n'), { mode: 0o600 });
+  fs.writeFileSync(file, [`ログイン ID: ${s.loginId}`, `仮のパスワード: ${password ? '（環境変数 POC_ADMIN_PASSWORD で指定したもの）' : s.initialPassword}`, `認証アプリの鍵: ${s.totpSecret}`, `認証アプリ用の URL: ${s.otpauthUrl}`, ''].join('\n'), { mode: 0o600 });
   console.log(`最初の主催者管理者（admin）を作りました。ログインに使う情報: ${file}`);
 } else console.log('スタッフは、すでに登録されています。');
 if (process.argv.includes('--with-event') && !store.db.prepare('SELECT 1 FROM events LIMIT 1').get()) {

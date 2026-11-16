@@ -3,3 +3,4 @@ data/
 agent/logs/
 agent/.env
 .env
+.wrangler/

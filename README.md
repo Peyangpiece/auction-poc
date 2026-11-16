@@ -126,3 +126,7 @@ node tools/aggregate.js --label P2-6
 
 秘密情報（IVS のストリームキー、obs-websocket のパスワード、AWS の認証情報、各トークン）は、ソースコードにもこのリポジトリにも書いていません。
 ストリームキーは OBS の設定の中だけ、obs-websocket のパスワードは配信用PCの `agent/.env` だけに置きます。
+
+## Cloudflare（workers.dev）で試す
+
+`npx wrangler login` → `npx wrangler deploy` → `npx wrangler secret put ADMIN_PASSWORD`。Docker が要る。**データは残らない（お試し専用）。** くわしくは `docs/03-PoC報告書.md` の 32 章。

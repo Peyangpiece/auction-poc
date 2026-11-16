@@ -3,3 +3,7 @@ data
 docs
 .git
 agent
+.wrangler
+cloudflare
+wrangler.jsonc
+.github

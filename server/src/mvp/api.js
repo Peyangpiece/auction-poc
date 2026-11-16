@@ -394,7 +394,7 @@ export function createApi({ store, config, nowMs }) {
     return { ok: true };
   });
   /** スタッフを作る。最初の主催者管理者は、tools/create-admin.js から呼ぶ */
-  function createStaff({ loginId, name, role, phone }) {
+  function createStaff({ loginId, name, role, phone, password: given }) {
     const id = String(loginId ?? '').trim();
     if (!/^[a-z0-9._-]{3,32}$/.test(id)) throw bad('ログイン ID は、半角の英小文字・数字・記号（. _ -）で 3〜32 文字にしてください');
     if (!ROLE_LABEL[role]) throw bad('役割を選んでください');
@@ -404,7 +404,7 @@ export function createApi({ store, config, nowMs }) {
     if (phone && !tel) throw bad('電話番号を、国内の番号で入力してください');
     if (tel && db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(tel)) throw new HttpError(409, 'この電話番号は、会員として登録されています');
     if (db.prepare('SELECT 1 FROM staff_accounts WHERE login_id = ?').get(id)) throw new HttpError(409, 'このログイン ID は使われています');
-    const password = randomToken(12);
+    const password = given || randomToken(12);
     const secret = newTotpSecret();
     const info = db.prepare('INSERT INTO staff_accounts (login_id, name, role, phone, password_hash, totp_secret, created_at) VALUES (?,?,?,?,?,?,?)')
       .run(id, fullName, role, tel, hashPassword(password), secret, nowMs());
