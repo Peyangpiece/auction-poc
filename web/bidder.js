@@ -416,8 +416,19 @@ const showPaddle = (title, p) => {
       const now = await getJson('/api/participation');
       if (now.status === 200 && now.checkedIn) { clearInterval(timer); showPaddle(title, now); }
     }, 4000);
+    // まちがえて「会場で参加」を選んだ人が、自分でオンライン参加に直せる
+    $('toOnline').hidden = false;
+    $('toOnline').onclick = async () => {
+      const res = await getJson('/api/my/participation/online', {});
+      if (res.status !== 200) { $('gateMsg').textContent = res.message ?? 'うまくいきませんでした。やり直してください'; return; }
+      clearInterval(timer);
+      showPaddle(title, res);
+      $('gateMsg').textContent = '';
+      $('gateWait').textContent = res.paymentChanged ? 'オンライン参加に切り替えました。お支払いは、銀行振込になります。' : 'オンライン参加に切り替えました。';
+    };
     return;
   }
+  $('toOnline').hidden = true;
   $('gateWait').textContent = '';
   $('enter').hidden = false; ready = true;
 };

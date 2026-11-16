@@ -403,5 +403,11 @@ test('画面で「会場で参加」を選んだ人は、会場参加になる�
     const res = await a.post('/api/join', { receive: 'pickup', payment: 'cash', mode: 'venue' });
     assert.deepEqual([res.status, res.json.mode, res.json.checkedIn], [200, 'venue', false], '会場参加なので、当日現金も選べる');
     await assert.rejects(t.ws(a), /来場の確認/, '受付の来場確認の前は、つなげない');
+    // まちがえて選んだ人は、自分でオンライン参加に直せる。当日現金は、銀行振込になる
+    const sw = await a.post('/api/my/participation/online', {});
+    assert.deepEqual([sw.status, sw.json.mode, sw.json.payment, sw.json.paymentChanged, sw.json.paddle], [200, 'online', 'transfer', true, 1]);
+    const wa = await t.ws(a);
+    wa.close();
+    assert.equal((await a.post('/api/my/participation/online', {})).status, 200, 'もう一度送っても、そのまま');
   } finally { await t.end(); }
 });
