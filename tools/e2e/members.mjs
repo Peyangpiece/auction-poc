@@ -50,7 +50,6 @@ try {
   console.log('スタッフ');
   const admin = await staffLogin(adminAcc);
   await shot(admin, 'mvp-01-staff-login');
-  await admin.click('#loginForm button[type=submit]');
   await admin.waitForSelector('#tabs button');
   check((await admin.textContent('#who')).includes('主催者管理者'), '主催者管理者としてログインできる');
   check((await admin.locator('#tabs button').count()) === 10, '主催者管理者には、10 の画面が出る');
@@ -94,7 +93,6 @@ try {
 
   // 進行役には、SMS の制限だけ（商品は、進行コンソールでその場で登録する）
   const auct = await staffLogin(auctAcc);
-  await auct.click('#loginForm button[type=submit]');
   await auct.waitForSelector('#tabs button');
   check((await auct.locator('#tabs button').count()) === 3, '進行役の管理画面には、受付・未引き取り・SMS の制限だけが出る');
 
@@ -157,11 +155,9 @@ try {
   await phone.waitForSelector('#stepCode:not([hidden])');
   await shot(phone, 'mvp-08-register-code');
   await phone.fill('[name=code]', lastCode() === '000000' ? '111111' : '000000');
-  await phone.click('#stepCode button[type=submit]');
   await phone.waitForFunction(() => document.querySelector('#stepCode .msg').textContent.includes('あと 4 回'));
   check(true, '認証番号の誤りは、残りの回数を出す');
   await phone.fill('[name=code]', lastCode());
-  await phone.click('#stepCode button[type=submit]');
   await phone.waitForSelector('#stepProfile:not([hidden])');
   await phone.fill('[name=name]', '検証 太郎');
   await phone.fill('[name=email]', 'taro@example.com');
@@ -190,7 +186,6 @@ try {
   await phone.click('#stepPhone button[type=submit]');
   await phone.waitForSelector('#stepCode:not([hidden])');
   await phone.fill('[name=code]', lastCode());
-  await phone.click('#stepCode button[type=submit]');
   await phone.waitForURL(/mypage\.html/);
   check(true, '電話番号と認証番号で、ログインできる');
 
@@ -241,7 +236,6 @@ try {
   await guest.click('#stepPhone button[type=submit]');
   await guest.waitForSelector('#stepCode:not([hidden])');
   await guest.fill('[name=code]', lastCode());
-  await guest.click('#stepCode button[type=submit]');
   await guest.waitForSelector('#stepProfile:not([hidden])');
   await guest.fill('[name=name]', '会場 花子');
   await guest.fill('[name=email]', 'hanako@example.com');

@@ -75,6 +75,15 @@ function field(label, name, props = {}, hint = '') {
   return el('label', { class: 'field' }, label, hint && el('small', { text: hint }), input, el('span', { class: 'err', role: 'alert' }));
 }
 
+// 認証番号（6桁）は、入れ終わったら、そのまま確かめに進む（もう一度ボタンを押す手間をなくす）。
+// ほかの欄がまだ埋まっていないとき（スタッフのログインなど）は、進めない。
+document.addEventListener('input', (ev) => {
+  const input = ev.target;
+  if (!(input instanceof HTMLInputElement) || !input.classList.contains('code') || !input.form) return;
+  input.value = input.value.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/\D/g, '').slice(0, 6); // 全角の数字や空白を直す
+  if (/^\d{6}$/.test(input.value) && input.form.checkValidity()) input.form.requestSubmit();
+});
+
 /** スタッフ向け: データの保存が失敗し続けているときに、画面の上に警告を出す（1分ごとに確かめる） */
 function watchStorage(first) {
   const bar = el('p', { class: 'alarm', role: 'alert', hidden: true, text: 'データの保存に失敗しています。競りを進める前に、システムの担当者へ連絡してください。' });

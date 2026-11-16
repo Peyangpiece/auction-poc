@@ -185,7 +185,8 @@ function onMessage(msg, at) {
       if (msg.type === 'welcome') {
         log(`接続しました（${msg.name}）`);
         document.querySelectorAll('[data-crash]').forEach((b) => { b.disabled = !msg.allowCrash; });
-        if (!msg.allowCrash) $('crashNote').textContent = '障害の模擬は無効です（POC_ALLOW_CRASH=1 で有効）';
+        // 障害の模擬は、検証用の環境でだけ出す（本番の進行役の画面には、強制終了のボタンを置かない）
+        $('crashBox').hidden = !msg.allowCrash;
       }
       render(); renderStream(); break;
     case 'lot': {
