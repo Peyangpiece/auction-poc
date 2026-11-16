@@ -37,6 +37,11 @@ try {
   await shot(b1, 'gate');
   for (const b of [b1, b2]) await b.click('#enter');
   await b1.waitForFunction(() => document.getElementById('me').textContent.includes('番'));
+  const urls = [await b1.evaluate(() => location.href), await con.evaluate(() => location.href)];
+  check(urls.every((u) => !/[?&]t=/.test(u)), `参加用の合言葉が、アドレス欄に残らない（${urls.map((u) => u.split('/').pop()).join(' , ')}）`);
+  await b1.reload(); await b1.click('#enter');
+  await b1.waitForFunction(() => document.getElementById('me').textContent.includes('番'));
+  check(true, '再読み込みしても、同じタブなら入り直せる');
   check((await ratio(b1)) === 1.333, 'ライブ画面は、停止中も 4:3');
   check((await text(b1, 'bid')).includes('次の品'), '品がない間は、入札ボタンが案内になる');
   await shot(b1, 'bidder-watch');

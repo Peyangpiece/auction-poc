@@ -1,0 +1,67 @@
+/* 進行コンソールのスタイル。共通の部品は app.css */
+.brandbar > div, main { max-width: 1240px; margin: 0 auto; padding-left: 24px; padding-right: 24px; }
+.brandbar > div { min-height: 80px; }
+.brand img { width: 48px; height: 48px; }
+.brand__name { font-size: 20px; }
+.meta { display: flex; align-items: baseline; gap: 24px; color: var(--ink-2); font-size: 14px; }
+.meta b { color: var(--ink); }
+#clock { font-family: var(--digits); font-weight: 600; font-size: 24px; letter-spacing: 0; color: var(--action); min-width: 8.2ch; text-align: right; font-variant-numeric: tabular-nums; }
+main { display: grid; gap: 40px; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; padding-top: 24px; padding-bottom: 48px; }
+.col { display: grid; gap: 32px; min-width: 0; align-content: start; }
+@media (max-width: 900px) { .brandbar > div, main { padding-left: 16px; padding-right: 16px; } main { grid-template-columns: minmax(0, 1fr); gap: 32px; } }
+section > h2 { margin-bottom: 8px; }
+.sechead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.sechead h2 { margin: 0; }
+.count { font-size: 13px; color: var(--ink-3); }
+
+/* 表示板と、その下の操作 */
+.board { padding: 20px; gap: 14px; }
+.board-top { font-size: 15px; }
+#lotNo { font-size: 20px; margin-right: 10px; color: var(--board-ink-2); }
+#lotNo:empty { display: none; }
+#title { color: var(--board-ink); font-weight: 700; font-size: 18px; overflow-wrap: anywhere; }
+.board .state { color: var(--board-ink); }
+.plabel { font-size: 13px; color: var(--board-ink-2); margin-bottom: 4px; }
+.price { font-size: 92px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.actions [hidden] { display: none; }
+#b_close, #b_next { min-width: 220px; }
+#cmdMsg { margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--danger); }
+#cmdMsg:empty { display: none; }
+#idleWarn { margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--danger); }
+#idleWarn:empty { display: none; }
+.actions .push { margin-left: auto; }
+
+/* 表 */
+.tablewrap { overflow: auto; overscroll-behavior: contain; }
+#histWrap { max-height: 260px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-size: 12px; font-weight: 700; color: var(--ink-2); padding: 6px 8px 6px 0; white-space: nowrap; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--ground); }
+td { padding: 8px 8px 8px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td:last-child { text-align: right; white-space: nowrap; padding-right: 0; }
+td.amt { font-size: 18px; line-height: 1; }
+td.digits { font-size: 16px; }
+tr.void td { text-decoration: line-through; color: var(--ink-3); }
+tr.focus td { font-weight: 700; background: var(--ground-alt); }
+td .btn { min-height: 40px; padding: 4px 14px; font-size: 14px; }
+.addlot { display: grid; grid-template-columns: minmax(0, 1fr) 130px 170px auto; gap: 8px; align-items: end; margin-top: 16px; }
+@media (max-width: 640px) { .addlot { grid-template-columns: minmax(0, 1fr); } }
+
+/* 配信 */
+.kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0; font-size: 14px; }
+.kv dt, .kv dd { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.kv dt { color: var(--ink-2); padding-right: 16px; }
+.kv dd { text-align: right; font-weight: 600; }
+.inline { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.inline .field { flex: 1 1 200px; max-width: 260px; }
+
+#comments { list-style: none; padding: 0; max-height: 200px; overflow: auto; overscroll-behavior: contain; }
+#comments li { display: grid; grid-template-columns: 3.5em minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; overflow-wrap: anywhere; }
+#comments .who { color: var(--ink-3); }
+#comments .btn { min-height: 32px; padding: 2px 10px; font-size: 13px; }
+#log { font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; overscroll-behavior: contain; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+
+details summary { cursor: pointer; font-size: 15px; font-weight: 700; letter-spacing: .12em; color: var(--action); min-height: 44px; display: flex; align-items: center; }
+details .stack { display: grid; gap: 8px; justify-items: start; margin-top: 8px; }
+
+#dlgReasonWrap { margin-top: 16px; }

@@ -11,6 +11,31 @@ const jstShort = (ms) => hmFmt.format(ms);
 const localNow = () => performance.timeOrigin + performance.now();
 const params = new URLSearchParams(location.search);
 
+/**
+ * 参加用の合言葉を、URL に残さない。
+ * 開いた直後に URL から取り出して、このタブの中だけに覚えさせ、アドレス欄と履歴からは消す
+ * （画面の共有・スクリーンショット・履歴から漏れにくくする）。再読み込みしても、同じタブなら使える。
+ */
+function takeToken(key) {
+  let token = params.get('t');
+  try {
+    if (token) sessionStorage.setItem(key, token);
+    else token = sessionStorage.getItem(key);
+  } catch { /* 保存できない設定でも、そのまま使えるようにする */ }
+  if (params.has('t')) {
+    params.delete('t');
+    const rest = params.toString();
+    history.replaceState(null, '', location.pathname + (rest ? '?' + rest : ''));
+  }
+  return token;
+}
+// サーバーが接続を切った理由（つなぎ直しても同じ結果になるもの）
+const CLOSE_REASON = {
+  4401: 'URL が正しくありません',
+  4409: '同時に開ける画面の数を超えました',
+  4429: '送信が多すぎるため、接続を切りました',
+};
+
 const STATE_LABEL = {
   waiting: '待機', preparing: '配信準備中', preparing_warn: '配信準備中（警告）', open: '受付中',
   suspended: '中断', sold: '落札', unsold: '流札', not_held: '未実施',
@@ -83,7 +108,7 @@ class Link {
     };
     ws.onclose = (ev) => {
       if (ws !== this.ws) return; // すでに見切りをつけて、つなぎ直しに入っている
-      if (ev.code === 4401) return this.onStatus(false, '合言葉（トークン）が正しくありません');
+      if (CLOSE_REASON[ev.code]) { this.ws = { readyState: 3, send() {}, close() {} }; return this.onStatus(false, CLOSE_REASON[ev.code]); } // つなぎ直さない
       this.dropped('close');
     };
     ws.onerror = () => {};

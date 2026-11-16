@@ -64,6 +64,18 @@ export function loadConfig(env = process.env) {
     // 配信の止め忘れの注意: 競りがないまま配信が続いた時間がこれを超えたら、進行コンソールに注意を出す（止めはしない）
     streamIdleWarnMs: num(env.POC_STREAM_IDLE_WARN_MS, 600000),
 
+    // ---- 守り（不正な連打・大量の接続・よそのサイトからの接続への備え）。0 を指定すると、その制限を外す
+    maxConnections: num(env.POC_MAX_CONNECTIONS, 500),        // 同時接続の上限（想定の上限 100 人の5倍）
+    maxConnectionsPerUser: num(env.POC_MAX_CONNECTIONS_PER_USER, 5), // 同じ会員・スタッフの同時接続（複数の端末やタブ）
+    helloTimeoutMs: num(env.POC_HELLO_TIMEOUT_MS, 10000),     // つないでから、この時間内に名乗らない接続は切る
+    messageRate: num(env.POC_MESSAGE_RATE, 100),              // 1接続あたりの受信の上限（1秒あたり。瞬間的にはこの2倍まで）
+    bidRate: num(env.POC_BID_RATE, 5),                        // 会員1人あたりの入札の上限（1秒あたり）
+    maxBufferedBytes: num(env.POC_MAX_BUFFERED_BYTES, 1048576), // 送信の滞留がこれを超えた端末は切る（つなぎ直しで最新を取り直す）
+    // 自分のサイト以外のページからの WebSocket 接続を断る。別のドメインから使う場合は、カンマ区切りで足す
+    allowedOrigins: (env.POC_ALLOWED_ORIGINS || '').split(',').map((x) => x.trim()).filter(Boolean),
+    // ブラウザに守らせる読み込みの制限（Content-Security-Policy）。off で付けない
+    csp: env.POC_CSP || 'on',
+
     sysSampleMs: num(env.POC_SYS_SAMPLE_MS, 10000),
   };
 }

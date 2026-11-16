@@ -39,9 +39,35 @@ function broadcast(msg) {
   const sentAt = nowMs();
   const staffText = JSON.stringify({ ...msg, sentAt });
   const memberText = msg.lot || msg.lots ? JSON.stringify({ ...forMember(msg), sentAt }) : staffText;
-  for (const c of clients) if (c.ws.readyState === 1) c.ws.send(c.role === 'auctioneer' ? staffText : memberText);
+  for (const c of clients) {
+    if (c.ws.readyState !== 1) continue;
+    // 通信の遅い端末に送信がたまり続けると、サーバーのメモリを圧迫する。たまりすぎた端末は切る（端末はつなぎ直して、最新の状態を取り直す）
+    if (config.maxBufferedBytes > 0 && c.ws.bufferedAmount > config.maxBufferedBytes) {
+      metrics.write('dropped_slow_client', { conn: c.id, buffered: c.ws.bufferedAmount });
+      c.ws.terminate();
+      continue;
+    }
+    c.ws.send(c.role === 'auctioneer' ? staffText : memberText);
+  }
   return nowMs();
 }
+
+/** 一定の速さまでしか通さない計り（トークンバケット）。rate=1秒あたりの回数、burst=瞬間的に許す回数 */
+function limiter(rate, burst = rate * 2) {
+  if (!(rate > 0)) return () => true;
+  let tokens = burst;
+  let last = nowMs();
+  return () => {
+    const now = nowMs();
+    tokens = Math.min(burst, tokens + ((now - last) / 1000) * rate);
+    last = now;
+    if (tokens < 1) return false;
+    tokens -= 1;
+    return true;
+  };
+}
+const bidLimiters = new Map(); // 会員ごとの入札の計り（端末を増やしても、1人あたりの上限は変わらない）
+const userConnections = new Map(); // 'member:3' -> 同時接続の数
 
 function presence() {
   let members = 0;
@@ -90,11 +116,40 @@ if (recovered.length) console.log('[recovery]', JSON.stringify(recovered));
 // ---------------------------------------------------------------- HTTP
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png' };
 
+// ブラウザに守らせる制限。スクリプトとスタイルは自分のサイトのファイルだけ（画面の中に直接書いたものは動かない）。
+// 映像の再生（Amazon IVS のプレーヤー）に要る許可は、公式の資料を見ずに書いた想定で【未検証】。実物で映像が出なければ、ここを直すか POC_CSP=off にする。
+const playerOrigin = (() => { try { return new URL(config.ivsPlayerScriptUrl).origin; } catch { return ''; } })();
+const CSP = [
+  "default-src 'self'",
+  `script-src 'self' 'wasm-unsafe-eval' ${playerOrigin}`.trim(),
+  "style-src 'self'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "media-src 'self' blob: https:",
+  "connect-src 'self' ws: wss: https:",
+  "worker-src 'self' blob:",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+].join('; ');
+const SECURITY_HEADERS = {
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer', // 参加用の URL が、よそのサイトに伝わらないようにする
+  'x-frame-options': 'DENY',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+  ...(config.csp === 'off' ? {} : { 'content-security-policy': CSP }),
+};
+const startedAt = nowMs();
+
 const server = http.createServer((req, res) => {
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   const url = new URL(req.url, 'http://x');
   if (url.pathname === '/healthz') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, now: nowMs(), connections: clients.size }));
+    let db = true;
+    try { store.db.prepare('SELECT 1').get(); } catch { db = false; }
+    res.statusCode = db ? 200 : 503;
+    return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, agent: stream.view().agentConnected }));
   }
   if (url.pathname === '/hooks/ivs' && req.method === 'POST') return handleEventBridge(req, res);
   if (req.method !== 'GET') return res.writeHead(405).end();
@@ -103,7 +158,11 @@ const server = http.createServer((req, res) => {
   const file = path.join(config.webDir, name);
   fs.readFile(file, (err, body) => {
     if (err) return res.writeHead(404).end('not found');
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
+    const ext = path.extname(file);
+    if (!MIME[ext]) return res.writeHead(404).end('not found'); // 画面に使う種類のファイルだけを配る
+    // 書体と画像は1日おぼえさせる。画面とスクリプトは毎回取り直す（直した内容がすぐ届く）
+    const cache = ext === '.woff2' || ext === '.webp' || ext === '.png' ? 'public, max-age=86400' : 'no-store';
+    res.writeHead(200, { 'content-type': MIME[ext], 'cache-control': cache });
     res.end(body);
   });
 });
@@ -140,6 +199,22 @@ const agentWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname === '/ws') {
+    // よそのサイトのページからの接続を断る（ブラウザは Origin を必ず付ける。付いていないのは、負荷のプログラムなどブラウザ以外）
+    const origin = req.headers.origin;
+    if (origin) {
+      let host = '';
+      try { host = new URL(origin).host; } catch { /* 形の崩れた Origin は断る */ }
+      if (host !== req.headers.host && !config.allowedOrigins.includes(origin)) {
+        metrics.write('rejected_origin', { origin });
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        return socket.destroy();
+      }
+    }
+    if (config.maxConnections > 0 && wss.clients.size >= config.maxConnections) {
+      metrics.write('rejected_full', { connections: wss.clients.size });
+      socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n');
+      return socket.destroy();
+    }
     wss.handleUpgrade(req, socket, head, (ws) => onClient(ws, req));
   } else if (url.pathname === '/agent') {
     // エージェントは、接続のときにトークンを Authorization ヘッダーで示す
@@ -171,10 +246,20 @@ function onClient(ws, req) {
   ws.on('pong', () => { ws.isAlive = true; });
   const conn = { ws, role: null, member: null, staff: null, id: ++connSeq, ip: req.socket.remoteAddress };
   const send = (msg) => ws.readyState === 1 && ws.send(JSON.stringify(msg));
+  const allow = limiter(config.messageRate);
+  // 名乗らないままの接続を残さない
+  const helloTimer = config.helloTimeoutMs > 0 ? setTimeout(() => { if (!conn.role) ws.close(4408, 'hello timeout'); }, config.helloTimeoutMs) : null;
 
   ws.on('message', (raw) => {
+    // 受信が速すぎる接続は切る（壊れた端末や、わざとの連打からサーバーを守る）
+    if (!allow()) {
+      metrics.write('rejected_flood', { conn: conn.id, role: conn.role });
+      send({ type: 'error', message: '送信が多すぎるため、接続を切りました' });
+      return ws.close(4429, 'too many messages');
+    }
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
+    if (msg === null || typeof msg !== 'object') return;
 
     // 時刻合わせ（POC-SRV-006）: すぐにサーバーの時刻を返す。認証の前でも答える。
     if (msg.type === 'time') return send({ type: 'time', t0: msg.t0, ts: nowMs() });
@@ -187,6 +272,17 @@ function onClient(ws, req) {
         send({ type: 'error', message: '合言葉（トークン）が正しくありません' });
         return ws.close(4401, 'unauthorized');
       }
+      if (conn.role) return; // 名乗り直しは受け付けない
+      // 同じ人の同時接続に上限を置く（合言葉が漏れたときに、際限なくつながれないようにする）
+      const userKey = member ? `member:${member.id}` : `staff:${staff.id}`;
+      const open = userConnections.get(userKey) ?? 0;
+      if (config.maxConnectionsPerUser > 0 && open >= config.maxConnectionsPerUser) {
+        send({ type: 'error', message: '同時に開ける画面の数を超えました。ほかの画面を閉じてから、開き直してください' });
+        return ws.close(4409, 'too many connections');
+      }
+      userConnections.set(userKey, open + 1);
+      conn.userKey = userKey;
+      clearTimeout(helloTimer);
       conn.role = member ? 'member' : 'auctioneer';
       conn.member = member ?? null;
       conn.staff = staff ?? null;
@@ -209,6 +305,15 @@ function onClient(ws, req) {
       case 'bid':
         // 主催者側のスタッフは入札できない（FR-CON-004）
         if (conn.role !== 'member') return send({ type: 'error', message: 'スタッフは入札できません' });
+        {
+          // 入札の速さの上限（会員ごと）。人の操作ではありえない速さの入札は、受け付けずに返す。記録にも残さない
+          let ok = bidLimiters.get(conn.member.id);
+          if (!ok) bidLimiters.set(conn.member.id, (ok = limiter(config.bidRate, Math.max(1, config.bidRate))));
+          if (!ok()) {
+            metrics.write('rejected_bid_rate', { paddle: conn.member.paddle_no });
+            return send({ type: 'bid_result', reqId: msg.reqId ?? null, lotId: Number(msg.lotId), accepted: false, code: 'RATE_LIMITED', amount: Number(msg.amount) });
+          }
+        }
         return auction.receiveBid(conn.member, msg, send);
       // ---- 測定用の送り返し（POC-SRV-008、POC-UI-006）
       case 'price_ack':
@@ -230,6 +335,11 @@ function onClient(ws, req) {
   });
 
   ws.on('close', () => {
+    clearTimeout(helloTimer);
+    if (conn.userKey) {
+      const left = (userConnections.get(conn.userKey) ?? 1) - 1;
+      if (left > 0) userConnections.set(conn.userKey, left); else userConnections.delete(conn.userKey);
+    }
     if (clients.delete(conn)) {
       metrics.write('disconnect', { conn: conn.id, role: conn.role });
       presence();
