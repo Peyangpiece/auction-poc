@@ -118,17 +118,6 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   /** 落札者が払う金額（落札額＋買歩銭） */
   const payable = (l) => l.amount + (l.premium ?? 0);
 
-  // ------------------------------------------------------------ 期限の計算
-  /** 金融機関の休業日: 土日と、主催者設定のカレンダー（FR-ORG-001） */
-  const bankHolidays = () => new Set(setting('bank_holidays').split(/\s+/).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)));
-  const isBankHoliday = (date, set) => { const w = new Date(date + 'T00:00:00Z').getUTCDay(); return w === 0 || w === 6 || set.has(date); };
-  /** 支払期限: 送付日の翌日から数えて days 日目。shift なら、休業日のときは前の営業日（FR-INV-005） */
-  function dueDate(sentDate, days, shift) {
-    let d = addDays(sentDate, days);
-    if (shift) { const set = bankHolidays(); while (isBankHoliday(d, set)) d = addDays(d, -1); }
-    return d;
-  }
-
   // ------------------------------------------------------------ 明細を作る（落札の確定 → 明細。FR-INV-001・003）
   /**
    * 落札した品のうち、まだ明細になっていないものを明細にする。何度呼んでも同じ結果になる
@@ -165,8 +154,10 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const receiveNote = [...new Set(lines.map((l) => RECV[l.receive]).filter(Boolean))].join('・');
     const info = db.transaction(() => {
       const number = nextNumber();
-      const r = db.prepare('INSERT INTO invoices (number, kind, account_id, event_id, issued_at, total, receive_note, due_days, shift_holiday) VALUES (?,?,?,?,?,?,?,?,?)')
-        .run(number, kind, first.account_id, first.event_id, nowMs(), total, receiveNote, dueDays, shiftHoliday ? 1 : 0);
+      // 支払期限は、発行日の5日後（違約金などは7日後）の日付（発注者の指示。請求書には、この日付だけを書く）
+      const due = dueDays === null ? null : addDays(today(), dueDays);
+      const r = db.prepare('INSERT INTO invoices (number, kind, account_id, event_id, issued_at, total, receive_note, due_days, shift_holiday, due_date) VALUES (?,?,?,?,?,?,?,?,?,?)')
+        .run(number, kind, first.account_id, first.event_id, nowMs(), total, receiveNote, dueDays, 0, due);
       for (const l of lines) db.prepare('UPDATE bill_lines SET invoice_id = ? WHERE id = ?').run(r.lastInsertRowid, l.id);
       return { id: Number(r.lastInsertRowid), number };
     })();
@@ -392,18 +383,16 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     if (!i) throw new HttpError(404, '請求書が見つかりません');
     if (i.kind === 'cash') throw new HttpError(409, '当日現金の精算の請求書は、その場で渡すので、送付の記録はありません');
     if (i.sent_at) return { ok: true, dueDate: i.due_date };
-    // 記録した日を「送付日」とし、支払期限はそこから数える。送付日が記録されるまで、期限はない（未払いにも自動の停止にもならない）
-    const sentOn = today();
-    const due = dueDate(sentOn, i.due_days, !!i.shift_holiday);
-    db.prepare('UPDATE invoices SET sent_at = ?, due_date = ?, overdue_notified = 0 WHERE id = ?').run(nowMs(), due, id);
-    audit(ctx, 'invoice.sent', { target: `invoice:${i.number}`, after: { sentOn, dueDate: due } });
-    return { ok: true, dueDate: due };
+    // 送ったことを記録する（FR-INV-008）。支払期限は、発行したときに決まっている（発行日の5日後）ので、ここでは変えない
+    db.prepare('UPDATE invoices SET sent_at = ? WHERE id = ?').run(nowMs(), id);
+    audit(ctx, 'invoice.sent', { target: `invoice:${i.number}`, after: { sentOn: today(), dueDate: i.due_date } });
+    return { ok: true, dueDate: i.due_date };
   });
   route('POST', '/api/billing/invoices/:id/unsent', (ctx, body, id) => {
     needStaff(ctx, 'admin');
     const i = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
     if (!i?.sent_at) throw new HttpError(409, '送付済みの記録がありません');
-    db.prepare('UPDATE invoices SET sent_at = NULL, due_date = NULL WHERE id = ?').run(id);
+    db.prepare('UPDATE invoices SET sent_at = NULL WHERE id = ?').run(id);
     audit(ctx, 'invoice.unsent', { target: `invoice:${i.number}`, before: { sentOn: jst(i.sent_at), dueDate: i.due_date } });
     return { ok: true };
   });

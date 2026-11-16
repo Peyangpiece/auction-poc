@@ -137,25 +137,26 @@ test('当日現金の精算と、開催終了の請求書（AC-FR-PAY-010-1、AC
     assert.deepEqual(drafts.map((d) => d.to).sort(), [a.email, b.email], '送付用のメールの下書きを作る（送信はしない）');
     assert.ok(fs.existsSync(drafts[0].attachments[0]), '下書きには、PDF を添付する');
     const list = (await t.admin.get('/api/billing/invoices')).json.invoices;
-    assert.deepEqual(list.map((i) => [i.kind, i.sentOn, i.dueDate]), [['transfer', null, null], ['transfer', null, null], ['cash', null, null]], '送付日が記録されるまで、支払期限はない');
+    assert.deepEqual(list.map((i) => [i.kind, i.sentOn, i.dueDate]), [['transfer', null, '2026-12-12'], ['transfer', null, '2026-12-12'], ['cash', null, null]], '支払期限は、発行日（12/7）の5日後の日付。現金の精算には、期限はない');
   } finally { await t.close(); }
 });
 
-test('送付済みの記録と支払期限（送付日の翌日から5日目。休業日なら前の営業日）、消し込みは金額が一致するときだけ', async () => {
+test('支払期限は発行日の5日後の日付。送付済みの記録。消し込みは金額が一致するときだけ', async () => {
   const t = await setup();
   try {
     const a = await t.member(1);
     t.sold('飯ごう', [[a, 2000]]);
     const [inv] = await t.endEvent();
+    assert.equal(inv.due_date, '2026-12-12', '12/7 に発行 → 期限は 12/12（土曜でも、そのままの日付）');
     const l = await t.line('飯ごう');
     assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 2200 })).status, 200, '送付の前でも、入金があれば消し込める');
     await t.admin.post(`/api/billing/lines/${l.id}/unclear`, { reason: '検証のため' });
-    // 12/7（月）に送付 → 5日目は 12/12（土）→ 前の営業日の 12/11（金）
-    assert.equal((await t.admin.post(`/api/billing/invoices/${inv.id}/sent`)).json.dueDate, '2026-12-11');
+    // 送ったことの記録（期限は変わらない）と、その取り消し
+    assert.equal((await t.admin.post(`/api/billing/invoices/${inv.id}/sent`)).json.dueDate, '2026-12-12');
+    assert.equal((await t.admin.get('/api/billing/invoices')).json.invoices[0].sentOn, '2026-12-07');
     await t.admin.post(`/api/billing/invoices/${inv.id}/unsent`);
-    // 主催者設定の休業日（12/11）を足すと、さらに前の 12/10
-    assert.equal((await t.admin.post('/api/settings', { orgName: '株式会社レイワ', returnPolicy: '仮', shippingNotice: '仮', bankHolidays: '2026-12-11' })).status, 200);
-    assert.equal((await t.admin.post(`/api/billing/invoices/${inv.id}/sent`)).json.dueDate, '2026-12-10');
+    assert.deepEqual([(await t.admin.get('/api/billing/invoices')).json.invoices[0].sentOn, (await t.line('飯ごう')).invoice.dueDate], [null, '2026-12-12']);
+    await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);
 
     assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 2000 })).status, 400, '落札額だけ（買歩銭を除いた金額）では、消し込めない');
     assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: 2201 })).status, 400, '多すぎる入金でも、消し込めない');
@@ -180,12 +181,12 @@ test('未払いによる自動の停止と解除（AC-FR-AUTH-015-1・2・3）�
     t.sold('飯ごう', [[a, 2000]]);
     t.sold('寝袋', [[a, 3000]]);
     const [inv] = await t.endEvent();
-    await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);                    // 期限は 12/11
+    await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);                    // 期限は 12/12（発行日の5日後）
     const l1 = await t.line('飯ごう'), l2 = await t.line('寝袋');
     assert.equal((await t.admin.post(`/api/billing/lines/${l1.id}/cancel`, { reason: '未払い' })).status, 409, '期限の前は、解除できない');
-    await t.advance(4);                                                                   // 12/11: 期限の当日は、まだ未払いではない
+    await t.advance(5);                                                                   // 12/12: 期限の当日は、まだ未払いではない
     assert.equal((await a.get('/api/me')).json.member.suspended, false);
-    await t.advance(1);                                                                   // 12/12 0時を過ぎた
+    await t.advance(1);                                                                   // 12/13 0時を過ぎた
     assert.deepEqual(t.api.billing.sweep(), { overdue: 1, pickup: 0 });
     const me = (await a.get('/api/me')).json.member;
     assert.deepEqual([me.suspended, me.suspendedBy], [true, 'unpaid'], '自動で停止される');
@@ -217,7 +218,7 @@ test('未払いによる自動の停止と解除（AC-FR-AUTH-015-1・2・3）�
     assert.equal(pen.status, 200);
     const penInv = (await t.admin.get('/api/billing/invoices')).json.invoices.find((i) => i.number === pen.json.invoice);
     assert.deepEqual([penInv.kind, penInv.total], ['penalty', 300]);
-    assert.equal((await t.admin.post(`/api/billing/invoices/${penInv.id}/sent`)).json.dueDate, addDays(t.today(), 7), '12/12（土）に送付 → 12/19（土）のまま');
+    assert.equal((await t.admin.post(`/api/billing/invoices/${penInv.id}/sent`)).json.dueDate, addDays(t.today(), 7), '違約金は、発行日の7日後');
     // 返金の記録
     assert.equal((await t.admin.post(`/api/billing/lines/${l2.id}/refund`, { amount: 3000, date: t.today(), method: 'transfer' })).status, 400, '返金には理由が要る');
     assert.equal((await t.admin.post(`/api/billing/lines/${l2.id}/refund`, { amount: 3000, date: t.today(), method: 'transfer', reason: '解除の後に入金があった' })).status, 200);
@@ -233,7 +234,7 @@ test('繰り上げ: 次点の1人だけに打診し、承諾で請求書を1通�
     await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);
     const l = await t.line('飯ごう');
     assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/offer`)).status, 409, '解除の前は、打診できない');
-    await t.advance(5);
+    await t.advance(6);
     await t.admin.post(`/api/billing/lines/${l.id}/cancel`, { reason: '未払い' });
     const offer = await t.admin.post(`/api/billing/lines/${l.id}/offer`);
     assert.deepEqual([offer.json.amount, offer.json.deadline], [1800, addDays(t.today(), 3)], '価格は、次点の人の最後の有効な入札額。回答期限は3日目まで');
@@ -261,19 +262,18 @@ test('繰り上げの回答期限を過ぎたら、辞退とみなす。現地�
     assert.equal((await t.line('水筒')).pickupBy, '2026-12-14');
     const [inv] = await t.endEvent();
     await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);
-    await t.advance(5);
-    const l = await t.line('飯ごう');
-    await t.admin.post(`/api/billing/lines/${l.id}/cancel`, { reason: '未払い' });
-    await t.admin.post(`/api/billing/lines/${l.id}/offer`);                // 12/12 に打診 → 12/15 まで
-    await t.advance(1);                                                          // 12/13: 受け取り期限の前日
+    await t.advance(6);                                                    // 12/13: 支払期限（12/12）を過ぎた。受け取り期限（12/14）の前日でもある
     assert.equal(t.api.billing.sweep().pickup, 1);
     assert.ok(t.outbox().some((m) => m.kind === 'pickup' && m.to === b.email));
     assert.equal(t.api.billing.sweep().pickup, 0, '同じ知らせは、2度送らない');
-    await t.advance(2);                                                          // 12/15: まだ回答できる。受け取り期限は過ぎた
+    const l = await t.line('飯ごう');
+    await t.admin.post(`/api/billing/lines/${l.id}/cancel`, { reason: '未払い' });
+    await t.admin.post(`/api/billing/lines/${l.id}/offer`);                // 12/13 に打診 → 12/16 まで
+    await t.advance(2);                                                    // 12/15: まだ回答できる。受け取り期限は過ぎた
     const pickup = (await t.admin.get('/api/billing/pickup')).json.lines;
     assert.deepEqual(pickup.map((x) => [x.label.includes('水筒'), x.pickupLate]), [[true, true]], '未引き取りの一覧に載り、期限を過ぎたものは強調する');
     assert.equal((await b.get('/api/my/billing')).json.offers[0].state, 'open');
-    await t.advance(1);                                                          // 12/16
+    await t.advance(2);                                                    // 12/17
     assert.equal((await b.get('/api/my/billing')).json.offers[0].state, 'expired');
   } finally { await t.close(); }
 });
@@ -550,15 +550,15 @@ test('違約金・遅延損害金の金額の案、帳簿の出力、請求書�
     await t.admin.post('/api/billing/settle', { lineIds: [sleeping.id] });
     await t.admin.post(`/api/billing/lines/${sleeping.id}/deliver`);
     const [inv] = await t.endEvent();
-    await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);            // 期限 12/11
+    await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);            // 期限 12/12
     const l = await t.line('飯ごう');
     assert.equal((await t.admin.get(`/api/billing/lines/${l.id}/penalty-suggest`)).json.amount, null, '率が設定されていなければ、案は出さない');
     await t.admin.post('/api/settings', { orgName: '株式会社レイワ', returnPolicy: '仮', shippingNotice: '仮', penaltyRateB2c: '10', lateRateB2c: '14.6' });
-    await t.advance(15);                                                   // 12/22: 期限から11日
+    await t.advance(15);                                                   // 12/22: 期限から10日
     await t.admin.post(`/api/billing/lines/${l.id}/cancel`, { reason: '未払い' });
     assert.equal((await t.admin.get(`/api/billing/lines/${l.id}/penalty-suggest`)).json.amount, 1000, '違約金の案: 落札額 10,000円 × 10%');
     const late = (await t.admin.get(`/api/billing/lines/${l.id}/penalty-suggest?kind=late`)).json;
-    assert.deepEqual([late.days, late.amount], [11, Math.floor(11000 * 14.6 / 100 * 11 / 365)], '遅延損害金の案: 期限の翌日から解除の日までを日割りし、1円未満は切り捨て');
+    assert.deepEqual([late.days, late.amount], [10, Math.floor(11000 * 14.6 / 100 * 10 / 365)], '遅延損害金の案: 期限の翌日から解除の日までを日割りし、1円未満は切り捨て');
 
     const ledger = await t.admin.get('/api/billing/ledger.csv?month=2026-12');
     assert.match(ledger.buf.toString('utf8'), /"2026-12-07","No\.2 寝袋","1","","3000","検証 2郎","東京都千代田区2","09066660002"/, '引き渡した品だけが、帳簿に出る');

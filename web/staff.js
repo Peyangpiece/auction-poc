@@ -201,7 +201,7 @@ async function billingPanel() {
       el('td', { class: 'n' }, yen(l.payable), l.premium ? el('div', { class: 'note', text: `落札 ${yen(l.amount)}＋買歩銭 ${yen(l.premium)}` }) : null),
       el('td', { text: `${RECV[l.receive] ?? ''}${l.payment ? '・' + PAY[l.payment] : ''}` }),
       el('td', {}, el('span', { class: l.state === 'unpaid' ? 'warn' : 'state', 'data-on': ['cleared', 'delivered'].includes(l.state) ? '1' : '0', text: LINE_STATE[l.state] }),
-        l.invoice && el('div', { class: 'note', text: `${l.invoice.number}${l.invoice.dueDate ? '　期限 ' + l.invoice.dueDate : l.invoice.kind === 'cash' ? '' : '　未送付'}` }),
+        l.invoice && el('div', { class: 'note', text: `${l.invoice.number}${l.invoice.dueDate ? '　期限 ' + l.invoice.dueDate : ''}` }),
         l.pickupBy && l.state === 'cleared' && el('div', { class: l.pickupLate ? 'warn' : 'note', text: `受け取り期限 ${l.pickupBy}` }),
         l.offer && el('div', { class: 'note', text: `繰り上げ: ${{ open: '回答待ち', accepted: '承諾', declined: '辞退', expired: '期限切れ' }[l.offer.state]}` })),
       act(
@@ -236,10 +236,10 @@ async function billingPanel() {
   if (isAdmin()) {
     const inv = await api('GET', '/api/billing/invoices');
     nodes.push(el('h2', { class: 'subhead', text: '請求書' }),
-      el('p', { class: 'note', text: 'メールの下書きを送ったら「送付済みにする」を押してください。支払期限は、その日から数えます。' }),
+      el('p', { class: 'note', text: '支払期限は、発行日の5日後です（違約金などは7日後）。メールの下書きを送ったら「送付済みにする」を押してください。' }),
       table(['請求番号', '宛先', '種類', '金額', '発行日', '送付・期限', ''], inv.invoices.map((i) => el('tr', {},
         el('td', { class: 'n', text: i.number }), el('td', { class: 'dyn', text: i.name }), el('td', { text: INV_KIND[i.kind] }), el('td', { class: 'n', text: yen(i.total) }), el('td', { class: 'n', text: i.issuedOn }),
-        el('td', {}, i.kind === 'cash' ? 'その場で渡した' : i.sentOn ? `送付 ${i.sentOn}　期限 ${i.dueDate}` : el('span', { class: i.stale ? 'warn' : '', text: i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付' })),
+        el('td', {}, i.kind === 'cash' ? 'その場で渡した' : el('span', { class: !i.sentOn && i.stale ? 'warn' : '', text: `${i.sentOn ? `送付 ${i.sentOn}` : i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付'}　期限 ${i.dueDate}` })),
         act(el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: 'PDF' }), el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/xlsx`, text: 'Excel' }),
           !['cash', 'penalty'].includes(i.kind) && !i.sentOn && smallBtn(i.shipping ? `送料 ${yen(i.shipping.amount)}` : '送料を入力', () => shippingForm(i.accountId, i.eventId, i.name, i.shipping)),
           i.kind !== 'cash' && (i.sentOn ? smallBtn('送付を取り消す', () => post(`/api/billing/invoices/${i.id}/unsent`)) : smallBtn('送付済みにする', () => post(`/api/billing/invoices/${i.id}/sent`), 'btn-primary'))))), '請求書は、まだありません。'));
@@ -386,7 +386,6 @@ async function settingsPanel() {
     el('div', { class: 'grid2' }, field('電話番号', 'orgTel', { value: s.orgTel }), field('メールアドレス', 'orgEmail', { value: s.orgEmail })),
     field('適格請求書発行事業者の登録番号', 'invoiceRegNo', { value: s.invoiceRegNo }, 'T から始まる番号'),
     field('振込先の口座', 'bankAccount', { value: s.bankAccount }),
-    field('金融機関の休業日', 'bankHolidays', { value: s.bankHolidays, rows: 3 }, '土日のほかの休業日（祝日など）を、2026-12-31 の形で、1行に1つ。支払期限の計算に使います'),
     el('h2', { class: 'subhead', text: '印鑑（請求書に押す）' }),
     sealBox(),
     el('h2', { class: 'subhead', text: '買歩銭' }),
