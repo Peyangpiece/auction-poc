@@ -2,11 +2,18 @@
 #   docker build -t reiwa-no-seri .
 #   docker run -p 8080:8080 -v reiwa-data:/app/data -e POC_COOKIE_SECURE=1 -e POC_TRUST_PROXY=1 reiwa-no-seri
 # データ（データベース・請求書・印鑑・書き出し）は /app/data に置く。必ず、消えない場所（ボリューム）をつなぐこと。
+# 1段目: 依存を入れる。データベースの部品（better-sqlite3）の組み立てに、Python とコンパイラが要るので、道具の入った大きい版を使う
+FROM node:22 AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+# 2段目: 動かすための小さい版。組み立て済みの依存だけを持ってくる
 FROM node:22-slim
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+COPY --from=deps /app/node_modules ./node_modules
 COPY server ./server
 COPY web ./web
 COPY tools ./tools
