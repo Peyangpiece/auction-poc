@@ -65,6 +65,11 @@
   .addlot { display: grid; grid-template-columns: minmax(0, 1fr) 140px auto; gap: 8px; align-items: end; margin-top: 16px; }
   @media (max-width: 520px) { .addlot { grid-template-columns: minmax(0, 1fr); } }
 
+  .cmtlist { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; overscroll-behavior: contain; }
+  .cmtlist li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; overflow-wrap: anywhere; }
+  .cmtlist li:first-child { border-top: 0; }
+  .cmtlist .who { font-weight: 800; color: var(--ink-3); white-space: nowrap; }
+  .cmtlist .btn { min-height: 36px; padding: 4px 12px; font-size: 13px; }
   .dangerzone { box-shadow: var(--shadow), inset 0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent); }
   .stack { display: grid; gap: 8px; justify-items: start; }
 </style>
@@ -153,6 +158,12 @@
       </form>
     </section>
 
+    <section class="card" aria-labelledby="cmtTitle">
+      <div class="cardhead"><h2 id="cmtTitle" class="eyebrow">参加者のコメント</h2></div>
+      <ul id="comments" class="cmtlist"></ul>
+      <p class="note" id="cmtEmpty">まだコメントはありません。</p>
+    </section>
+
     <section class="card dangerzone" aria-labelledby="dzTitle">
       <div class="cardhead"><h2 id="dzTitle" class="eyebrow">障害の模擬（検証用）</h2></div>
       <div class="stack">
@@ -181,7 +192,21 @@
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
-const S = { lots: new Map(), focus: null, history: [], stream: null };
+const S = { lots: new Map(), focus: null, history: [], stream: null, comments: [] };
+function renderComments() {
+  $('comments').replaceChildren(...S.comments.map((c) => {
+    const li = document.createElement('li');
+    const who = document.createElement('span'); who.className = 'who num'; who.textContent = `${c.paddle}番`;
+    const body = document.createElement('span'); body.textContent = c.text;
+    const hide = document.createElement('button'); hide.type = 'button'; hide.className = 'btn'; hide.textContent = '非表示にする';
+    hide.setAttribute('aria-label', `${c.paddle}番のコメント「${c.text}」を非表示にする`);
+    hide.onclick = () => cmd('hide_comment', { id: c.id });
+    li.append(who, body, hide);
+    return li;
+  }));
+  $('cmtEmpty').style.display = S.comments.length ? 'none' : 'block';
+  $('comments').scrollTop = $('comments').scrollHeight;
+}
 const log = (text) => { const el = $('log'); el.textContent += `${jst(link ? link.serverNow() : Date.now())} ${text}\n`; el.scrollTop = el.scrollHeight; };
 
 function focusLot() { return S.lots.get(S.focus) ?? null; }
@@ -298,6 +323,7 @@ function onMessage(msg, at) {
   switch (msg.type) {
     case 'welcome': case 'snapshot':
       S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history; S.stream = msg.stream;
+      S.comments = msg.comments ?? S.comments; renderComments();
       if (msg.type === 'welcome') {
         log(`接続しました（${msg.name}）`);
         document.querySelectorAll('[data-crash]').forEach((b) => { b.disabled = !msg.allowCrash; });
@@ -328,6 +354,8 @@ function onMessage(msg, at) {
       if (p && p.agentConnected !== msg.stream.agentConnected) log(`配信エージェント: ${msg.stream.agentConnected ? '接続' : '切断'}`);
       renderStream(); break;
     }
+    case 'comment': S.comments.push(msg); if (S.comments.length > 30) S.comments.shift(); renderComments(); break;
+    case 'comment_hidden': S.comments = S.comments.filter((c) => c.id !== msg.id); renderComments(); break;
     case 'presence': $('presence').textContent = msg.members; break;
     case 'error': log('エラー: ' + msg.message); break;
   }

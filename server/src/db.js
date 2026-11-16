@@ -57,6 +57,15 @@ CREATE TABLE IF NOT EXISTS lot_events (
   data TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS lot_events_lot ON lot_events(lot_id, seq);
+-- コメント（参加者が映像の横に書き込む短い文。20文字まで）。削除はせず、非表示の印を付ける。
+CREATE TABLE IF NOT EXISTS comments (
+  id INTEGER PRIMARY KEY,
+  lot_id INTEGER REFERENCES lots(id),
+  member_id INTEGER NOT NULL REFERENCES members(id),
+  body TEXT NOT NULL,
+  at REAL NOT NULL,
+  hidden INTEGER NOT NULL DEFAULT 0
+);
 CREATE TRIGGER IF NOT EXISTS lot_events_no_update BEFORE UPDATE ON lot_events
   BEGIN SELECT RAISE(ABORT, 'lot_events は追記だけ'); END;
 CREATE TRIGGER IF NOT EXISTS lot_events_no_delete BEFORE DELETE ON lot_events
@@ -117,6 +126,13 @@ export function openDb(dbPath) {
       `INSERT INTO lots (lot_no, title, start_price, unit_override, updated_at)
        VALUES ((SELECT COALESCE(MAX(lot_no), 0) + 1 FROM lots), ?, ?, ?, ?)`),
     insertMember: db.prepare(`INSERT INTO members (paddle_no, name, token_hash) VALUES (?, ?, ?)`),
+    insertComment: db.prepare(`INSERT INTO comments (lot_id, member_id, body, at) VALUES (?, ?, ?, ?)`),
+    hideComment: db.prepare(`UPDATE comments SET hidden = 1 WHERE id = ?`),
+    recentComments: db.prepare(`
+      SELECT * FROM (
+        SELECT c.id, c.body AS text, c.at, m.paddle_no AS paddle
+        FROM comments c JOIN members m ON m.id = c.member_id WHERE c.hidden = 0 ORDER BY c.id DESC LIMIT 30
+      ) ORDER BY id`),
     insertStaff: db.prepare(`INSERT INTO staff (role, name, token_hash) VALUES (?, ?, ?)`),
   };
   return { db, q, tx: (fn) => db.transaction(fn)() };

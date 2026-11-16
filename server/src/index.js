@@ -46,6 +46,27 @@ function crashPoint(point) {
   if (armedCrash && armedCrash === point) crashNow(point);
 }
 
+// ---------------------------------------------------------------- コメント
+// 入札とは別の処理。入札の順番や締めには一切関わらない（遅れても落ちても、競りの結果は変わらない）。
+const lastCommentAt = new Map(); // member id -> 最後に書き込んだ時刻
+function onComment(conn, msg, send) {
+  const fail = (message) => send({ type: 'comment_result', reqId: msg.reqId ?? null, ok: false, message });
+  if (conn.role !== 'member') return fail('コメントは会員だけが書き込めます');
+  // 制御文字を除き、前後の空白を落とす。長さは文字（書記素ではなくコードポイント）で数える
+  const text = String(msg.text ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  if (!text) return fail('コメントを入力してください');
+  if ([...text].length > config.commentMaxLength) return fail(`コメントは${config.commentMaxLength}文字までです`);
+  const now = nowMs();
+  const wait = config.commentIntervalMs - (now - (lastCommentAt.get(conn.member.id) ?? 0));
+  if (wait > 0) return fail(`続けて書き込むには、あと${Math.ceil(wait / 1000)}秒お待ちください`);
+  lastCommentAt.set(conn.member.id, now);
+  const lotId = auction.snapshot().focusLotId;
+  const info = store.q.insertComment.run(lotId, conn.member.id, text, now);
+  send({ type: 'comment_result', reqId: msg.reqId ?? null, ok: true });
+  broadcast({ type: 'comment', id: Number(info.lastInsertRowid), paddle: conn.member.paddle_no, text, at: now });
+  metrics.write('comment', { paddle: conn.member.paddle_no, length: [...text].length });
+}
+
 const stream = new StreamControl({ config, metrics, broadcast });
 const auction = new Auction({ store, config, metrics, broadcast, stream, crashPoint });
 const recovered = auction.recover();
@@ -146,7 +167,8 @@ function onClient(ws, req) {
       send({
         type: 'welcome', role: conn.role, paddle: member?.paddle_no ?? null, name: (member ?? staff).name,
         conn: conn.id, serverTime: nowMs(), stream: stream.view(), allowCrash: config.allowCrash,
-        playerScriptUrl: config.ivsPlayerScriptUrl, ...auction.snapshot(),
+        playerScriptUrl: config.ivsPlayerScriptUrl, venueContact: config.venueContact,
+        commentMaxLength: config.commentMaxLength, comments: store.q.recentComments.all(), ...auction.snapshot(),
       });
       return presence();
     }
@@ -154,7 +176,7 @@ function onClient(ws, req) {
 
     switch (msg.type) {
       case 'sync': // 再接続のあとなどに、最新の状態を取り直す（FR-UI-002）
-        return send({ type: 'snapshot', serverTime: nowMs(), stream: stream.view(), ...auction.snapshot() });
+        return send({ type: 'snapshot', serverTime: nowMs(), stream: stream.view(), comments: store.q.recentComments.all(), ...auction.snapshot() });
       case 'bid':
         // 主催者側のスタッフは入札できない（FR-CON-004）
         if (conn.role !== 'member') return send({ type: 'error', message: 'スタッフは入札できません' });
@@ -168,6 +190,8 @@ function onClient(ws, req) {
         return metrics.write('video_latency', { conn: conn.id, paddle: conn.member?.paddle_no ?? null, latencyMs: msg.latencyMs, clientAt: msg.at, net: msg.net ?? null });
       case 'client_event':
         return metrics.write('client_event', { conn: conn.id, paddle: conn.member?.paddle_no ?? null, name: String(msg.name).slice(0, 64), data: msg.data ?? null, clientAt: msg.at ?? null });
+      case 'comment':
+        return onComment(conn, msg, send);
       case 'cmd':
         if (conn.role !== 'auctioneer') return send({ type: 'error', message: '進行役だけができる操作です' });
         return onAuctioneer(conn, msg, send);
@@ -199,6 +223,11 @@ function onAuctioneer(conn, msg, send) {
       case 'set_auto_stop': stream.setAutoStopMs(Number(msg.ms)); return ok();
       case 'create_lot': return ok({ lot: auction.createLot(msg) });
       case 'lot_log': return ok({ log: auction.lotLog(Number(msg.lotId)) });
+      case 'hide_comment': // 不適切なコメントを全員の画面から消す（記録は残す）
+        store.q.hideComment.run(Number(msg.id));
+        broadcast({ type: 'comment_hidden', id: Number(msg.id) });
+        metrics.write('comment_hidden', { id: Number(msg.id), actor: conn.staff.name });
+        return ok();
       case 'mark': // 測定の区切り（どの検証の記録かを後で見分ける）
         metrics.write('mark', { label: String(msg.label), phase: msg.phase ?? null, data: msg.data ?? null });
         return ok();

@@ -96,6 +96,8 @@ node tools/aggregate.js --label P2-6
 | `POC_INCREMENT_TABLE` | P2-4 の例 | 入札単位の表（本仕様 OQ-14 が決まったら差し替える） |
 | `POC_AUTO_STOP_MS` | 180000 | 無操作で配信を止めるまで（進行コンソールからも変えられる） |
 | `POC_LIVE_SETTLE_MS` / `POC_LIVE_TIMEOUT_MS` | 8000 / 60000 | LIVE から受付中までの待ち／警告にするまで |
+| `POC_VENUE_CONTACT` | — | 入札画面の下に出す会場の連絡先。空なら出さない |
+| `POC_COMMENT_MAX_LENGTH` / `POC_COMMENT_INTERVAL_MS` | 20 / 3000 | コメントの長さの上限／続けて書き込めるまでの間隔 |
 | `POC_ALLOW_CRASH` | 0 | 1 で障害の模擬（強制終了）を許す。本番では必ず 0 |
 
 秘密情報（IVS のストリームキー、obs-websocket のパスワード、AWS の認証情報、各トークン）は、ソースコードにもこのリポジトリにも書いていません。

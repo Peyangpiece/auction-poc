@@ -46,6 +46,12 @@ export function loadConfig(env = process.env) {
     // 起動時から仕込む強制終了の位置（自動テスト用）: before_close_record | after_close_record
     crashAt: env.POC_CRASH_AT || '',
 
+    // コメント: 長さの上限と、同じ会員が続けて書き込めるまでの間隔
+    commentMaxLength: num(env.POC_COMMENT_MAX_LENGTH, 20),
+    commentIntervalMs: num(env.POC_COMMENT_INTERVAL_MS, 3000),
+    // 入札画面の下に出す会場の連絡先（主催者設定 FR-ORG-001 に当たる。PoC では環境変数で渡す）
+    venueContact: env.POC_VENUE_CONTACT || '',
+
     sysSampleMs: num(env.POC_SYS_SAMPLE_MS, 10000),
   };
 }

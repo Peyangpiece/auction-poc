@@ -75,6 +75,7 @@ export class Client {
         if (this.ack) this.send({ type: 'result_ack', lotId: msg.lotId, at: at + this.offset, net: this.net });
         break;
       case 'bid_result':
+      case 'comment_result':
       case 'cmd_result':
       case 'time': {
         const key = msg.type === 'time' ? `t${msg.t0}` : msg.reqId;
@@ -129,6 +130,12 @@ export class Client {
     };
     this.log.push(rec);
     return { ...res, ...rec };
+  }
+
+  /** コメントを書き込む */
+  comment(text) {
+    const reqId = ++this.reqId;
+    return this.#request(reqId, { type: 'comment', reqId, text });
   }
 
   /** 進行役の操作 */

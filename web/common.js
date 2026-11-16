@@ -44,7 +44,7 @@ class Link {
     ws.onmessage = (ev) => {
       const at = localNow();
       const msg = JSON.parse(ev.data);
-      if (msg.type === 'time' || msg.type === 'bid_result' || msg.type === 'cmd_result') {
+      if (msg.type === 'time' || msg.type === 'bid_result' || msg.type === 'cmd_result' || msg.type === 'comment_result') {
         const key = msg.type === 'time' ? 't' + msg.t0 : msg.reqId;
         const w = this.waiters.get(key);
         if (w) { this.waiters.delete(key); w({ ...msg, clientRecvAt: at }); }
