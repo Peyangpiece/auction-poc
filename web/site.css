@@ -20,7 +20,8 @@ main.narrow { max-width: 520px; }
 .form { display: grid; gap: 16px; }
 .form .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .form .btn-primary { flex: 1 1 200px; }
-.field small { font-weight: 400; color: var(--ink-2); }
+/* 補足の文字は、ブラウザ任せ（約11px）にせず、読める大きさに決める */
+.field small { font-size: 13px; font-weight: 400; color: var(--ink-2); }
 .field .err { font-weight: 400; color: var(--danger); min-height: 0; }
 .field .err:empty { display: none; }
 .input[aria-invalid="true"] { border-color: var(--danger); border-width: 2px; }
@@ -59,7 +60,7 @@ select.input { appearance: auto; }
 .today__tag { font-size: 14px; font-weight: 700; letter-spacing: .2em; color: var(--gold); }
 .today h2 { color: var(--board-ink); font-size: 30px; letter-spacing: .06em; overflow-wrap: anywhere; }
 .today__time { font-size: 44px; line-height: 1.1; }
-.today h3 { font-size: 13px; letter-spacing: .12em; color: var(--board-ink-2); margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--board-line); }
+.today h3 { font-size: 14px; letter-spacing: .12em; color: var(--board-ink-2); margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--board-line); }
 .today ul { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 4px 24px; font-size: 17px; font-weight: 700; }
 .today__go { background: #fff; border-color: #fff; color: var(--navy); min-height: 72px; font-size: 22px; margin-top: 16px; }
 .today__go:hover { background: var(--board-ink-2); border-color: var(--board-ink-2); color: var(--navy-dk); }
@@ -87,7 +88,8 @@ select.input { appearance: auto; }
 .lead .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .lead .btn { flex: 1 1 160px; }
 .terms { border-top: 1px solid var(--line); padding-top: 24px; display: grid; gap: 16px; font-size: 14px; color: var(--ink-2); }
-.terms h2 { margin-bottom: 4px; }
+/* 本文（14px）との差をはっきり付ける */
+.terms h2 { font-size: 18px; letter-spacing: .08em; color: var(--ink); margin-bottom: 4px; }
 .pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .empty { padding: 48px 0; color: var(--ink-2); text-align: center; }
 dialog.wide { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
