@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#f3f2ee" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#f2f2f5" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
 <title>進行コンソール — ライブオークション PoC</title>
 <link rel="stylesheet" href="app.css">
@@ -20,15 +20,15 @@
   .cardhead h2 { font-size: 15px; }
 
   /* 進行中のロット */
-  #title { font-size: 20px; font-weight: 800; overflow-wrap: anywhere; }
-  #price { font-size: clamp(48px, 7vw, 76px); font-weight: 800; line-height: 1.05; letter-spacing: -.02em; margin: 4px 0 12px; }
+  #title { font-size: 20px; font-weight: 700; overflow-wrap: anywhere; }
+  #price { font-size: clamp(48px, 7vw, 76px); font-weight: 700; line-height: 1.05; letter-spacing: -.02em; margin: 4px 0 12px; }
   #price small { font-size: 16px; font-weight: 700; color: var(--ink-3); letter-spacing: 0; margin-left: 8px; }
   .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 16px; }
   .facts dd small { display: block; font-size: 12px; font-weight: 700; color: var(--ink-3); }
   .facts dd small[data-on="1"] { color: var(--ok); }
   .facts div { background: var(--surface-2); border-radius: var(--r-sm); padding: 8px 12px; }
   .facts dt { font-size: 12px; font-weight: 700; color: var(--ink-3); }
-  .facts dd { margin: 0; font-size: 20px; font-weight: 800; }
+  .facts dd { margin: 0; font-size: 20px; font-weight: 700; }
   .alert { display: none; gap: 4px; padding: 12px 16px; border-radius: var(--r-md); background: var(--danger-soft); color: var(--danger); font-weight: 700; margin-bottom: 16px; }
   .alert span { font-weight: 400; color: var(--ink-2); font-size: 14px; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -70,7 +70,7 @@
   .cmtlist { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; overscroll-behavior: contain; }
   .cmtlist li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; overflow-wrap: anywhere; }
   .cmtlist li:first-child { border-top: 0; }
-  .cmtlist .who { font-weight: 800; color: var(--ink-3); white-space: nowrap; }
+  .cmtlist .who { font-weight: 700; color: var(--ink-3); white-space: nowrap; }
   .cmtlist .btn { min-height: 36px; padding: 4px 12px; font-size: 13px; }
   .dangerzone { box-shadow: var(--shadow), inset 0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent); }
   .stack { display: grid; gap: 8px; justify-items: start; }

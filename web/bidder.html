@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#f3f2ee" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#f2f2f5" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
 <title>入札 — ライブオークション PoC</title>
 <link rel="stylesheet" href="app.css">
 <style>
-  body { padding-bottom: calc(132px + env(safe-area-inset-bottom)); transition: background-color .2s ease; }
+  body { padding-bottom: calc(176px + env(safe-area-inset-bottom)); transition: background-color .2s ease; }
   main { max-width: 560px; margin: 0 auto; padding: 12px max(16px, env(safe-area-inset-left)) 24px max(16px, env(safe-area-inset-right)); display: grid; gap: 12px; }
   /* スマホでは、映像 → 価格 → 履歴 → コメントの順に並べる（価格と入札を、スクロールせずに見える位置に置く） */
   .stage, .panel { display: contents; }
-  #videoBox { order: 1; } .pricecard { order: 2; } .histcard { order: 3; } .cmtcard { order: 4; } .panel > .note, .panel > details { order: 5; }
+  #videoBox { order: 1; } .pricecard { order: 2; } .bidbar { order: 2; } .histcard { order: 3; } .cmtcard { order: 4; } .panel > .note, .panel > details { order: 5; }
   .topbar { grid-column: 1 / -1; }
   /* PC では、左に映像とコメント、右に入札の操作を並べる */
   @media (min-width: 960px) {
@@ -26,8 +26,10 @@
 
   /* 上の帯: 参加番号・映像の受信状態・応札／観戦 */
   .chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
-  .seg { display: inline-grid; grid-auto-flow: column; padding: 3px; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
-  .seg button { appearance: none; border: 0; background: none; font: inherit; font-weight: 800; font-size: 14px; color: var(--ink-2); min-height: 38px; min-width: 64px; padding: 0 16px; border-radius: 999px; cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+  .seglabel { font-size: 13px; font-weight: 600; color: var(--ink-3); margin-left: 4px; }
+  body.outbid .seglabel, body.won .seglabel { color: rgba(255, 255, 255, .85); }
+  .seg { display: inline-grid; grid-auto-columns: 1fr; grid-auto-flow: column; padding: 3px; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+  .seg button { appearance: none; border: 0; background: none; font: inherit; font-weight: 700; font-size: 14px; color: var(--ink-2); min-height: 38px; min-width: 64px; padding: 0 16px; border-radius: 999px; cursor: pointer; transition: background-color .15s ease, color .15s ease; }
   .seg button[aria-checked="true"] { background: var(--accent); color: var(--accent-ink); }
   .seg button[data-mode="watch"][aria-checked="true"] { background: var(--ink-2); color: var(--surface); }
   .seg button:disabled { opacity: .5; cursor: not-allowed; }
@@ -43,7 +45,7 @@
   #cmtBody { display: grid; gap: 10px; margin-top: 8px; }
   #comments { list-style: none; margin: 0; padding: 0; max-height: 168px; overflow: auto; overscroll-behavior: contain; display: grid; gap: 6px; }
   #comments li { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; font-size: 15px; overflow-wrap: anywhere; }
-  #comments .who { font-size: 12px; font-weight: 800; color: var(--ink-3); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+  #comments .who { font-size: 12px; font-weight: 700; color: var(--ink-3); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
   #comments li.mine .who { color: var(--right); }
   #cmtEmpty { font-size: 14px; color: var(--ink-3); }
   #cmtForm { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
@@ -61,44 +63,36 @@
   .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-top: max(8px, env(safe-area-inset-top)); }
   .topbar > div { min-width: 0; }
   body.outbid .chips .pill, body.won .chips .pill { background: rgba(255, 255, 255, .92); color: #16181d; }
-  #title { font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+  #title { font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
 
   /* 映像 */
-  #videoBox { display: none; position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow); outline: 1px solid var(--line); outline-offset: -1px; }
-  #videoBox video { width: 100%; height: 100%; display: block; object-fit: contain; }
-  #break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: #1b2530; color: #fff; }
-  #break strong { font-size: 18px; }
-  /* 配信が止まっている間は、場所を取らない休憩の表示にする（FR-STR-004） */
-  #videoBox.idle { aspect-ratio: auto; }
-  #videoBox.idle video { display: none; }
-  #videoBox.idle #break { position: static; padding: 20px 16px; }
-  #break span { font-size: 13px; opacity: .8; }
+  /* ライブ画面は常に 4:3（停止中も同じ大きさ）。映像は元の比率のまま収め、切り取らない（playing-video.md › Best practices） */
+  #videoBox { display: none; position: relative; aspect-ratio: 4 / 3; width: 100%; background: #000; border-radius: var(--r-lg); overflow: hidden; }
+  #videoBox video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
+  #break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: #000; color: #fff; }
+  #break strong { font-size: 20px; font-weight: 600; }
+  #break span { font-size: 15px; color: rgba(255, 255, 255, .72); }
 
   /* 価格 */
   .pricecard { display: grid; gap: 14px; }
   .pricehead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  #price { font-size: clamp(44px, 14vw, 64px); font-weight: 800; line-height: 1.05; letter-spacing: -.02em; transition: transform .18s ease, color .3s ease; transform-origin: left center; }
-  #price.tick { transform: scale(1.04); color: var(--accent); }
-  #right { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: var(--r-md); font-weight: 800; font-size: 15px; background: var(--surface-2); color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line); transition: background-color .2s ease, color .2s ease, transform .2s ease; }
-  #right::before { content: ""; width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 2px currentColor; }
-  #right.on { background: var(--right); color: #fff; box-shadow: none; transform: scale(1.05); }
-  #right.on::before, #right.won::before { background: currentColor; }
-  #right.won { background: var(--ok); color: #fff; box-shadow: none; }
-  @media (prefers-color-scheme: dark) { #right.on, #right.won { color: #10131a; } }
+  #price { font-size: clamp(44px, 14vw, 64px); font-weight: 700; line-height: 1.05; letter-spacing: -.02em; transition: transform .18s ease, color .3s ease; transform-origin: left center; }
+  #price.tick { transform: scale(1.04); }
+  /* 「うりきり」「権利」の2つのランプ。両方が点いた人が落札する。色だけでなく、印（●／○）と文字でも状態を示す */
+  .lamps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  #right, .lamp { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 8px 12px; border-radius: var(--r-md); font-weight: 700; font-size: 17px; background: var(--surface-2); color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line); transition: background-color .2s ease, color .2s ease; }
+  #right::before, .lamp::before { content: ""; flex: none; width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 2px currentColor; }
+  #right.on { background: var(--right); color: #fff; box-shadow: none; }
+  #right.won, #urikiri.on { background: var(--ok); color: #fff; box-shadow: none; }
+  #right.on::before, #right.won::before, #urikiri.on::before { background: currentColor; }
+  @media (prefers-color-scheme: dark) { #right.on, #right.won, #urikiri.on { color: #10131a; } }
   .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
-  .lamps { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-  /* 「うりきり」「権利」は、点いているか消えているかを色だけでなく文字と印でも示す */
-  .lamp { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: var(--r-md); font-weight: 800; font-size: 15px; background: var(--surface-2); color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line); transition: background-color .2s ease, color .2s ease, transform .2s ease; }
-  .lamp::before { content: ""; width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 2px currentColor; }
-  #urikiri.on { background: var(--ok); color: #fff; box-shadow: none; }
-  #urikiri.on::before { background: currentColor; }
-  @media (prefers-color-scheme: dark) { #urikiri.on { color: #10131a; } }
   #hint { font-size: 14px; font-weight: 700; color: var(--warn); background: var(--warn-soft); border-radius: var(--r-sm); padding: 8px 12px; }
   #hint:empty { display: none; }
   .facts div { background: var(--surface-2); border-radius: var(--r-sm); padding: 8px 10px; min-width: 0; }
   .facts dt { font-size: 12px; color: var(--ink-3); font-weight: 700; }
-  .facts dd { margin: 0; font-size: 17px; font-weight: 800; overflow-wrap: anywhere; }
-  #banner { font-size: 20px; font-weight: 800; text-align: center; padding: 12px; border-radius: var(--r-md); background: var(--accent-soft); color: var(--accent); }
+  .facts dd { margin: 0; font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+  #banner { font-size: 20px; font-weight: 700; text-align: center; padding: 12px; border-radius: var(--r-md); background: var(--surface-2); color: var(--ink); }
   #banner:empty { display: none; }
 
   /* 入札の履歴 */
@@ -108,7 +102,7 @@
   #history li { display: grid; grid-template-columns: minmax(5.5em, auto) 1fr auto; align-items: baseline; gap: 12px; padding: 10px 4px; border-top: 1px solid var(--line); }
   #history li:first-child { border-top: 0; }
   #history .who { font-weight: 700; color: var(--ink-2); white-space: nowrap; }
-  #history .amt { font-weight: 800; font-size: 17px; }
+  #history .amt { font-weight: 700; font-size: 17px; }
   #history .at { font-size: 13px; color: var(--ink-3); }
   #history li.mine .who { color: var(--right); }
   #history li.void .amt, #history li.void .who { text-decoration: line-through; color: var(--ink-3); }
@@ -119,6 +113,17 @@
   /* 画面の下に固定する入札の操作（親指が届く位置） */
   .bidbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 -1px 0 var(--line), 0 -8px 24px rgba(22, 24, 29, .08); }
   .bidbar > div { max-width: 560px; margin: 0 auto; padding: 10px max(16px, env(safe-area-inset-left)) calc(12px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-right)); display: grid; gap: 8px; }
+  /* スマホでは 4:3 の映像の下に価格が来るので、価格と2つのランプを、固定した入札の帯にも小さく出す（スクロールしなくても落札の条件が見える） */
+  .mini { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .mini b { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+  .mini .ml { display: inline-flex; gap: 6px; }
+  .minilamp { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line); }
+  .minilamp::before { content: ""; width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 2px currentColor; }
+  .minilamp.on { background: var(--ok); color: #fff; box-shadow: none; }
+  .minilamp.on.right { background: var(--right); }
+  .minilamp.on::before { background: currentColor; }
+  @media (prefers-color-scheme: dark) { .minilamp.on { color: #10131a; } }
+  @media (min-width: 960px) { .mini { display: none; } }
   #msg { min-height: 24px; font-size: 15px; font-weight: 700; text-align: center; color: var(--ink-2); }
   #msg[data-kind="ok"] { color: var(--ok); }
   #msg[data-kind="ng"] { color: var(--danger); }
@@ -166,7 +171,8 @@
       <div class="chips">
         <span class="pill plain num">参加番号 <b id="me">—</b></span>
         <span class="pill" id="videoState" data-state="">映像 —</span>
-        <div class="seg" role="radiogroup" aria-label="参加のしかた">
+        <span class="seglabel" id="segLabel">参加のしかた</span>
+        <div class="seg" role="radiogroup" aria-labelledby="segLabel">
           <button type="button" role="radio" data-mode="bid" aria-checked="false">応札</button>
           <button type="button" role="radio" data-mode="watch" aria-checked="true">観戦</button>
         </div>
@@ -184,7 +190,7 @@
     <section class="card cmtcard" aria-labelledby="cmtTitle">
       <div class="cmthead">
         <h2 id="cmtTitle">コメント</h2>
-        <label class="switch"><span id="cmtSwitchLabel">表示する</span><input type="checkbox" id="cmtOn" role="switch" checked></label>
+        <label class="switch"><span id="cmtSwitchLabel">コメントを表示</span><input type="checkbox" id="cmtOn" role="switch" checked></label>
       </div>
       <div id="cmtBody">
         <ul id="comments" aria-live="polite"></ul>
@@ -203,12 +209,12 @@
     <section class="card pricecard" aria-label="現在の価格">
       <div class="pricehead">
         <p class="eyebrow" id="priceLabel">現在価格</p>
-        <div class="lamps">
-          <span class="lamp" id="urikiri" aria-live="polite">うりきり</span>
-          <span id="right" aria-live="polite">権利</span>
-        </div>
       </div>
       <div class="num" id="price" aria-live="polite">—</div>
+      <div class="lamps" role="group" aria-label="落札の条件（両方が点くと落札）">
+        <span class="lamp" id="urikiri" aria-live="polite">うりきり</span>
+        <span id="right" aria-live="polite">権利</span>
+      </div>
       <div id="banner" role="status"></div>
       <p id="hint" role="status"></p>
       <dl class="facts num">
@@ -221,6 +227,7 @@
 
     <div class="bidbar">
       <div>
+        <div class="mini num" aria-hidden="true"><b id="miniPrice">—</b><span class="ml"><span class="minilamp" id="miniUri">うりきり</span><span class="minilamp right" id="miniRight">権利</span></span></div>
         <div id="msg" role="status" aria-live="polite"></div>
         <button class="btn btn-primary btn-lg num" id="bid" type="button" disabled>入札</button>
       </div>
@@ -311,7 +318,8 @@ function render() {
     $('status').textContent = '—'; $('status').dataset.state = '';
     $('price').textContent = '—'; $('min').textContent = '—'; $('highest').textContent = '—'; $('banner').textContent = '';
     $('bid').disabled = true; $('bid').textContent = '入札'; $('right').className = ''; S.shownPrice = null;
-    $('urikiri').className = 'lamp'; $('reserve').textContent = '—'; $('hint').textContent = ''; return;
+    $('urikiri').className = 'lamp'; $('reserve').textContent = '—'; $('hint').textContent = '';
+    $('miniPrice').textContent = '—'; $('miniUri').className = 'minilamp'; $('miniRight').className = 'minilamp right'; return;
   }
   const mine = lot.highestPaddle !== null && lot.highestPaddle === S.paddle;
   $('lotNo').textContent = `ロット ${lot.lotNo}`;
@@ -350,6 +358,9 @@ function render() {
   $('bid').textContent = lot.status !== 'open' ? '入札の受付を待っています'
     : watching ? '観戦中です（入札するには「応札」へ）'
     : mine ? 'あなたが最高入札者です' : `${yen(lot.minBid)} で入札`;
+  $('miniPrice').textContent = yen(price);
+  $('miniUri').className = urikiri ? 'minilamp on' : 'minilamp';
+  $('miniRight').className = mine && lot.status !== 'unsold' ? 'minilamp right on' : 'minilamp right';
   S.wasHighest = mine && lot.status === 'open';
 }
 function renderHistory() {
@@ -373,7 +384,6 @@ function renderStream() {
   $('videoBox').style.display = show ? 'block' : 'none';
   const live = !!S.stream?.live && !!S.stream?.playbackUrl;
   $('break').style.display = live ? 'none' : 'flex';
-  $('videoBox').classList.toggle('idle', !live);
   $('breakSub').textContent = S.stream?.live ? '' : '入札の受付が始まると、映像も始まります';
   // 映像の受信状態（会場参加は映像なし）
   const vs = $('videoState');
@@ -395,7 +405,6 @@ document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('clic
 function renderComments() {
   const on = $('cmtOn').checked;
   $('cmtBody').style.display = on ? 'grid' : 'none';
-  $('cmtSwitchLabel').textContent = on ? '表示する' : '表示しない';
   if (!on) return;
   const ul = $('comments');
   ul.replaceChildren(...S.comments.map((c) => {
