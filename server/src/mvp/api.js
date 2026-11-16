@@ -10,6 +10,7 @@ import {
 } from './security.js';
 import { Notifier, outboxSender } from './notify.js';
 import QRCode from 'qrcode';
+import { createBilling } from './billing.js';
 
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
@@ -140,7 +141,7 @@ export function createApi({ store, config, nowMs }) {
   // ------------------------------------------------------------ 会員
   const memberView = (m) => ({
     kind: m.kind, name: m.name, phone: m.phone, email: m.email, emailVerified: !!m.email_verified, address: m.address,
-    shipTo: m.ship_to, company: m.company, contactName: m.contact_name, billing: m.billing, suspended: !!m.suspended,
+    shipTo: m.ship_to, company: m.company, contactName: m.contact_name, billing: m.billing, suspended: !!billing.suspension(m.id), suspendedBy: billing.suspension(m.id),
   });
   async function sendEmailVerification(ctx, member) {
     const token = randomToken();
@@ -151,6 +152,9 @@ export function createApi({ store, config, nowMs }) {
 
   const routes = [];
   const route = (method, pattern, handler) => routes.push({ method, re: new RegExp('^' + pattern.replace(/:id/g, '(\\d+)') + '$'), handler });
+
+  // 請求・消し込み・手数料（MVP の 6）
+  const billing = createBilling({ db, config, nowMs, audit, notifier, setting, route, needStaff, needMember, HttpError, bad });
 
   route('GET', '/api/me', (ctx) => ({
     member: ctx.member ? memberView(ctx.member) : null,
@@ -427,8 +431,26 @@ export function createApi({ store, config, nowMs }) {
       mode: p?.mode ?? null, checkedIn: p ? p.mode !== 'venue' || !!p.checked_in_at : false,
       // 会場の QR コードから来た人か（まだ手続きの前なら、会場参加として手続きできる）
       venue: venueMatches(event, ctx.url.searchParams.get('venue')),
-      suspended: !!member.suspended,
+      suspended: !!billing.suspension(member.id), suspendedBy: billing.suspension(member.id),
     };
+  });
+  // 受け取り方法と支払方法の変更（参加者本人。開催終了まで。FR-PAY-009、FR-SHIP-008）
+  route('POST', '/api/my/participation', (ctx, body) => {
+    const member = needMember(ctx);
+    const event = activeEvent();
+    const p = event ? participant(member.id, event.id) : null;
+    // 開催終了の後は、主催者管理者だけが変えられる（AC-FR-SHIP-008-1）
+    if (!p) throw new HttpError(409, '開催が終了したため、ここでは変更できません。変更は主催者に連絡してください');
+    const next = { receive: body.receive ?? p.receive, payment: body.payment ?? p.payment };
+    if (!RECEIVE[next.receive] || !PAYMENT[next.payment]) throw bad('受け取り方法と支払方法を選んでください');
+    if (p.mode === 'online' && next.payment === 'cash') throw bad('当日現金は、会場で参加する方だけが選べます');
+    db.transaction(() => {
+      db.prepare('UPDATE members SET receive = ?, payment = ? WHERE id = ?').run(next.receive, next.payment, p.id);
+      // 受け取り方法は、その開催で落札したすべての明細に使う。発行済みの請求書は出し直さない（FR-INV-006）
+      db.prepare('UPDATE bill_lines SET receive = ? WHERE participant_id = ? AND delivered_at IS NULL').run(next.receive, p.id);
+    })();
+    audit(ctx, 'participation.change', { target: `participant:${p.id}`, before: { receive: p.receive, payment: p.payment }, after: next });
+    return { ok: true, ...next };
   });
   route('POST', '/api/join', (ctx, body) => {
     const member = needMember(ctx);
@@ -517,12 +539,12 @@ export function createApi({ store, config, nowMs }) {
     return { member: p };
   }
   /** 入札してよいか。停止中の会員は SUSPENDED（FR-AUTH-009）。停止の前に受理された入札は、有効のまま */
-  const suspendedStmt = db.prepare('SELECT suspended FROM member_accounts WHERE id = ?');
   const bidGate = (m) => {
     if (!m.account_id) return null; // 検証用の参加者（合言葉の URL）
     // つないだあとで開催が切り替わったら、前の開催の参加番号では入札できない（新しい開催で、参加手続きをやり直す）
     if (m.event_id !== (activeEvent()?.id ?? null)) return 'NOT_JOINED';
-    return suspendedStmt.get(m.account_id)?.suspended ? 'SUSPENDED' : null;
+    // 手動の停止か、未払いによる自動の停止（FR-AUTH-009・015）。どちらか一方でもかかっていれば、入札できない
+    return billing.suspension(m.account_id) ? 'SUSPENDED' : null;
   };
 
   // ------------------------------------------------------------ 表示する文言
@@ -531,9 +553,11 @@ export function createApi({ store, config, nowMs }) {
   route('GET', '/api/terms', () => ({ orgName: setting('org_name'), shippingNotice: setting('shipping_notice'), returnPolicy: setting('return_policy') }));
 
   // ------------------------------------------------------------ 主催者設定（FR-ORG-001 の一部）・監査ログ・知らせ
+  // 請求書・手数料に使う設定（FR-ORG-001 の一部）。未入力でも動くが、請求書には「（未設定）」と出る
+  const BILLING_KEYS = { orgAddress: ['org_address', 200], orgTel: ['org_tel', 40], orgEmail: ['org_email', 254], invoiceRegNo: ['invoice_reg_no', 20], bankAccount: ['bank_account', 200], bankHolidays: ['bank_holidays', 4000], feeMinimum: ['fee_minimum', 12], feeTaxMode: ['fee_tax_mode', 12] };
   route('GET', '/api/settings', (ctx) => {
     needStaff(ctx, 'admin');
-    return { orgName: setting('org_name'), returnPolicy: setting('return_policy'), shippingNotice: setting('shipping_notice') };
+    return { orgName: setting('org_name'), returnPolicy: setting('return_policy'), shippingNotice: setting('shipping_notice'), ...Object.fromEntries(Object.entries(BILLING_KEYS).map(([k, [key]]) => [k, setting(key)])) };
   });
   route('POST', '/api/settings', (ctx, body) => {
     needStaff(ctx, 'admin');
@@ -541,6 +565,7 @@ export function createApi({ store, config, nowMs }) {
       org_name: String(body.orgName ?? '').trim().slice(0, 100),
       return_policy: String(body.returnPolicy ?? '').trim().slice(0, 2000),
       shipping_notice: String(body.shippingNotice ?? '').trim().slice(0, 1000),
+      ...Object.fromEntries(Object.entries(BILLING_KEYS).filter(([k]) => body[k] !== undefined).map(([k, [key, max]]) => [key, String(body[k] ?? '').trim().slice(0, max)])),
     };
     if (!next.org_name || !next.return_policy || !next.shipping_notice) throw bad('名称・返品特約・送料の表示は、空にできません');
     const before = Object.fromEntries(Object.keys(next).map((k) => [k, setting(k)]));
@@ -601,6 +626,7 @@ export function createApi({ store, config, nowMs }) {
       }
       const result = await hit.r.handler(ctx, body, ...hit.m.slice(1).map(Number));
       if (result?.redirect) { res.writeHead(302, { location: result.redirect }); return res.end(); }
+      if (result?.file) { res.writeHead(200, { 'content-type': result.file.type, 'content-disposition': `attachment; filename="${result.file.name}"`, 'cache-control': 'no-store' }); return res.end(result.file.body); }
       if (result?.svg) { res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' }); return res.end(result.svg); }
       sendJson(res, 200, result ?? { ok: true });
     } catch (err) {
@@ -643,6 +669,6 @@ export function createApi({ store, config, nowMs }) {
   }
   return {
     handle, createStaff, audit, participantFromCookie, bidGate, eventId: () => activeEvent()?.id ?? null,
-    staffFromCookie, eventState, setPhase, proxyTarget,
+    staffFromCookie, eventState, setPhase, proxyTarget, billing,
   };
 }

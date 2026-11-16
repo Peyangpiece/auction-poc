@@ -53,7 +53,7 @@ try {
   await admin.click('#loginForm button[type=submit]');
   await admin.waitForSelector('#tabs button');
   check((await admin.textContent('#who')).includes('主催者管理者'), '主催者管理者としてログインできる');
-  check((await admin.locator('#tabs button').count()) === 7, '主催者管理者には、7つの画面が出る');
+  check((await admin.locator('#tabs button').count()) === 10, '主催者管理者には、10 の画面が出る');
 
   // 設定
   await admin.click('#tabs [data-key=settings]');
@@ -96,7 +96,7 @@ try {
   const auct = await staffLogin(auctAcc);
   await auct.click('#loginForm button[type=submit]');
   await auct.waitForSelector('#tabs button');
-  check((await auct.locator('#tabs button').count()) === 2, '進行役の管理画面には、受付と SMS の制限だけが出る');
+  check((await auct.locator('#tabs button').count()) === 3, '進行役の管理画面には、受付・未引き取り・SMS の制限だけが出る');
 
   console.log('その場での登録（進行コンソール）');
   // 進行コンソールは、スタッフのログインで入る（合言葉つきの URL は使わない）
@@ -307,6 +307,38 @@ try {
   await con.waitForFunction(() => document.getElementById('sold').textContent.includes('10,000'));
   const soldRow = await con.textContent('#sold');
   check(soldRow.includes('2番') && soldRow.includes('現地受け取り') && soldRow.includes('当日現金'), '落札一覧に、参加番号・落札額・受け取り方法・支払方法が出る');
+  // 当日現金の精算（受付）→ 請求書（領収書を兼ねる）→ 引き渡し
+  await admin.click('#tabs [data-key=billing]');
+  await admin.waitForFunction(() => { const t = document.querySelector('#panel table')?.textContent ?? ''; return t.includes('未精算') && t.includes('当日現金'); });
+  check(true, '落札すると、請求の画面に「未精算」の明細が出る');
+  await admin.check('#panel table input[type=checkbox]');
+  await shot(admin, 'mvp-24-billing-settle');
+  await admin.click('#panel >> text=選んだ明細を、当日現金で精算');
+  await admin.waitForSelector('#dlg[open]');
+  check(/請求書（領収書を兼ねる）\d{8}-0001 を発行しました/.test(await admin.textContent('#dlg')), '精算すると、請求書（領収書を兼ねる）を発行する');
+  const pdfUrl = await admin.getAttribute('#dlg a', 'href');
+  const pdf = await admin.evaluate(async (u) => { const r = await fetch(u); const b = new Uint8Array(await r.arrayBuffer()); return { type: r.headers.get('content-type'), head: String.fromCharCode(...b.slice(0, 5)) }; }, pdfUrl);
+  check(pdf.type === 'application/pdf' && pdf.head === '%PDF-', '請求書の PDF を開ける');
+  await admin.click('#dlg >> text=閉じる');
+  await admin.waitForSelector('#panel td.act >> text=引き渡し');
+  await admin.click('#panel td.act >> text=引き渡し');
+  await admin.waitForSelector('#panel >> text=引き渡し済み');
+  check(true, '消し込みのあとに、引き渡しを記録できる');
+  await shot(admin, 'mvp-25-billing', { fullPage: true });
+  await guest.goto(sys.base + '/mypage.html');
+  await guest.waitForSelector('#billing:not([hidden])');
+  const mine = await guest.textContent('#myLines');
+  check(mine.includes('防水シート') && mine.includes('お渡し済み') && mine.includes('（PDF）'), '落札者のマイページに、品・状態・請求書が出る');
+  await shot(guest, 'mvp-26-mypage-billing', { fullPage: true });
+  await guest.goto(sys.base + '/bidder.html');
+  await guest.waitForSelector('#enter:not([hidden])');
+  await guest.click('#enter');
+  await guest.waitForFunction(() => document.getElementById('bid').textContent.length > 0);
+  await admin.click('#tabs [data-key=fees]');
+  await admin.waitForFunction(() => { const t = document.querySelector('#panel .facts')?.textContent ?? ''; return t.includes('¥10,000') && t.includes('¥550'); });
+  check(true, '手数料の集計: 対象 10,000円 → 手数料 500円 ＋ 消費税 50円');
+  await shot(admin, 'mvp-27-fees', { fullPage: true });
+
   await con.fill('#resumeAt', '13:00');
   await con.click('#breakForm button[type=submit]');
   await guest.waitForFunction(() => document.getElementById('eventNote').textContent.includes('13:00'));

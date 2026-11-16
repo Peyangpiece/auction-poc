@@ -117,6 +117,10 @@ const auction = new Auction({ store, config, metrics, broadcast, stream, crashPo
 const recovered = auction.recover();
 if (recovered.length) console.log('[recovery]', JSON.stringify(recovered));
 
+// 起動のときと1時間ごとに、請求の見回りをする（落札の明細の作り漏れ、期限を過ぎた知らせ、受け取り期限の前日の知らせ）
+try { api.billing.sweep(); } catch (err) { console.error('[billing]', err); }
+setInterval(() => { try { api.billing.sweep(); } catch (err) { console.error('[billing]', err); } }, 3600000).unref();
+
 // ---------------------------------------------------------------- HTTP
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png' };
 
@@ -393,7 +397,8 @@ function onAuctioneer(conn, msg, send) {
           // 競りを始めたら、開催は「進行中」になる（休憩も終わる。FR-EVT-003）
           if (msg.action === 'start' && api.eventState() && api.eventState().phase !== 'running') broadcast({ type: 'event', event: api.setPhase(staffRef(conn), 'running') });
           // 落札の一覧を、進行役に送り直す（受け取り方法・支払方法つき。FR-CON-002）
-          if (msg.action === 'close') sendSold();
+          // 落札したら、明細を作って、落札者にメールで知らせる（FR-INV-001）
+          if (msg.action === 'close') { api.billing.syncLines(); sendSold(); }
         });
       case 'sold_list': return ok({ sold: auction.soldList() });
       case 'event_break': { // 休憩（FR-CON-003）: 進行中の品がないときだけ。次の開始予定時刻が要る
@@ -409,9 +414,11 @@ function onAuctioneer(conn, msg, send) {
         const notHeld = auction.closeOutWaiting(conn.staff.name); // 待機の品は、未実施にする
         stream.manual('stop');                                    // 配信を停止する
         const sold = auction.soldList();
+        // まだ精算していない明細を、落札者ごとに1通の振込の請求書にまとめて発行する（FR-INV-004）
+        const invoices = api.billing.onEventEnd(api.eventId(), { staff: staffRef(conn), system: true });
         api.setPhase(staffRef(conn), 'ended');
         broadcast({ type: 'event', event: null, ended: true });
-        return ok({ notHeld, sold });
+        return ok({ notHeld, sold, invoices: invoices.length });
       }
       case 'proxy_bid': { // 緊急用の代理入札（FR-CON-005）
         if (!msg.cardChecked) return ng('参加番号の札を確認して、チェックを入れてください');

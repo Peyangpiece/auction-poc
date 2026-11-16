@@ -140,3 +140,11 @@ td.paddle { font-size: 20px; font-weight: 700; }
   dialog { position: static; border: 0; box-shadow: none; width: 100%; }
   dialog .actions { display: none; }
 }
+.subhead { margin: 40px 0 8px; font-size: 16px; }
+.monthpick .input { width: 190px; }
+td.act a.btn { min-height: 40px; padding: 4px 12px; font-size: 13px; margin-left: 4px; }
+td .note { font-size: 12px; }
+.mylines > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; padding: 12px 0; align-items: baseline; }
+.mylines > li > .note, .mylines > li > a { grid-column: 1 / -1; }
+.mylines a { color: var(--action); font-weight: 700; text-underline-offset: 4px; font-size: 14px; }
+.facts dt { padding-right: 24px; }

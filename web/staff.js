@@ -141,6 +141,109 @@ function qrDialog(event) {
     el('div', { class: 'actions' }, smallBtn('印刷', () => window.print()), closeBtn()));
 }
 
+// ------------------------------------------------------------ 請求: 精算・消し込み・引き渡し・未払いの対応・請求書
+const LINE_STATE = { unsettled: '未精算', billed: '請求済み', unpaid: '未払い', cleared: '消し込み済み', delivered: '引き渡し済み', cancelled: '解除' };
+const INV_KIND = { cash: '現金の精算', transfer: '振込', promote: '繰り上げ', penalty: '違約金など' };
+const isAdmin = () => me.role === 'admin';
+const post = async (url, body) => { const r = await api('POST', url, body); if (!r.ok) alertLine(r.message); show(current); return r; };
+/** 入力を1つ（または2つ）聞いてから実行する */
+function askForm(title, note, fields, run, okText = '実行する') {
+  const form = el('form', { class: 'form', novalidate: true }, note && el('p', { text: note }), fields, msgLine(),
+    el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: okText }), closeBtn('やめる')));
+  onSubmit(form, async (data) => { const res = await run(data); if (res.ok) { dlg.close(); show(current); } return res; });
+  openDialog(title, form);
+}
+async function billingPanel() {
+  const res = await api('GET', '/api/billing/lines');
+  if (!res.ok) return [el('p', { class: 'msg', text: res.message })];
+  const picked = new Set();
+  const settleBtn = smallBtn('選んだ明細を、当日現金で精算', async () => {
+    const r = await api('POST', '/api/billing/settle', { lineIds: [...picked] });
+    if (!r.ok) return alertLine(r.message);
+    show('billing');
+    openDialog('精算しました', el('p', { text: `請求書（領収書を兼ねる）${r.invoice.number} を発行しました。金額 ${yen(r.invoice.total)}` }),
+      el('div', { class: 'actions' }, el('a', { class: 'btn btn-primary', href: `/api/billing/invoices/${r.invoice.id}/pdf`, text: 'PDF を開く' }), closeBtn()));
+  }, 'btn-primary');
+  settleBtn.disabled = true;
+  const rows = res.lines.map((l) => {
+    const box = l.state === 'unsettled' && el('input', { type: 'checkbox', 'aria-label': `${l.label} を精算に選ぶ`, onchange: (ev) => { if (ev.target.checked) picked.add(l.id); else picked.delete(l.id); settleBtn.disabled = picked.size === 0; } });
+    const a = isAdmin();
+    return el('tr', {},
+      el('td', {}, box || ''),
+      el('td', { class: 'n paddle', text: l.paddle ?? '' }),
+      el('td', { class: 'dyn' }, l.name, el('div', { class: 'note', text: l.label })),
+      el('td', { class: 'n', text: yen(l.amount) }),
+      el('td', { text: `${RECV[l.receive] ?? ''}${l.payment ? '・' + PAY[l.payment] : ''}` }),
+      el('td', {}, el('span', { class: l.state === 'unpaid' ? 'warn' : 'state', 'data-on': ['cleared', 'delivered'].includes(l.state) ? '1' : '0', text: LINE_STATE[l.state] }),
+        l.invoice && el('div', { class: 'note', text: `${l.invoice.number}${l.invoice.dueDate ? '　期限 ' + l.invoice.dueDate : l.invoice.kind === 'cash' ? '' : '　未送付'}` }),
+        l.pickupBy && l.state === 'cleared' && el('div', { class: l.pickupLate ? 'warn' : 'note', text: `受け取り期限 ${l.pickupBy}` }),
+        l.offer && el('div', { class: 'note', text: `繰り上げ: ${{ open: '回答待ち', accepted: '承諾', declined: '辞退', expired: '期限切れ' }[l.offer.state]}` })),
+      act(
+        a && ['billed', 'unpaid'].includes(l.state) && smallBtn('消し込み', () => askForm('振込の消し込み', `${l.name}　${l.label}。入金の金額が、明細の金額（${yen(l.amount)}）と一致するときだけ消し込めます。`,
+          [field('入金の金額（円）', 'amount', { inputMode: 'numeric', required: true }), field('メモ', 'memo', {}, '任意')], (d) => api('POST', `/api/billing/lines/${l.id}/clear`, { amount: Number(d.amount), memo: d.memo }), '消し込む'), 'btn-primary'),
+        a && l.state === 'unpaid' && smallBtn('督促', () => askForm('督促の記録', l.dunning.map((d) => `${dateFmt.format(d.at)} ${d.method}: ${d.body}`).join('\n'),
+          [field('方法', 'method', { required: true, placeholder: '電話・メールなど' }), field('内容', 'body', { rows: 3, required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/dun`, d), '記録する')),
+        a && l.state === 'unpaid' && smallBtn('解除…', () => askReason('落札を解除', '解除の理由（取り消せません。本人にメールで知らせます）', true, (reason) => api('POST', `/api/billing/lines/${l.id}/cancel`, { reason })), 'btn-danger'),
+        l.state === 'cleared' && l.kind !== 'penalty' && l.kind !== 'late' && smallBtn('引き渡し', () => post(`/api/billing/lines/${l.id}/deliver`), 'btn-primary'),
+        a && l.state === 'cleared' && smallBtn('消し込みを取り消す', () => askReason('消し込みを取り消す', '取り消しの理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/unclear`, { reason }))),
+        a && l.state === 'delivered' && smallBtn('引き渡しを取り消す', () => askReason('引き渡しの記録を取り消す', '取り消しの理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/undeliver`, { reason }))),
+        a && l.state === 'cancelled' && l.kind === 'lot' && !l.offer && smallBtn('繰り上げを打診', () => post(`/api/billing/lines/${l.id}/offer`)),
+        a && l.state === 'cancelled' && smallBtn('違約金', () => askForm('違約金の請求', '金額を確かめて、確定してください。別の請求書を発行します。',
+          [field('金額（円）', 'amount', { inputMode: 'numeric', required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/penalty`, { kind: 'penalty', amount: Number(d.amount) }), '請求書を発行')),
+        a && ['cancelled', 'cleared', 'delivered'].includes(l.state) && smallBtn('返金', () => askForm('返金の記録', `${l.name}　${l.label}`,
+          [field('返金額（円）', 'amount', { inputMode: 'numeric', required: true }), field('返金日', 'date', { type: 'date', value: res.today, required: true }),
+            field('方法', 'method', { options: [['transfer', '振込'], ['cash', '現金']] }), field('理由', 'reason', { rows: 2, required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/refund`, { ...d, amount: Number(d.amount) }), '記録する'))));
+  });
+  const nodes = [
+    el('div', { class: 'toolbar' }, el('p', { class: 'note', text: '当日現金は、明細を選んで「精算」。振込は、入金を確かめて「消し込み」。引き渡しは、消し込みのあとにだけ記録できます。' }),
+      el('div', {}, settleBtn, ' ', isAdmin() && el('a', { class: 'btn', href: '/api/billing/shipping.csv', text: '配送の一覧（CSV）' }))),
+    el('p', { class: 'msg', id: 'line', role: 'alert' }),
+    table(['', '参加番号', '落札者・品', '金額', '受け取り・支払', '状態', ''], rows, '落札した品は、まだありません。'),
+  ];
+  if (isAdmin()) {
+    const inv = await api('GET', '/api/billing/invoices');
+    nodes.push(el('h2', { class: 'subhead', text: '請求書' }),
+      el('p', { class: 'note', text: 'メールの下書きを送ったら「送付済みにする」を押してください。支払期限は、その日から数えます。' }),
+      table(['請求番号', '宛先', '種類', '金額', '発行日', '送付・期限', ''], inv.invoices.map((i) => el('tr', {},
+        el('td', { class: 'n', text: i.number }), el('td', { class: 'dyn', text: i.name }), el('td', { text: INV_KIND[i.kind] }), el('td', { class: 'n', text: yen(i.total) }), el('td', { class: 'n', text: i.issuedOn }),
+        el('td', {}, i.kind === 'cash' ? 'その場で渡した' : i.sentOn ? `送付 ${i.sentOn}　期限 ${i.dueDate}` : el('span', { class: i.stale ? 'warn' : '', text: i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付' })),
+        act(el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: 'PDF' }), el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/xlsx`, text: 'Excel' }),
+          i.kind !== 'cash' && (i.sentOn ? smallBtn('送付を取り消す', () => post(`/api/billing/invoices/${i.id}/unsent`)) : smallBtn('送付済みにする', () => post(`/api/billing/invoices/${i.id}/sent`), 'btn-primary'))))), '請求書は、まだありません。'));
+  }
+  return nodes;
+}
+async function pickupPanel() {
+  const res = await api('GET', '/api/billing/pickup');
+  return [el('p', { class: 'note', text: '現地受け取りで、支払いは済んでいるのに、まだ受け取っていない品です。期限は、消し込みの日の翌日から7日目まで。' }),
+    table(['落札者', '品', '消し込み', '受け取り期限'], res.lines.map((l) => el('tr', {},
+      el('td', { class: 'dyn', text: l.name }), el('td', { class: 'dyn', text: l.label }), el('td', { class: 'n', text: l.clearedOn }),
+      el('td', {}, el('span', { class: l.pickupLate ? 'warn' : 'n', text: `${l.pickupBy}${l.pickupLate ? '（期限を過ぎています）' : ''}` })))), '未引き取りの品はありません。')];
+}
+let feeMonth = null;
+async function feesPanel() {
+  const [f, long] = await Promise.all([api('GET', '/api/billing/fees' + (feeMonth ? `?month=${feeMonth}` : '')), api('GET', '/api/billing/long-unpaid')]);
+  feeMonth = f.month;
+  const pick = el('input', { class: 'input', type: 'month', value: f.month, 'aria-label': '月', onchange: (ev) => { feeMonth = ev.target.value; show('fees'); } });
+  return [
+    el('div', { class: 'toolbar' }, el('div', { class: 'monthpick' }, pick),
+      f.confirmedOn ? el('p', { text: `確認済み（${f.confirmedOn}）` }) : smallBtn('この月の明細を、確認済みにする', () => post('/api/billing/fees/confirm', { month: f.month }), 'btn-primary')),
+    el('p', { class: 'msg', id: 'line', role: 'alert' }),
+    el('dl', { class: 'facts' },
+      el('dt', { text: '対象の落札額（消し込み済み・税込）' }), el('dd', { class: 'n', text: yen(f.base) }),
+      el('dt', { text: `手数料（${f.rate}%。差し引き ${yen(f.deduction)}）` }), el('dd', { class: 'n', text: yen(f.fee) }),
+      el('dt', { text: '最低保証額' }), el('dd', { class: 'n', text: yen(f.minimum) }),
+      el('dt', { text: `消費税（${f.taxMode === 'exclusive' ? '外税' : '内税'}）` }), el('dd', { class: 'n', text: f.taxMode === 'exclusive' ? yen(f.tax) : '手数料に含む' }),
+      el('dt', { text: '請求額' }), el('dd', { class: 'n paddle', text: yen(f.total) })),
+    el('h2', { class: 'subhead', text: '根拠になる明細' }),
+    table(['品', '税込落札額', '支払方法', '消し込みの日', '返金・取り消し'], f.details.map((d) => el('tr', {},
+      el('td', { class: 'dyn', text: d.label }), el('td', { class: 'n', text: yen(Math.abs(d.amount)).replace('¥', d.amount < 0 ? '−¥' : '¥') }), el('td', { text: d.method ?? '' }), el('td', { class: 'n', text: d.clearedOn }), el('td', { text: d.note }))), 'この月の明細はありません。'),
+    el('h2', { class: 'subhead', text: '長く未払いのままの明細（期限の翌日から30日以上）' }),
+    table(['落札者', '品', '金額', '期限', '督促', '引き渡し'], long.lines.map((l) => el('tr', {},
+      el('td', { class: 'dyn', text: l.name }), el('td', { class: 'dyn', text: l.label }), el('td', { class: 'n', text: yen(l.amount) }), el('td', { class: 'n', text: l.invoice.dueDate }),
+      el('td', { text: `${l.dunning.length} 回` }), el('td', { text: l.deliveredOn ? '済' : '未' }))), '該当する明細はありません。'),
+  ];
+}
+
 // ------------------------------------------------------------ SMS の制限の解除（受付係もできる）
 function smsPanel() {
   const form = el('form', { class: 'form', novalidate: true },
@@ -214,6 +317,16 @@ async function settingsPanel() {
     field('主催者の名称', 'orgName', { value: s.orgName, required: true }),
     field('返品特約の表示', 'returnPolicy', { value: s.returnPolicy, rows: 4, required: true }, 'トップページに表示します。弁護士の確認が済むまでは仮の文言です'),
     field('送料の表示', 'shippingNotice', { value: s.shippingNotice, rows: 3, required: true }, 'トップページに表示します'),
+    el('h2', { class: 'subhead', text: '請求書に載せる内容' }),
+    field('住所', 'orgAddress', { value: s.orgAddress, rows: 2 }, '郵便番号から。改行できます'),
+    el('div', { class: 'grid2' }, field('電話番号', 'orgTel', { value: s.orgTel }), field('メールアドレス', 'orgEmail', { value: s.orgEmail })),
+    field('適格請求書発行事業者の登録番号', 'invoiceRegNo', { value: s.invoiceRegNo }, 'T から始まる番号'),
+    field('振込先の口座', 'bankAccount', { value: s.bankAccount }),
+    field('金融機関の休業日', 'bankHolidays', { value: s.bankHolidays, rows: 3 }, '土日のほかの休業日（祝日など）を、2026-12-31 の形で、1行に1つ。支払期限の計算に使います'),
+    el('h2', { class: 'subhead', text: '手数料の集計' }),
+    el('div', { class: 'grid2' },
+      field('消費税の扱い', 'feeTaxMode', { options: [['exclusive', '外税（手数料に消費税を足す）'], ['inclusive', '内税（手数料に含む）']], value: s.feeTaxMode || 'exclusive' }),
+      field('最低保証額（円）', 'feeMinimum', { value: s.feeMinimum, inputMode: 'numeric' }, '未定なら空のまま')),
     el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '保存する' })));
   onSubmit(form, async (data) => {
@@ -239,6 +352,9 @@ async function auditPanel() {
 // ------------------------------------------------------------ 切り替え
 const PANELS = {
   reception: ['受付', receptionPanel, ['admin', 'auctioneer', 'reception']],
+  billing: ['請求', billingPanel, ['admin', 'reception']],
+  pickup: ['未引き取り', pickupPanel, ['admin', 'auctioneer', 'reception']],
+  fees: ['手数料', feesPanel, ['admin']],
   events: ['開催', eventsPanel, ['admin']],
   members: ['会員', membersPanel, ['admin']],
   sms: ['SMS の制限', smsPanel, ['admin', 'auctioneer', 'reception']],

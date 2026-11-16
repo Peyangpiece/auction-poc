@@ -20,7 +20,8 @@ const REJECT = {
   OFF_LADDER: () => '入札できる金額ではありません',
   ALREADY_HIGHEST: () => 'あなたが最高入札者です',
   RATE_LIMITED: () => '入札が速すぎます。少し待ってから押してください',
-  SUSPENDED: () => '参加が停止されています',
+  // 停止の理由で、言葉を分ける（FR-BID-012）
+  SUSPENDED: () => (S.unpaid ? 'お支払いの確認が取れていない請求があるため、参加が停止されています' : '参加が停止されています'),
   NOT_JOINED: () => '参加手続きを済ませてください',
 };
 function say(text, kind = '') { $('msg').textContent = text; $('msg').dataset.kind = kind; }
@@ -345,6 +346,8 @@ $('bid').addEventListener('click', async () => {
     render(); return;
   }
   const shown = localNow();
+  // 停止で断られたときは、理由（手動か、未払いか）を取り直してから伝える
+  if (res.code === 'SUSPENDED' && !token) { const p = await getJson('/api/participation'); S.unpaid = p.suspendedBy === 'unpaid'; }
   say(res.accepted ? `受理されました：${yen(res.amount)}` : (REJECT[res.code]?.(res) ?? res.code), res.accepted ? 'ok' : 'ng');
   Object.assign(lot, { currentPrice: res.currentPrice, minBid: res.minBid });
   if (res.accepted) lot.highestPaddle = S.paddle;

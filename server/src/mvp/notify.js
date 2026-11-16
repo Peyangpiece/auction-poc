@@ -47,6 +47,14 @@ export class Notifier {
     return this.#deliver({ channel: 'sms', to, kind, body });
   }
 
+  /**
+   * 請求メールの下書きを作る（FR-INV-007）。送信はしない（利用会社の担当者が、自分で送る）。
+   * 本番では、利用会社の Outlook の「下書き」に保存する送り手に差し替える（FR-INV-009）。いまは、開発用の書き出しに残すだけ。
+   */
+  draft(to, subject, body, attachments = []) {
+    return this.#deliver({ channel: 'draft', to, kind: 'invoice', subject, body, attachments });
+  }
+
   email(to, kind, subject, body) {
     return this.#deliver({ channel: 'email', to, kind, subject, body });
   }
