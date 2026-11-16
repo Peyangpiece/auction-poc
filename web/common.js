@@ -36,6 +36,7 @@ class Link {
   }
 
   serverNow() { return localNow() + this.offset; }
+  get up() { return this.ws.readyState === 1 && this.downAt === null; }
 
   connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -54,7 +55,7 @@ class Link {
         const wasDown = this.downAt;
         this.attempt = 0;
         this.downAt = null;
-        this.onStatus(true);
+        this.onStatus(true, null, !!wasDown && this.everConnected);
         this.syncClock().then(() => {
           if (wasDown && this.everConnected) {
             // 再接続にかかった時間（P3-5）: 切れてから／回線が戻ってから
@@ -71,6 +72,8 @@ class Link {
     ws.onclose = (ev) => {
       if (ev.code === 4401) return this.onStatus(false, '合言葉（トークン）が正しくありません');
       if (this.downAt === null) this.downAt = localNow();
+      // 応答を待っている操作（入札など）を、時間切れまで待たせない。届いたかどうかは、再接続後の表示で分かる
+      for (const [key, w] of this.waiters) { this.waiters.delete(key); w(null); }
       this.onStatus(false);
       // 切れてから1秒後に1回目を試し、その後は2秒ごとに試す（FR-UI-001）
       setTimeout(() => this.connect(), this.attempt++ === 0 ? 1000 : 2000);

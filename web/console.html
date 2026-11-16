@@ -37,7 +37,9 @@
   .price { font-size: 92px; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
   .actions [hidden] { display: none; }
-  #b_close { min-width: 220px; }
+  #b_close, #b_next { min-width: 220px; }
+  #cmdMsg { margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--danger); }
+  #cmdMsg:empty { display: none; }
   .actions .push { margin-left: auto; }
 
   /* 表 */
@@ -110,6 +112,7 @@
         </div>
       </div>
       <div class="actions">
+        <button class="btn btn-primary btn-lg" id="b_next" type="button" hidden>次のロットを開始</button>
         <button class="btn btn-primary btn-lg" id="b_close" data-act="close" type="button">締め</button>
         <button class="btn" id="b_suspend" data-act="suspend" type="button">中断</button>
         <button class="btn btn-primary" id="b_resume" data-act="resume" type="button">再開</button>
@@ -117,6 +120,7 @@
         <button class="btn" id="b_back" data-act="back_to_waiting" type="button">待機に戻す</button>
         <button class="btn btn-danger push" id="b_cancel" data-act="cancel" data-reason="1" type="button">取りやめ…</button>
       </div>
+      <p id="cmdMsg" role="alert"></p>
     </section>
 
     <section aria-labelledby="histTitle">
@@ -208,8 +212,10 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
 const S = { lots: new Map(), focus: null, history: [], stream: null, comments: [] };
+// 一覧は、いちばん下を見ているときだけ新しい行に追従する
+function follow(el, update) { const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24; update(); if (atEnd) el.scrollTop = el.scrollHeight; }
 function renderComments() {
-  $('comments').replaceChildren(...S.comments.map((c) => {
+  follow($('comments'), () => $('comments').replaceChildren(...S.comments.map((c) => {
     const li = document.createElement('li');
     const who = document.createElement('span'); who.className = 'who num'; who.textContent = `${c.paddle}番`;
     const body = document.createElement('span'); body.className = 'dyn'; body.textContent = c.text;
@@ -218,11 +224,10 @@ function renderComments() {
     hide.onclick = () => cmd('hide_comment', { id: c.id });
     li.append(who, body, hide);
     return li;
-  }));
+  })));
   $('cmtEmpty').style.display = S.comments.length ? 'none' : 'block';
-  $('comments').scrollTop = $('comments').scrollHeight;
 }
-const log = (text) => { const el = $('log'); el.textContent += `${jst(link ? link.serverNow() : Date.now())} ${text}\n`; el.scrollTop = el.scrollHeight; };
+const log = (text) => { const el = $('log'); follow(el, () => { el.textContent += `${jst(link ? link.serverNow() : Date.now())} ${text}\n`; }); };
 
 function focusLot() { return S.lots.get(S.focus) ?? null; }
 function setLamp(id, on, sub) {
@@ -244,7 +249,9 @@ function render() {
   // 落札の条件は、うりきり（最低落札額に届いている）と、最高入札者がいることの両方
   setLamp('urikiri', !!lot?.urikiri, !lot ? '最低落札額なし' : lot.reservePrice === null ? '最低落札額なし' : `最低落札額 ${yen(lot.reservePrice)}`);
   setLamp('right', !!lot?.highestPaddle && st !== 'unsold', lot?.highestPaddle ? `${lot.highestPaddle}番` : 'なし');
-  $('result').textContent = !lot ? 'ロット一覧から「競り開始」を押してください'
+  const ended = st === 'sold' || st === 'unsold' || st === 'not_held';
+  const next = [...S.lots.values()].find((l) => l.status === 'waiting'); // 出品順でいちばん先の、待機中のロット
+  $('result').textContent = !lot ? (next ? '「次のロットを開始」を押すと、競りが始まります' : 'ロット一覧に、ロットを追加してください')
     : st === 'sold' ? `${lot.highestPaddle}番 落札`
     : st === 'unsold' ? (lot.currentPrice !== null ? '流札（最低落札額に届きませんでした）' : '流札')
     : st === 'open' ? (lot.currentPrice === null ? '入札はまだありません。いま締めると流札になります' : lot.urikiri ? `いま締めると、${lot.highestPaddle}番が落札します` : 'いま締めると流札になります（最低落札額に届いていません）')
@@ -253,20 +260,22 @@ function render() {
     : st === 'suspended' ? '中断しています' : '';
   // その状態でできる操作だけを出す
   const show = (id, on) => { $(id).hidden = !on; };
-  show('b_close', !lot || st === 'open' || st === 'sold' || st === 'unsold'); $('b_close').disabled = st !== 'open';
+  // 締めた後・最初は、次にやることが1つだけ（次のロットを開始）。板から目を離さずに進められる
+  show('b_next', (!lot || ended) && !!next);
+  if (next) { $('b_next').textContent = `次のロットを開始（No.${next.lotNo}）`; $('b_next').onclick = () => lotCmd('start', next.id); }
+  show('b_close', st === 'open');
   show('b_suspend', st === 'open'); show('b_resume', st === 'suspended'); show('b_cancel', st === 'suspended');
   show('b_nv', st === 'preparing_warn'); show('b_back', st === 'preparing' || st === 'preparing_warn');
 
   const cell = (text, cls) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; return td; };
-  $('history').replaceChildren(...S.history.map((h) => {
+  follow($('histWrap'), () => $('history').replaceChildren(...S.history.map((h) => {
     const tr = document.createElement('tr');
     if (!h.valid) tr.className = 'void';
     tr.append(cell(h.seq, 'num'), cell(jst(h.received_at), 'num'), cell(`${h.paddle}番`, 'num'), cell(yen(h.amount), 'digits amt'), cell(h.valid ? '' : '無効'));
     return tr;
-  }));
+  })));
   $('histEmpty').style.display = S.history.length ? 'none' : 'block';
   $('histCount').textContent = `${S.history.filter((h) => h.valid).length}件`;
-  $('histWrap').scrollTop = $('histWrap').scrollHeight;
 
   const busy = [...S.lots.values()].some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status));
   const tb = $('lots'); tb.replaceChildren();
@@ -278,7 +287,8 @@ function render() {
       cell(l.status === 'sold' ? `${l.highestPaddle}番 ${yen(l.currentPrice)}` : l.status === 'unsold' && l.currentPrice !== null ? '最低落札額に届かず' : '', 'num'));
     const td = document.createElement('td');
     if (l.status === 'waiting') {
-      const b1 = document.createElement('button'); b1.type = 'button'; b1.textContent = '競り開始'; b1.className = 'btn btn-primary'; b1.disabled = busy;
+      const b1 = document.createElement('button'); b1.type = 'button'; b1.textContent = '競り開始'; b1.className = 'btn'; b1.disabled = busy;
+      if (busy) b1.title = '進行中のロットを締めてから開始できます';
       b1.setAttribute('aria-label', `ロット ${l.lotNo} の競りを開始`);
       b1.onclick = () => lotCmd('start', l.id);
       const b2 = document.createElement('button'); b2.type = 'button'; b2.textContent = '除外…'; b2.className = 'btn';
@@ -310,6 +320,8 @@ setInterval(() => {
 async function cmd(action, extra = {}) {
   const reqId = ++link.reqId, sent = localNow();
   const res = await link.request(reqId, { type: 'cmd', reqId, action, ...extra, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
+  // うまくいかなかった操作は、記録の欄だけでなく、操作した場所のすぐ下にも理由を出す
+  $('cmdMsg').textContent = !res ? '応答がありません。接続を確かめて、もう一度操作してください' : res.ok ? '' : res.message;
   if (!res) log(`${action}: 応答なし`);
   else if (!res.ok) log(`${action}: 拒否（${res.message}）`);
   else log(`${action}: OK${res.status ? `（${STATE_LABEL[res.status]}${res.reason === 'reserve_not_met' ? '・最低落札額に届かず' : ''} ${res.paddle ?? ''} ${res.amount ? yen(res.amount) : ''}）` : ''} ${Math.round(res.clientRecvAt - sent)}ms`);
@@ -348,7 +360,12 @@ async function lotCmd(action, lotId, needReason = false) {
   }
   return cmd(action, { lotId, reason });
 }
-document.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => { const lot = focusLot(); if (lot) lotCmd(b.dataset.act, lot.id, !!b.dataset.reason); }));
+document.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async () => {
+  const lot = focusLot(); if (!lot) return;
+  b.disabled = true; // 二度押しを防ぐ（結果が届いたら元に戻す）
+  await lotCmd(b.dataset.act, lot.id, !!b.dataset.reason);
+  b.disabled = false; render();
+}));
 document.querySelectorAll('[data-cmd]').forEach((b) => b.addEventListener('click', () => cmd(b.dataset.cmd)));
 document.querySelectorAll('[data-crash]').forEach((b) => b.addEventListener('click', async () => {
   const ans = await ask({ title: 'サーバーを強制終了しますか？', body: `${b.textContent.replace('…', '')}。参加者の画面は「再接続中」になり、受付中のロットは復旧の規則に従って中断または確定になります。`, okLabel: '強制終了する', danger: true });

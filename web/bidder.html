@@ -20,8 +20,8 @@
   #lotNo { font-size: 18px; margin-right: 8px; color: var(--action); }
   #lotNo:empty { display: none; }
   main { display: grid; gap: 24px; }
-  .stage, .side { display: contents; }
-  #videoBox { order: 1; } .hist { order: 2; } .cmt { order: 3; } .fine { order: 4; }
+  .side { display: contents; }
+  #videoBox { order: 1; } .board { order: 2; } .hist { order: 3; } .cmt { order: 4; } .fine { order: 5; }
 
   /* 上回られたら、画面全体の色を変える（FR-UI-004） */
   body.outbid { background: var(--alarm); }
@@ -53,7 +53,7 @@
   .brandbar > div { min-height: 56px; }
   .brand img { width: 36px; height: 36px; }
   .board > * { width: 100%; max-width: 520px; margin-inline: auto; }
-  .board-main { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+  .board-main { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 4px 12px; }
   .plabel { font-size: 12px; color: var(--board-ink-2); line-height: 1.3; }
   .price { font-size: 44px; }
   .board-meta { display: grid; justify-items: end; gap: 2px; font-size: 13px; color: var(--board-ink-2); text-align: right; white-space: nowrap; }
@@ -64,7 +64,7 @@
   #msg:empty { display: none; }
   #msg[data-kind="ng"] { color: var(--board-ng); }
   /* 板の上の入札ボタンは、板の文字色で塗る（暗い板の上でいちばん明るい面＝押すところ） */
-  #bid { width: 100%; background: #fff; border-color: #fff; color: var(--navy); }
+  #bid { width: 100%; background: #fff; border-color: #fff; color: var(--navy); white-space: normal; min-width: 0; }
   #bid:hover:not(:disabled) { background: #e9edf3; border-color: #e9edf3; color: var(--navy); }
   #bid:disabled { opacity: 1; background: transparent; border-color: var(--board-line); color: var(--board-ink-2); font-size: 16px; font-weight: 600; }
   #bid:focus-visible { outline-color: var(--board-ng); }
@@ -107,8 +107,10 @@
   .check input { width: 20px; height: 20px; }
 
   /* 入場 */
-  #gate { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--ground); }
-  #gate > div { width: min(400px, 100%); display: grid; gap: 20px; }
+  /* 低い画面（横向きなど）でも「参加する」に必ず届くよう、入場画面は中でスクロールできるようにする */
+  #gate { position: fixed; inset: 0; z-index: 40; display: flex; overflow-y: auto; overscroll-behavior: contain; padding: 24px; background: var(--ground); }
+  #gate > div { width: min(400px, 100%); display: grid; gap: 20px; margin: auto; }
+  @media (max-height: 520px) { #gate .mark { width: 56px; height: 56px; } #gate > div { gap: 12px; } }
   #gate .mark { width: 96px; height: 96px; }
   #gate .co { font-weight: 700; letter-spacing: .1em; }
   #gate h1 { font-size: 26px; letter-spacing: .08em; color: var(--action); border-bottom: 1px solid var(--red); padding-bottom: 12px; }
@@ -116,9 +118,24 @@
   #gateMsg { color: var(--danger); font-size: 14px; font-weight: 600; }
   #gateMsg:empty { display: none; }
 
-  /* PC: 左に映像とコメント、右に表示板と履歴 */
+  /* PC と、横向きのスマホ: 左に映像とコメント、右に表示板と履歴。表示板は固定しない（横向きでは画面が低く、固定すると映像が隠れる） */
+  /* 低くて幅も狭い画面（PC の拡大表示など）: 板を固定せず、映像のすぐ下に置く（固定すると映像が隠れる） */
+  @media (max-height: 520px) and (max-width: 699px) {
+    .board { position: static; }
+    .board > * { max-width: none; }
+  }
+  @media (min-width: 960px), (min-width: 700px) and (orientation: landscape) {
+    body { padding-bottom: 32px !important; }
+    .brandbar > div, .top, main { max-width: 1168px; }
+    main { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 24px 32px; align-items: start; }
+    #videoBox { grid-column: 1; grid-row: 1; }
+    .side { display: grid; gap: 24px; min-width: 0; align-content: start; grid-column: 2; grid-row: 1 / span 2; }
+    .cmt { grid-column: 1; grid-row: 2; }
+    .board { position: static; padding: 16px; gap: 12px; }
+    .board > * { max-width: none; }
+    .board:has(#msg:not(:empty)) #result { display: block; }
+  }
   @media (min-width: 960px) {
-    body { padding-bottom: 32px; }
     .brandbar > div, .top, main { max-width: 1168px; padding-left: 24px; padding-right: 24px; }
     .brandbar > div { min-height: 80px; }
     .brand img { width: 48px; height: 48px; }
@@ -126,17 +143,24 @@
     .top { padding-top: 24px; padding-bottom: 16px; }
     .top h1 { font-size: 22px; }
     #lotNo { font-size: 22px; }
-    main { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 32px; align-items: start; }
-    .stage, .side { display: grid; gap: 24px; min-width: 0; align-content: start; }
-    .board { position: static; padding: 24px; gap: 16px; }
-    .board:has(#msg:not(:empty)) #result { display: block; }
+    .board { padding: 24px; gap: 16px; }
     .board .lamps { padding-top: 16px; }
     #bid { min-height: 60px; }
     .plabel { font-size: 13px; }
-    .board > * { max-width: none; }
     .price { font-size: 84px; }
     .board-result { font-size: 18px; }
   }
+  /* 幅の狭い端末: 社名と「応札／観戦」がぶつからないように詰める */
+  .brand__text { overflow: hidden; }
+  @media (max-width: 359px) {
+    .brandbar > div, .top, main { padding-left: 16px; padding-right: 16px; }
+    .brand { gap: 8px; }
+    .brand__name { font-size: 15px; letter-spacing: .06em; }
+    .brand__service { letter-spacing: .04em; }
+    .seg button { min-width: 52px; padding: 0 10px; }
+  }
+  #cmtCount { font-size: 12px; color: var(--ink-3); justify-self: end; }
+  #bid.locked { opacity: .6; }
 </style>
 </head>
 <body>
@@ -146,7 +170,8 @@
     <p class="co">株式会社NEWS</p>
     <h1>ライブオークション</h1>
     <ul>
-      <li>上回られたときは、音と画面の色でお知らせします。</li>
+      <li>「うりきり」と「権利」のランプが両方点いている人が落札します。</li>
+      <li>上回られたときは、音と画面の色でお知らせします。「参加する」を押すと、確認の音が鳴ります。</li>
       <li>入札額は税込で、参加者全員に公開されます。</li>
       <li>締めは進行役の操作で確定します。通信や映像の遅れにより、締めの直前の入札が間に合わないことがあります。</li>
     </ul>
@@ -155,6 +180,7 @@
   </div>
 </div>
 
+<p class="sr-only" id="alert" role="alert"></p>
 <div class="overlay" id="overlay" role="alert"><div><span id="overlayText">再接続中…</span><small id="overlaySub">通信が戻りしだい、自動でつなぎ直します</small></div></div>
 
 <header class="brandbar">
@@ -174,28 +200,9 @@
 </div>
 
 <main>
-  <div class="stage">
-    <div id="videoBox">
-      <video id="video" playsinline muted aria-label="会場のライブ映像"></video>
-      <div id="break"><strong id="breakTitle">映像は停止中です</strong><span id="breakSub"></span></div>
-    </div>
-
-    <section class="cmt" aria-labelledby="cmtTitle">
-      <div class="sechead">
-        <h2 id="cmtTitle">コメント</h2>
-        <label class="switch">表示<input type="checkbox" id="cmtOn" role="switch" checked></label>
-      </div>
-      <div id="cmtBody">
-        <ul id="comments" aria-live="polite"></ul>
-        <p id="cmtEmpty">コメントはまだありません。</p>
-        <form id="cmtForm">
-          <label class="sr-only" for="cmtText">コメント（20文字まで）</label>
-          <input class="input" id="cmtText" name="comment" maxlength="20" autocomplete="off" enterkeyhint="send" placeholder="コメント（20文字まで）">
-          <button class="btn" id="cmtSend" type="submit">送信</button>
-        </form>
-        <p id="cmtMsg" role="alert"></p>
-      </div>
-    </section>
+  <div id="videoBox">
+    <video id="video" playsinline muted aria-label="会場のライブ映像"></video>
+    <div id="break"><strong id="breakTitle">映像は停止中です</strong><span id="breakSub"></span></div>
   </div>
 
   <div class="side">
@@ -203,7 +210,7 @@
       <div class="board-main">
         <div class="pricewrap">
           <div class="plabel" id="priceLabel">現在価格</div>
-          <div class="price" id="price" aria-live="polite"></div>
+          <div class="price" id="price"></div>
         </div>
         <div class="board-meta">
           <span class="state" id="status">待機中</span>
@@ -212,8 +219,8 @@
       </div>
       <p class="board-result" id="result" role="status"></p>
       <div class="lamps">
-        <div class="lamp" id="urikiri" role="status"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub">最低落札額なし</small></div>
-        <div class="lamp" id="right" role="status"><span class="bulb"></span><b id="rightLabel">権利</b><small class="num" id="rightSub">最高入札者なし</small></div>
+        <div class="lamp" id="urikiri" role="img"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub">最低落札額なし</small></div>
+        <div class="lamp" id="right" role="img"><span class="bulb"></span><b id="rightLabel">権利</b><small class="num" id="rightSub">最高入札者なし</small></div>
       </div>
       <p id="msg" role="status" aria-live="polite"></p>
       <button class="btn btn-lg digits" id="bid" type="button" disabled>入札</button>
@@ -244,6 +251,24 @@
       </details>
     </div>
   </div>
+
+  <section class="cmt" aria-labelledby="cmtTitle">
+    <div class="sechead">
+      <h2 id="cmtTitle">コメント</h2>
+      <label class="switch">表示<input type="checkbox" id="cmtOn" role="switch" checked></label>
+    </div>
+    <div id="cmtBody">
+      <ul id="comments" aria-live="polite"></ul>
+      <p id="cmtEmpty">コメントはまだありません。</p>
+      <form id="cmtForm">
+        <label class="sr-only" for="cmtText">コメント（20文字まで）</label>
+        <input class="input" id="cmtText" name="comment" maxlength="20" autocomplete="off" enterkeyhint="send" placeholder="コメント（20文字まで）" aria-describedby="cmtCount">
+        <button class="btn" id="cmtSend" type="submit">送信</button>
+      </form>
+      <span class="num" id="cmtCount">0／20文字</span>
+      <p id="cmtMsg" role="alert"></p>
+    </div>
+  </section>
 </main>
 
 <script src="common.js"></script>
@@ -256,7 +281,9 @@ $('net').textContent = net;
 const store = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
 // 応札／観戦: 観戦の間は入札ボタンを押せない（誤って入札しないため）。最初は観戦にしておく
 const S = { lots: new Map(), focus: null, paddle: null, history: [], stream: null, wasHighest: false, playerUrl: null, shownPrice: null, rendered: 0,
-  mode: store.get('poc-mode', 'watch'), comments: [], cmtMax: 20 };
+  mode: store.get('poc-mode', 'watch'), comments: [], cmtMax: 20, lockUntil: 0, connected: false };
+// 一覧は、いちばん下を見ているときだけ新しい行に追従する（読み返している途中で勝手に動かさない）
+function follow(el, update) { const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24; update(); if (atEnd) el.scrollTop = el.scrollHeight; }
 let link, audioCtx = null, wakeLock = null, player = null, playerLoading = false;
 
 // ---- 文言（FR-BID-012）
@@ -337,34 +364,44 @@ function render() {
   setLamp('right', holds ? (st === 'sold' ? 'won' : 'on') : '', holds && st === 'sold' ? '落札' : '権利',
     lot.highestPaddle === null ? '最高入札者なし' : mine ? `あなた（${lot.highestPaddle}番）` : `最高入札者 ${lot.highestPaddle}番`);
 
-  $('result').textContent = st === 'sold' ? `${lot.highestPaddle}番 落札`
+  $('result').textContent = st === 'sold' ? (mine ? `あなたが落札しました（${lot.highestPaddle}番）` : `${lot.highestPaddle}番 落札`)
     : st === 'unsold' ? (lot.currentPrice !== null ? '流札（最低落札額に届きませんでした）' : '流札')
     : st === 'suspended' ? '中断しています。再開をお待ちください'
     : !ended && !urikiri && lot.currentPrice !== null ? '最低落札額に届くまで、落札にはなりません'
     : '';
 
+  // 入札ボタン。観戦中は「応札に切り替える」ボタンとして働く（切り替えの場所を探させない）
   const watching = S.mode !== 'bid';
-  $('bid').disabled = !(st === 'open' && !mine && !watching);
-  $('bid').textContent = st !== 'open' ? (ended ? '次のロットをお待ちください' : '受付の開始をお待ちください')
-    : watching ? '観戦中（入札するには「応札」に切り替え）'
+  const staff = S.paddle === null;
+  const bid = $('bid');
+  const canBid = st === 'open' && !mine && !watching;
+  const canJoin = st === 'open' && watching && !staff;
+  // 他の人の入札で金額が変わった直後は、短い間だけ押せなくする（古い金額のつもりで、新しい金額を押してしまうのを防ぐ）
+  const locked = canBid && performance.now() < S.lockUntil;
+  bid.dataset.action = canJoin ? 'join' : 'bid';
+  bid.disabled = !(canBid || canJoin) || locked;
+  bid.classList.toggle('locked', locked);
+  bid.textContent = st !== 'open' ? (ended ? '次のロットをお待ちください' : st === 'suspended' ? '中断しています' : '受付の開始をお待ちください')
+    : staff ? 'スタッフは入札できません'
+    : watching ? '応札に切り替える'
     : mine ? 'あなたが最高入札者です' : `${yen(lot.minBid)} で入札`;
+  document.title = `${yen(price)} No.${lot.lotNo}｜株式会社NEWS ライブオークション`;
   S.wasHighest = mine && st === 'open';
 }
 function renderHistory() {
   // 受理された入札の全件を、受付連番の順のまま表示する。金額は全桁そのまま（隠さない・並べ替えない）
   const ul = $('history');
   const grew = S.history.length > S.rendered;
-  ul.replaceChildren(...S.history.map((h, i) => {
+  follow(ul, () => ul.replaceChildren(...S.history.map((h, i) => {
     const li = document.createElement('li');
     li.className = [h.valid ? '' : 'void', h.paddle === S.paddle ? 'mine' : '', grew && i === S.history.length - 1 ? 'new' : ''].join(' ').trim();
     const cell = (cls, text) => { const s = document.createElement('span'); s.className = cls; s.textContent = text; return s; };
     li.append(cell('who', `${h.paddle}番${h.paddle === S.paddle ? '（あなた）' : ''}`), cell('amt digits', yen(h.amount)), cell('at num', h.valid ? jstShort(h.received_at) : '無効'));
     return li;
-  }));
+  })));
   S.rendered = S.history.length;
   $('count').textContent = `${S.history.filter((h) => h.valid).length}件`;
   $('empty').style.display = S.history.length ? 'none' : 'block';
-  ul.scrollTop = ul.scrollHeight;
 }
 function renderStream() {
   const show = $('showVideo').checked && !venue;
@@ -391,19 +428,20 @@ function renderComments() {
   $('cmtBody').style.display = on ? 'grid' : 'none';
   if (!on) return;
   const ul = $('comments');
-  ul.replaceChildren(...S.comments.map((c) => {
+  follow(ul, () => ul.replaceChildren(...S.comments.map((c) => {
     const li = document.createElement('li');
     if (c.paddle === S.paddle) li.className = 'mine';
     const who = document.createElement('span'); who.className = 'who num'; who.textContent = `${c.paddle}番`;
     const body = document.createElement('span'); body.className = 'dyn'; body.textContent = c.text;
     li.append(who, body);
     return li;
-  }));
+  })));
   $('cmtEmpty').style.display = S.comments.length ? 'none' : 'block';
-  ul.scrollTop = ul.scrollHeight;
 }
 $('cmtOn').checked = store.get('poc-comments', 'on') === 'on';
 $('cmtOn').addEventListener('change', () => { store.set('poc-comments', $('cmtOn').checked ? 'on' : 'off'); renderComments(); });
+const countComment = () => { $('cmtCount').textContent = `${[...$('cmtText').value].length}／${S.cmtMax}文字`; };
+$('cmtText').addEventListener('input', countComment);
 $('cmtForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const text = $('cmtText').value.trim();
@@ -412,7 +450,7 @@ $('cmtForm').addEventListener('submit', async (ev) => {
   const reqId = ++link.reqId;
   const res = await link.request(reqId, { type: 'comment', reqId, text }, 5000);
   $('cmtSend').disabled = false;
-  if (res?.ok) { $('cmtText').value = ''; $('cmtMsg').textContent = ''; }
+  if (res?.ok) { $('cmtText').value = ''; $('cmtMsg').textContent = ''; countComment(); }
   else $('cmtMsg').textContent = res?.message ?? '送信できませんでした。通信を確かめて、もう一度お試しください。';
 });
 
@@ -461,7 +499,7 @@ function onMessage(msg, at) {
     case 'welcome': case 'snapshot':
       if (msg.type === 'welcome') {
         S.paddle = msg.paddle; S.playerUrl = msg.playerScriptUrl; $('me').textContent = msg.paddle === null ? 'スタッフ' : `${msg.paddle}番`;
-        S.cmtMax = msg.commentMaxLength ?? 20; $('cmtText').maxLength = S.cmtMax;
+        S.cmtMax = msg.commentMaxLength ?? 20; $('cmtText').maxLength = S.cmtMax; countComment();
         $('contact').textContent = msg.venueContact ? `会場連絡先：${msg.venueContact}` : '';
         document.querySelectorAll('.seg button').forEach((b) => { b.disabled = msg.paddle === null; });
         setMode(S.mode);
@@ -493,17 +531,27 @@ function onMessage(msg, at) {
       const lot = S.lots.get(msg.lotId);
       if (!lot) break;
       const outbid = S.wasHighest && msg.paddle !== S.paddle && msg.lotId === S.focus;
+      if (msg.paddle !== S.paddle && msg.lotId === S.focus) {
+        if (!outbid) say(''); // 前の入札の結果は、もう今の状況ではない
+        if (S.mode === 'bid' && lot.minBid !== msg.minBid) { S.lockUntil = performance.now() + 600; setTimeout(render, 620); }
+      }
       Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle, urikiri: msg.urikiri });
       if (msg.lotId === S.focus) S.history.push({ seq: msg.seq, amount: msg.amount, received_at: msg.receivedAt, valid: 1, paddle: msg.paddle });
       render(); renderHistory();
       if (outbid) notifyOutbid(msg);
       break;
     }
-    case 'result':
+    case 'result': {
       link.send({ type: 'result_ack', lotId: msg.lotId, at: at + link.offset, net });
       S.lots.set(msg.lotId, msg.lot);
       render();
+      if (msg.lotId !== S.focus) break;
+      const won = msg.status === 'sold' && msg.paddle === S.paddle;
+      say(won ? `落札しました：${yen(msg.amount)}` : '', 'ok');
+      $('alert').textContent = msg.status === 'sold' ? (won ? `あなたが ${yen(msg.amount)} で落札しました` : `${msg.paddle}番が ${yen(msg.amount)} で落札しました`) : '流札になりました';
+      if (won) { beep(); if ('vibrate' in navigator) navigator.vibrate(300); }
       break;
+    }
     case 'stream':
       S.stream = msg.stream; renderStream();
       break;
@@ -520,6 +568,8 @@ function notifyOutbid(msg) {
   const vibrated = 'vibrate' in navigator ? navigator.vibrate([200, 100, 200]) : null;
   $('audio').textContent = audio; $('vib').textContent = vibrated === null ? '非対応' : String(vibrated);
   say(`上回られました：${msg.paddle}番 ${yen(msg.amount)}`, 'ng');
+  $('alert').textContent = `上回られました。${msg.paddle}番が ${yen(msg.amount)}。次の入札額は ${yen(msg.minBid)}`;
+  document.title = `上回られました｜${yen(msg.amount)}`;
   link.event('outbid_notify', { seq: msg.seq, audio, vibrated, hidden: document.hidden, wake: $('wake').textContent });
 }
 
@@ -527,11 +577,19 @@ function notifyOutbid(msg) {
 $('bid').addEventListener('click', async () => {
   const lot = focusLot();
   if (!lot) return;
+  if ($('bid').dataset.action === 'join') { // 観戦中に押したら、まず応札に切り替えるだけ（この1回では入札しない）
+    setMode('bid'); link.event('mode', { mode: 'bid', via: 'bid-button' });
+    say('応札に切り替えました。もう一度押すと入札します');
+    return;
+  }
   $('bid').disabled = true;
   $('bid').textContent = '送信中…';
   const reqId = ++link.reqId, sent = localNow();
   const res = await link.request(reqId, { type: 'bid', reqId, lotId: lot.id, amount: lot.minBid, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
-  if (!res) { say('応答がありません。通信を確かめて、もう一度押してください', 'ng'); render(); return; }
+  if (!res) {
+    say(link.up ? '応答がありません。価格の表示を確かめて、必要ならもう一度押してください' : '通信が切れました。入札が届いたかは、つながり直した後の表示で確かめてください', 'ng');
+    render(); return;
+  }
   const shown = localNow();
   say(res.accepted ? `受理されました：${yen(res.amount)}` : (REJECT[res.code]?.(res) ?? res.code), res.accepted ? 'ok' : 'ng');
   Object.assign(lot, { currentPrice: res.currentPrice, minBid: res.minBid });
@@ -555,6 +613,10 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 $('showVideo').addEventListener('change', renderStream);
+new ResizeObserver(() => {
+  const fixed = getComputedStyle($('board')).position === 'fixed';
+  document.body.style.paddingBottom = fixed ? `${Math.ceil($('board').getBoundingClientRect().height) + 24}px` : '';
+}).observe($('board'));
 setInterval(() => {
   if (!link) return;
   $('clock').textContent = jst(link.serverNow());
@@ -569,13 +631,15 @@ $('enter').addEventListener('click', async () => {
   $('audio').textContent = audioCtx ? audioCtx.state : '使えない';
   $('vib').textContent = 'vibrate' in navigator ? '対応' : '非対応';
   $('gate').style.display = 'none';
+  $('result').textContent = '接続しています…';
   $('showVideo').checked = !venue; $('showVideo').disabled = venue;
   link = new Link({
     token, label: `bidder:${net}:${venue ? 'venue' : 'online'}`, onMessage,
-    onStatus: (up, why) => {
+    onStatus: (up, why, reconnected) => {
       $('overlay').style.display = up ? 'none' : 'flex';
       $('overlayText').textContent = why ?? '再接続中…';
       $('overlaySub').textContent = why ? '受付で受け取った URL を開き直してください' : '通信が戻りしだい、自動でつなぎ直します';
+      if (up && reconnected) say('つながり直しました。最新の状態を表示しています');
     },
   });
   const wake = await requestWake();
