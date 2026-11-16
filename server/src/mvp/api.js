@@ -391,16 +391,15 @@ export function createApi({ store, config, nowMs }) {
     return { ok: true };
   });
 
-  // ------------------------------------------------------------ 出品禁止の言葉・表示する文言
+  // ------------------------------------------------------------ 表示する文言
   // 商品は、競りの最中に進行コンソールからその場で登録する（発注者の決定）。事前の登録・審査・カタログは持たない。
-  const bannedWords = () => { try { return JSON.parse(setting('banned_words')).filter((w) => typeof w === 'string' && w.trim()); } catch { return []; } };
   // 送料が含まれないことの表示（FR-SHIP-003）と、返品特約の表示（FR-LEG-002）。だれでも見られる
   route('GET', '/api/terms', () => ({ orgName: setting('org_name'), shippingNotice: setting('shipping_notice'), returnPolicy: setting('return_policy') }));
 
   // ------------------------------------------------------------ 主催者設定（FR-ORG-001 の一部）・監査ログ・知らせ
   route('GET', '/api/settings', (ctx) => {
     needStaff(ctx, 'admin');
-    return { orgName: setting('org_name'), returnPolicy: setting('return_policy'), shippingNotice: setting('shipping_notice'), bannedWords: bannedWords() };
+    return { orgName: setting('org_name'), returnPolicy: setting('return_policy'), shippingNotice: setting('shipping_notice') };
   });
   route('POST', '/api/settings', (ctx, body) => {
     needStaff(ctx, 'admin');
@@ -408,7 +407,6 @@ export function createApi({ store, config, nowMs }) {
       org_name: String(body.orgName ?? '').trim().slice(0, 100),
       return_policy: String(body.returnPolicy ?? '').trim().slice(0, 2000),
       shipping_notice: String(body.shippingNotice ?? '').trim().slice(0, 1000),
-      banned_words: JSON.stringify((Array.isArray(body.bannedWords) ? body.bannedWords : []).map((w) => String(w).trim().slice(0, 50)).filter(Boolean).slice(0, 500)),
     };
     if (!next.org_name || !next.return_policy || !next.shipping_notice) throw bad('名称・返品特約・送料の表示は、空にできません');
     const before = Object.fromEntries(Object.keys(next).map((k) => [k, setting(k)]));
@@ -477,7 +475,5 @@ export function createApi({ store, config, nowMs }) {
     }
   }
 
-  /** 文面に含まれる出品禁止の言葉（進行コンソールから、その場で登録するときにも使う） */
-  const bannedIn = (text) => { const hay = String(text ?? '').toLowerCase(); return bannedWords().filter((w) => hay.includes(w.toLowerCase())); };
-  return { handle, createStaff, audit, bannedIn };
+  return { handle, createStaff, audit };
 }

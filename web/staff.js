@@ -163,11 +163,10 @@ async function settingsPanel() {
     field('主催者の名称', 'orgName', { value: s.orgName, required: true }),
     field('返品特約の表示', 'returnPolicy', { value: s.returnPolicy, rows: 4, required: true }, 'トップページに表示します。弁護士の確認が済むまでは仮の文言です'),
     field('送料の表示', 'shippingNotice', { value: s.shippingNotice, rows: 3, required: true }, 'トップページに表示します'),
-    field('出品禁止の言葉', 'bannedWords', { value: s.bannedWords.join('\n'), rows: 6 }, '1行に1つ。品名に含まれると、進行コンソールでの登録のときに、判断の理由を求めます'),
     el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '保存する' })));
   onSubmit(form, async (data) => {
-    const res = await api('POST', '/api/settings', { ...data, bannedWords: data.bannedWords.split('\n') });
+    const res = await api('POST', '/api/settings', data);
     if (res.ok) { const m = $('.msg', form); m.classList.add('ok'); m.textContent = '保存しました'; return null; }
     return res;
   });

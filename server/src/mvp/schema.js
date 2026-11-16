@@ -76,5 +76,4 @@ export const DEFAULT_SETTINGS = {
   org_name: '株式会社NEWS',
   return_policy: '【仮の文言。弁護士の確認前】中古品のため、現状でのお渡しとなります。落札後の返品・交換はお受けできません。',
   shipping_notice: '落札価格に送料は含まれません。配送の場合、送料は後日、別にご請求します。',
-  banned_words: '[]', // 出品禁止の言葉の一覧（本仕様 OQ-13 が未決のため、空で始める）
 };

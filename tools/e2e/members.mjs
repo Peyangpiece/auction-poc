@@ -52,12 +52,12 @@ try {
   check((await admin.textContent('#who')).includes('主催者管理者'), '主催者管理者としてログインできる');
   check((await admin.locator('#tabs button').count()) === 6, '主催者管理者には、6つの画面が出る（商品の事前登録はない）');
 
-  // 設定: 出品禁止の言葉
+  // 設定
   await admin.click('#tabs [data-key=settings]');
-  await admin.fill('[name=bannedWords]', '実銃\n火薬');
+  await admin.fill('[name=shippingNotice]', '落札価格に送料は含まれません。送料は別にご請求します。');
   await admin.click('#panel button[type=submit]');
   await admin.waitForSelector('#panel .msg.ok');
-  check(true, '出品禁止の言葉を保存できる');
+  check(true, '送料の表示を保存できる');
 
   // 開催
   await admin.click('#tabs [data-key=events]');
@@ -90,15 +90,11 @@ try {
   console.log('その場での登録（進行コンソール）');
   const con = await open(`/console.html?t=${sys.tokens.auctioneer}`, { viewport: { width: 1280, height: 860 } });
   await con.waitForSelector('#addLot');
-  await con.fill('#newTitle', '実銃の覆い（検証）');
+  await con.fill('#newTitle', '防水シート（検証）');
   await con.click('#addLot button[type=submit]');
-  await con.waitForSelector('#dlg[open]');
-  check((await con.textContent('#dlgBody')).includes('実銃'), '品名に出品禁止の言葉があると、判断の理由を求める');
-  await shot(con, 'mvp-03-console-banned-word');
-  await con.fill('#dlgReason', '銃そのものではなく、覆いの布であることを現物で確かめた');
-  await con.click('#dlgOk');
-  await con.waitForFunction(() => document.body.textContent.includes('実銃の覆い（検証）') && !document.querySelector('#dlg').open);
-  check(true, '理由を添えると、その場で登録できる');
+  await con.waitForFunction(() => document.body.textContent.includes('防水シート（検証）'));
+  check(true, '進行コンソールから、その場で登録できる');
+  await shot(con, 'mvp-03-console-add');
 
   console.log('トップページ');
   const phone = await open('/', devices['iPhone 13']);

@@ -366,16 +366,9 @@ function onAuctioneer(conn, msg, send) {
       case 'stream_status': stream.manual('status'); return ok();
       case 'set_auto_stop': stream.setAutoStopMs(Number(msg.ms)); return ok();
       case 'create_lot': {
-        // 商品は、競りの最中にその場で登録する（発注者の決定）。別の人による事前の審査は通らないので、
-        // 出品禁止の言葉が品名に含まれていたら、登録する本人に判断の理由を求め、記録に残す（FR-ITEM-006・007 の趣旨）。
-        const words = api.bannedIn(msg.title);
-        const reason = String(msg.reason ?? '').trim().slice(0, 1000);
-        if (words.length && !reason) {
-          return send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: false, action: msg.action, code: 'BANNED_WORD', words,
-            message: `出品禁止の言葉（${words.join('、')}）が含まれています。登録するには、判断の理由が必要です` });
-        }
+        // 商品は、競りの最中にその場で登録する（発注者の決定）。登録は記録に残す。
         const lot = auction.createLot(msg);
-        api.audit({ system: true }, 'lot.create', { target: `lot:${lot.id}`, after: { via: 'console', staff: conn.staff.id, title: lot.title, startPrice: lot.startPrice, warnings: words }, reason: reason || null });
+        api.audit({ system: true }, 'lot.create', { target: `lot:${lot.id}`, after: { via: 'console', staff: conn.staff.id, title: lot.title, startPrice: lot.startPrice } });
         return ok({ lot });
       }
       case 'lot_log': return ok({ log: auction.lotLog(Number(msg.lotId)) });
