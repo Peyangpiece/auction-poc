@@ -23,6 +23,9 @@ const makeStaff = (id, name, role) => {
 const outbox = () => fs.readFileSync(path.join(dataDir, 'outbox', 'outbox.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 const lastCode = () => /認証番号は (\d{6})/.exec(outbox().filter((m) => m.channel === 'sms').at(-1).body)[1];
 
+// 参加できるのは開催の当日だけなので、開催日は今日（日本時間）にする
+const jstDay = (offsetDays = 0) => new Date(Date.now() + 9 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10);
+const today = jstDay();
 const browser = await chromium.launch();
 const errors = [];
 const open = async (url, opts) => {
@@ -59,14 +62,22 @@ try {
   await admin.waitForSelector('#panel .msg.ok');
   check(true, '送料の表示を保存できる');
 
+  // 開催のない日のトップページ
+  const quiet = await open('/', { viewport: { width: 1280, height: 860 } });
+  await quiet.waitForSelector('#calBody td');
+  check((await quiet.isHidden('#today')) && (await quiet.locator('#calBody td.is-event').count()) === 0, '開催のない日は、カレンダーだけを出す');
+  check((await quiet.locator('#calBody td.is-today').count()) === 1, 'カレンダーに、今日の印が出る');
+  await shot(quiet, 'mvp-05-top-no-event');
+
   // 開催
   await admin.click('#tabs [data-key=events]');
   await admin.click('text=開催を作る');
   await admin.fill('#dlg [name=title]', '12月の競り（検証）');
-  await admin.fill('#dlg [name=startsAt]', '2026-12-05T09:00');
-  await admin.fill('#dlg [name=endsAt]', '2026-12-05T16:00');
+  await admin.fill('#dlg [name=startsAt]', `${today}T09:00`);
+  await admin.fill('#dlg [name=endsAt]', `${today}T18:00`);
   await admin.fill('#dlg [name=venueName]', '検証会場');
   await admin.fill('#dlg [name=venueAddress]', '埼玉県◯◯市1-2-3');
+  await admin.fill('#dlg [name=highlights]', '防水シート\n飯ごう\n寝袋');
   await admin.click('#dlg button[type=submit]');
   await admin.waitForSelector('#panel table');
   await admin.click('#panel >> text=公開する');
@@ -96,11 +107,34 @@ try {
   check(true, '進行コンソールから、その場で登録できる');
   await shot(con, 'mvp-03-console-add');
 
-  console.log('トップページ');
+  console.log('トップページ（開催の当日）');
+  // 2週間後の開催も公開しておく（月に2〜3回の開催）
+  const later = jstDay(14);
+  const made = await admin.evaluate(async (day) => {
+    const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+    const { id } = await post('/api/events', { title: '次回の競り（検証）', startsAt: `${day}T10:00`, endsAt: `${day}T17:00`, venueName: '検証会場', venueAddress: '埼玉県◯◯市1-2-3', notified: true });
+    return post(`/api/events/${id}/publish`, {});
+  }, later);
+  check(made.ok, '2つめの開催を公開できる');
+  const top = await open('/', { viewport: { width: 1280, height: 860 } });
+  await top.waitForSelector('#today:not([hidden])');
+  const hero = await top.textContent('#today');
+  check(hero.includes('本日開催') && hero.includes('12月の競り（検証）') && hero.includes('9:00 〜 18:00'), '開催の当日は、開催の名前と時間を大きく出す');
+  check(hero.includes('本日の目玉商品') && hero.includes('防水シート') && hero.includes('寝袋'), '本日の目玉商品を出す');
+  const go = await top.locator('.today__go').boundingBox();
+  check(go.height >= 72 && go.width >= 300, `「参加する」ボタンが大きい（${Math.round(go.width)}×${Math.round(go.height)}px）`);
+  const order = await top.evaluate(() => document.querySelector('#today').compareDocumentPosition(document.querySelector('.cal')) & Node.DOCUMENT_POSITION_FOLLOWING);
+  check(!!order, 'カレンダーは、当日の案内の下に出る');
+  check((await top.locator('#calBody td.is-event.is-today').count()) === 1, 'カレンダーの今日に、開催日の印が付く');
+  if (later.slice(0, 7) !== today.slice(0, 7)) await top.click('#calNext');
+  await top.waitForFunction(() => document.querySelector('#calList').textContent.includes('次回の競り（検証）'));
+  check(true, '2週間後の開催も、カレンダーに出る');
+  await shot(top, 'mvp-06-top-event-day', { fullPage: true });
   const phone = await open('/', devices['iPhone 13']);
   await phone.waitForSelector('#terms:not([hidden])');
   check((await phone.textContent('main')).includes('送料は含まれません'), '送料が含まれないことと、返品特約を表示する');
-  await shot(phone, 'mvp-04-top-phone');
+  check(await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'スマホの幅で、横にはみ出さない');
+  await shot(phone, 'mvp-04-top-phone', { fullPage: true });
 
   console.log('会員登録');
   await phone.click('#lead a[href="/register.html"]');

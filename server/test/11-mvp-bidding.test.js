@@ -47,14 +47,17 @@ async function setup() {
     assert.equal((await b.post('/api/register/complete', { kind: 'b2c', name, email: 'a@example.com', address: '東京都千代田区1-1', adult: true })).status, 200);
     return b;
   };
-  const publishEvent = async (title, startsAt = '2026-12-05T09:00') => {
-    const ev = { title, startsAt, endsAt: startsAt.slice(0, 11) + '18:00', venueName: '検証会場', venueAddress: '埼玉県◯◯市1-2-3', notified: true };
+  // 参加できるのは開催の当日だけなので、開催日は今日（日本時間）にする
+  const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+  const publishEvent = async (title, time = '09:00') => {
+    const startsAt = `${today}T${time}`;
+    const ev = { title, startsAt, endsAt: `${today}T23:59`, venueName: '検証会場', venueAddress: '埼玉県◯◯市1-2-3', notified: true };
     const { id } = (await staff.post('/api/events', ev)).json;
     assert.equal((await staff.post(`/api/events/${id}/publish`)).status, 200);
     return id;
   };
   const ws = async (b) => { const c = new Client(srv.url, undefined, { ack: false, headers: { cookie: b.cookie } }); await c.connect(); return c; };
-  return { ctx, srv, staff, register, publishEvent, ws, end: async () => { await srv.stop().catch(() => {}); cleanup(ctx); } };
+  return { ctx, srv, staff, register, publishEvent, ws, today, end: async () => { await srv.stop().catch(() => {}); cleanup(ctx); } };
 }
 
 test('参加手続き: 受け取り方法と支払方法の両方に答えるまで入れない。参加番号は開催ごとに1から（FR-MODE-005、FR-NUM-001）', async () => {
@@ -65,7 +68,7 @@ test('参加手続き: 受け取り方法と支払方法の両方に答えるま
     assert.equal((await browser(t.srv.httpUrl).get('/api/participation')).status, 401, 'ログインが要る');
     assert.equal((await a.get('/api/participation')).json.event, null);
     assert.equal((await a.post('/api/join', { receive: 'ship', payment: 'transfer' })).status, 409, '開催がなければ、参加できない');
-    await assert.rejects(t.ws(a), /開催中の競りはありません/);
+    await assert.rejects(t.ws(a), /本日の開催はありません/);
 
     await t.publishEvent('12月の競り');
     const before = (await a.get('/api/participation')).json;
@@ -129,7 +132,7 @@ test('開催が変わると、参加手続きも参加番号も No. も、その
   try {
     const a = await t.register('09055550001', '検証 一郎');
     const b = await t.register('09055550002', '検証 二郎');
-    const first = await t.publishEvent('12月前半の競り', '2026-12-05T09:00');
+    const first = await t.publishEvent('12月前半の競り', '09:00');
     await a.post('/api/join', { receive: 'ship', payment: 'transfer' });
     await b.post('/api/join', { receive: 'ship', payment: 'transfer' });
     const auctioneer = await connect(t.srv, t.ctx.tokens.auctioneer);
@@ -138,9 +141,9 @@ test('開催が変わると、参加手続きも参加番号も No. も、その
     assert.equal((await createLot(auctioneer, 1000)).lotNo, 2);
 
     // 前の開催の公開を取り下げ、次の開催を公開する（開催終了の操作は MVP の 5）
-    const ev = { title: '12月前半の競り', startsAt: '2026-12-05T09:00', endsAt: '2026-12-05T18:00', venueName: '検証会場', venueAddress: '埼玉県◯◯市1-2-3', notified: false };
+    const ev = { title: '12月前半の競り', startsAt: `${t.today}T09:00`, endsAt: `${t.today}T23:59`, venueName: '検証会場', venueAddress: '埼玉県◯◯市1-2-3', notified: false };
     assert.equal((await t.staff.post(`/api/events/${first}`, ev)).status, 200);
-    await t.publishEvent('12月後半の競り', '2026-12-19T09:00');
+    await t.publishEvent('12月後半の競り', '10:00');
     const p = (await b.get('/api/participation')).json;
     assert.deepEqual([p.event.title, p.joined, p.receive], ['12月後半の競り', false, null], '受け取り方法は、もう一度聞く');
     assert.equal((await b.post('/api/join', { receive: 'pickup', payment: 'transfer' })).json.paddle, 1, '参加番号は、開催ごとに1から');
@@ -181,4 +184,27 @@ test('以前の版のデータベースを開いても、入札の記録を保�
     assert.throws(() => store.db.prepare("INSERT INTO members (paddle_no, name, token_hash, event_id, account_id) VALUES (3, 'y', 'h3', 1, 2)").run(), /UNIQUE/);
     store.db.close();
   } finally { cleanup(ctx); }
+});
+
+test('開催の予定: 公開中の開催だけを出す。当日でなければ、参加手続きはできない', async () => {
+  const t = await setup();
+  try {
+    const a = await t.register('09055550001', '検証 一郎');
+    const anon = browser(t.srv.httpUrl);
+    const future = { title: '来年の競り', startsAt: '2099-01-10T09:00', endsAt: '2099-01-10T18:00', venueName: '検証会場', venueAddress: '埼玉県◯◯市1-2-3', highlights: '飯ごう\n防水シート', notified: true };
+    const { id } = (await t.staff.post('/api/events', future)).json;
+    assert.equal((await anon.get('/api/schedule')).json.events.length, 0, '公開の前は、予定に出ない');
+    await t.staff.post(`/api/events/${id}/publish`);
+    const s1 = (await anon.get('/api/schedule')).json;
+    assert.equal(s1.today, t.today);
+    assert.equal(s1.todayEvent, null);
+    assert.deepEqual(s1.events.map((e) => [e.title, e.startsAt, e.highlights]), [['来年の競り', '2099-01-10T09:00', '飯ごう\n防水シート']]);
+    assert.equal(JSON.stringify(s1).includes('"id"'), false);
+    assert.equal((await a.post('/api/join', { receive: 'ship', payment: 'transfer' })).status, 409, '開催の当日でなければ、参加できない');
+    await t.publishEvent('本日の競り');
+    const s2 = (await anon.get('/api/schedule')).json;
+    assert.equal(s2.todayEvent.title, '本日の競り');
+    assert.equal(s2.events.length, 2);
+    assert.equal((await a.post('/api/join', { receive: 'ship', payment: 'transfer' })).json.paddle, 1);
+  } finally { await t.end(); }
 });

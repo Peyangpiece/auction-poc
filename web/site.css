@@ -54,8 +54,36 @@ select.input { appearance: auto; }
 .facts dd { overflow-wrap: anywhere; }
 .banner { border-top: 3px solid var(--red); background: var(--ground-alt); padding: 12px 16px; margin-bottom: 24px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 
-/* ---- トップページ */
-.lead { display: grid; gap: 12px; margin-bottom: 40px; }
+/* ---- トップページ: 当日の案内（表示板と同じ、紺の地に赤い線）とカレンダー */
+.today { background: var(--board); color: var(--board-ink); border-top: 3px solid var(--red); padding: 32px 24px; display: grid; gap: 12px; margin-bottom: 40px; }
+.today__tag { font-size: 14px; font-weight: 700; letter-spacing: .2em; color: var(--board-ink-2); }
+.today h2 { color: var(--board-ink); font-size: 30px; letter-spacing: .06em; overflow-wrap: anywhere; }
+.today__time { font-size: 44px; line-height: 1.1; }
+.today h3 { font-size: 13px; letter-spacing: .12em; color: var(--board-ink-2); margin-top: 12px; padding-top: 16px; border-top: 1px solid var(--board-line); }
+.today ul { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 4px 24px; font-size: 17px; font-weight: 700; }
+.today__go { background: #fff; border-color: #fff; color: var(--navy); min-height: 72px; font-size: 22px; margin-top: 16px; }
+.today__go:hover { background: var(--board-ink-2); border-color: var(--board-ink-2); color: var(--navy-dk); }
+.cal { margin-bottom: 40px; }
+.cal__head { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; margin-bottom: 12px; }
+.cal__head h2 { font-size: 20px; letter-spacing: .08em; color: var(--ink); }
+.cal__nav { display: flex; align-items: center; gap: 8px; }
+.cal__nav p { font-size: 20px; min-width: 7.5em; text-align: center; }
+.cal__nav .btn { min-height: 44px; padding: 4px 14px; font-size: 14px; }
+.cal__grid { table-layout: fixed; border-top: 1px solid var(--edge); }
+.cal__grid th { text-align: center; padding: 8px 0; font-size: 13px; color: var(--ink-2); border-bottom: 1px solid var(--line); }
+.cal__grid td { height: 72px; padding: 6px 2px; text-align: center; vertical-align: top; border-bottom: 1px solid var(--line); overflow-wrap: normal; }
+.cal__day { display: block; font-size: 17px; font-weight: 500; line-height: 28px; width: 28px; margin: 0 auto; border-radius: 50%; }
+.cal__grid .is-past .cal__day { color: var(--ink-2); }
+/* 今日は輪郭、開催日は塗り。色だけでなく形でも分かる */
+.cal__grid .is-today .cal__day { box-shadow: 0 0 0 2px var(--red); }
+.cal__grid .is-event .cal__day { background: var(--action); color: var(--action-ink); font-weight: 700; }
+.cal__mark { display: block; margin-top: 4px; font-family: var(--digits); font-size: 12px; font-weight: 600; color: var(--action); letter-spacing: 0; }
+.cal__legend { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); margin: 12px 0; }
+.cal__key { width: 14px; height: 14px; border-radius: 50%; background: var(--action); }
+.cal__list > li { display: grid; grid-template-columns: 7em 8em minmax(0, 1fr); gap: 4px 16px; padding: 12px 0; align-items: baseline; }
+.cal__list b { font-size: 17px; }
+.cal__list .cal__none { display: block; color: var(--ink-2); }
+.lead { display: grid; gap: 12px; margin-bottom: 40px; max-width: 520px; }
 .lead .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .lead .btn { flex: 1 1 160px; }
 .terms { border-top: 1px solid var(--line); padding-top: 24px; display: grid; gap: 16px; font-size: 14px; color: var(--ink-2); }
@@ -81,6 +109,17 @@ td.n { font-family: var(--digits); font-variant-numeric: tabular-nums; white-spa
 .secret { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 14px; letter-spacing: 0; overflow-wrap: anywhere; user-select: all; background: var(--ground-alt); padding: 8px 12px; border-radius: var(--r); }
 .narrowcol, #login { max-width: 520px; }
 @media (max-width: 560px) {
+  .today { padding: 24px 16px; margin-left: -16px; margin-right: -16px; }
+  .today h2 { font-size: 24px; }
+  .today__time { font-size: 36px; }
+  .cal__grid td { height: 60px; }
+  .cal__mark { font-size: 11px; }
+  .cal__list > li { grid-template-columns: 6.5em minmax(0, 1fr); }
+  .cal__list > li span:last-child { grid-column: 1 / -1; }
+  .cal__nav { width: 100%; justify-content: space-between; }
+  .cal__nav p { min-width: 0; font-size: 18px; }
+  .cal__nav .btn { padding: 4px 10px; }
+
   .grid2 { grid-template-columns: minmax(0, 1fr); }
   .pagehead h1 { font-size: 22px; }
   .brand__service { display: none; }

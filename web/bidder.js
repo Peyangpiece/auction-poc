@@ -381,7 +381,7 @@ if (!token) (async () => {
   const p = await getJson('/api/participation');
   if (p.status === 401) return location.replace('/login.html?next=bidder');
   if (p.status !== 200) { $('gateMsg').textContent = p.message ?? '開けませんでした。開き直してください'; return; }
-  if (!p.event) { $('gateMsg').textContent = '開催中の競りはありません。'; return; }
+  if (!p.event) { $('gateMsg').textContent = '本日の開催はありません。'; return; }
   if (p.joined) return showPaddle(p.event.title, p.paddle);
   // 参加手続き: 受け取り方法と支払方法を、どちらも選ばれていない状態で聞く（FR-MODE-005）
   $('gateEvent').textContent = p.event.title;

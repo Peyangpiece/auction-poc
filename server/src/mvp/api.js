@@ -31,6 +31,8 @@ const bad = (message, extra) => new HttpError(400, message, extra);
 export function createApi({ store, config, nowMs }) {
   const db = store.db;
   db.exec(MVP_SCHEMA);
+  // 以前の版のデータベースに、後から足した列を加える
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'highlights'").get()) db.exec("ALTER TABLE events ADD COLUMN highlights TEXT NOT NULL DEFAULT ''");
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
 
   const notifier = new Notifier(
@@ -349,10 +351,10 @@ export function createApi({ store, config, nowMs }) {
   });
 
   // ------------------------------------------------------------ 開催（FR-EVT-001・002。主催者管理者だけ）
-  const eventView = (e) => ({ id: e.id, title: e.title, startsAt: e.starts_at, endsAt: e.ends_at, venueName: e.venue_name, venueAddress: e.venue_address, notified: !!e.notified, status: e.status });
+  const eventView = (e) => ({ id: e.id, title: e.title, startsAt: e.starts_at, endsAt: e.ends_at, venueName: e.venue_name, venueAddress: e.venue_address, highlights: e.highlights, notified: !!e.notified, status: e.status });
   function eventInput(body) {
     const text = (v, max = 200) => String(v ?? '').trim().slice(0, max);
-    const e = { title: text(body.title), startsAt: text(body.startsAt, 16), endsAt: text(body.endsAt, 16), venueName: text(body.venueName), venueAddress: text(body.venueAddress, 300), notified: body.notified === true ? 1 : 0 };
+    const e = { title: text(body.title), startsAt: text(body.startsAt, 16), endsAt: text(body.endsAt, 16), venueName: text(body.venueName), venueAddress: text(body.venueAddress, 300), highlights: text(body.highlights, 1000), notified: body.notified === true ? 1 : 0 };
     const isTime = (t) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(t);
     if (!e.title) throw bad('開催の名前を入力してください');
     if (!isTime(e.startsAt) || !isTime(e.endsAt) || e.endsAt <= e.startsAt) throw bad('開始と終了の日時を正しく入力してください');
@@ -366,7 +368,7 @@ export function createApi({ store, config, nowMs }) {
   route('POST', '/api/events', (ctx, body) => {
     needStaff(ctx, 'admin');
     const e = eventInput(body);
-    const info = db.prepare('INSERT INTO events (title, starts_at, ends_at, venue_name, venue_address, notified, created_at) VALUES (?,?,?,?,?,?,?)').run(e.title, e.startsAt, e.endsAt, e.venueName, e.venueAddress, e.notified, nowMs());
+    const info = db.prepare('INSERT INTO events (title, starts_at, ends_at, venue_name, venue_address, highlights, notified, created_at) VALUES (?,?,?,?,?,?,?,?)').run(e.title, e.startsAt, e.endsAt, e.venueName, e.venueAddress, e.highlights, e.notified, nowMs());
     audit(ctx, 'event.create', { target: `event:${info.lastInsertRowid}`, after: e });
     return { ok: true, id: Number(info.lastInsertRowid) };
   });
@@ -377,7 +379,7 @@ export function createApi({ store, config, nowMs }) {
     const e = eventInput(body);
     // 届出済みの印を外したら、公開も取り下げる（印のない開催は公開できない。FR-EVT-002）
     const status = e.notified ? before.status : 'preparing';
-    db.prepare('UPDATE events SET title=?, starts_at=?, ends_at=?, venue_name=?, venue_address=?, notified=?, status=? WHERE id=?').run(e.title, e.startsAt, e.endsAt, e.venueName, e.venueAddress, e.notified, status, id);
+    db.prepare('UPDATE events SET title=?, starts_at=?, ends_at=?, venue_name=?, venue_address=?, highlights=?, notified=?, status=? WHERE id=?').run(e.title, e.startsAt, e.endsAt, e.venueName, e.venueAddress, e.highlights, e.notified, status, id);
     audit(ctx, 'event.update', { target: `event:${id}`, before: eventView(before), after: { ...e, status } });
     return { ok: true };
   });
@@ -392,8 +394,21 @@ export function createApi({ store, config, nowMs }) {
   });
 
   // ------------------------------------------------------------ 参加手続き（FR-MODE-005、FR-SHIP-007、FR-PAY-009、FR-NUM-001）
-  /** いまの開催: 公開中の開催のうち、開始がいちばん早いもの【前提】。開催終了（FR-EVT-003）は MVP の 5 で足す */
-  const activeEvent = () => db.prepare("SELECT * FROM events WHERE status = 'published' ORDER BY starts_at, id LIMIT 1").get() ?? null;
+  /** 日本時間の、今日の日付（例: 2026-12-05） */
+  const todayJst = () => new Date(nowMs() + 9 * HOUR).toISOString().slice(0, 10);
+  /**
+   * いまの開催: 公開中の開催のうち、開催日が今日（日本時間）のもの【前提】。同じ日に2つあれば、開始が早いほう。
+   * 開催は月に2〜3回（発注者の決定）。参加手続きと入札は、開催の当日だけ受け付ける。
+   */
+  const activeEvent = () => db.prepare("SELECT * FROM events WHERE status = 'published' AND substr(starts_at, 1, 10) = ? ORDER BY starts_at, id LIMIT 1").get(todayJst()) ?? null;
+  // 開催の予定（トップページのカレンダー用）。公開中の開催だけ。だれでも見られる
+  route('GET', '/api/schedule', () => {
+    const today = todayJst();
+    const pub = (e) => ({ title: e.title, startsAt: e.starts_at, endsAt: e.ends_at, venueName: e.venue_name, venueAddress: e.venue_address, highlights: e.highlights });
+    const events = db.prepare("SELECT * FROM events WHERE status = 'published' AND substr(starts_at, 1, 10) >= ? ORDER BY starts_at, id LIMIT 200").all(today.slice(0, 8) + '01');
+    const now = activeEvent();
+    return { today, todayEvent: now ? pub(now) : null, events: events.map(pub) };
+  });
   const participant = (accountId, eventId) => db.prepare('SELECT id, paddle_no, name, account_id, event_id, receive, payment FROM members WHERE account_id = ? AND event_id = ?').get(accountId, eventId) ?? null;
   const RECEIVE = { pickup: '現地受け取り', ship: '配送' };
   route('GET', '/api/participation', (ctx) => {
@@ -409,7 +424,7 @@ export function createApi({ store, config, nowMs }) {
   route('POST', '/api/join', (ctx, body) => {
     const member = needMember(ctx);
     const event = activeEvent();
-    if (!event) throw new HttpError(409, '開催中の競りはありません');
+    if (!event) throw new HttpError(409, '本日の開催はありません');
     const errors = {};
     if (!RECEIVE[body.receive]) errors.receive = '受け取り方法を選んでください';
     // オンライン参加の人は、銀行振込だけを選べる（FR-PAY-002）。当日現金は、会場参加（MVP の 4）で選べるようにする
@@ -433,7 +448,7 @@ export function createApi({ store, config, nowMs }) {
     loadSession(ctx);
     if (!ctx.member) return { code: 'LOGIN', message: 'ログインしてください' };
     const event = activeEvent();
-    if (!event) return { code: 'NO_EVENT', message: '開催中の競りはありません' };
+    if (!event) return { code: 'NO_EVENT', message: '本日の開催はありません' };
     const p = participant(ctx.member.id, event.id);
     if (!p) return { code: 'NOT_JOINED', message: '参加手続きを済ませてください' };
     return { member: p };

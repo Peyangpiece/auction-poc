@@ -22,12 +22,38 @@
     <nav id="nav" aria-label="メニュー"></nav>
   </div>
 </header>
-<main class="narrow">
-<div class="pagehead">
-  <h1>ライブオークション</h1>
-  <hr class="rule">
-</div>
-<div class="lead" id="lead">
+<main>
+<h1 class="sr-only">ライブオークション</h1>
+<section class="today" id="today" hidden aria-labelledby="todayTitle">
+  <p class="today__tag">本日開催</p>
+  <h2 class="dyn" id="todayTitle"></h2>
+  <p class="today__time digits" id="todayTime"></p>
+  <p class="dyn" id="todayVenue"></p>
+  <div id="todayItems" hidden>
+    <h3>本日の目玉商品</h3>
+    <ul class="dyn" id="todayList"></ul>
+  </div>
+  <a class="btn btn-lg today__go" href="/bidder.html">参加する</a>
+</section>
+
+<section class="cal" aria-labelledby="calTitle">
+  <div class="cal__head">
+    <h2 id="calTitle">開催カレンダー</h2>
+    <div class="cal__nav">
+      <button class="btn" type="button" id="calPrev" aria-label="前の月">前の月</button>
+      <p class="digits" id="calMonth" aria-live="polite"></p>
+      <button class="btn" type="button" id="calNext" aria-label="次の月">次の月</button>
+    </div>
+  </div>
+  <table class="cal__grid">
+    <thead><tr><th scope="col">日</th><th scope="col">月</th><th scope="col">火</th><th scope="col">水</th><th scope="col">木</th><th scope="col">金</th><th scope="col">土</th></tr></thead>
+    <tbody id="calBody"></tbody>
+  </table>
+  <p class="cal__legend"><span class="cal__key"></span>開催日</p>
+  <ul class="rows cal__list dyn" id="calList"></ul>
+</section>
+
+<div class="lead" id="lead" hidden>
   <p>参加には、会員登録が必要です。</p>
   <div class="actions">
     <a class="btn btn-primary btn-lg" href="/register.html">会員登録</a>

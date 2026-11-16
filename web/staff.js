@@ -49,13 +49,13 @@ async function eventsPanel() {
     act(smallBtn('編集', () => eventDialog(e)),
       e.status !== 'published' && smallBtn('公開する', async () => { const r = await api('POST', `/api/events/${e.id}/publish`); if (!r.ok) alertLine(r.message); else show('events'); }, 'btn-primary'))));
   return [
-    el('div', { class: 'toolbar' }, el('p', { class: 'note', text: '公安委員会への届出済みの印がない開催は、公開できません。' }), smallBtn('開催を作る', () => eventDialog(null), 'btn-primary')),
+    el('div', { class: 'toolbar' }, el('p', { class: 'note', text: '公開した開催が、トップページのカレンダーに出ます。届出済みの印がない開催は、公開できません。' }), smallBtn('開催を作る', () => eventDialog(null), 'btn-primary')),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['名前', '日時', '会場', '届出', '状態', ''], rows, '開催はまだありません。'),
   ];
 }
 function eventDialog(e) {
-  const v = e ?? { title: '', startsAt: '', endsAt: '', venueName: '', venueAddress: '', notified: false };
+  const v = e ?? { title: '', startsAt: '', endsAt: '', venueName: '', venueAddress: '', highlights: '', notified: false };
   const form = el('form', { class: 'form', novalidate: true },
     field('開催の名前', 'title', { value: v.title, required: true }),
     el('div', { class: 'grid2' },
@@ -63,6 +63,7 @@ function eventDialog(e) {
       field('終了', 'endsAt', { type: 'datetime-local', value: v.endsAt, required: true })),
     field('会場の名称', 'venueName', { value: v.venueName, required: true }),
     field('会場の住所', 'venueAddress', { value: v.venueAddress, required: true }),
+    field('目玉商品', 'highlights', { value: v.highlights, rows: 4 }, '1行に1つ。開催の当日、トップページに「本日の目玉商品」として表示します'),
     el('label', { class: 'check' }, el('input', { type: 'checkbox', name: 'notified', value: '1', checked: v.notified }), el('span', { text: '公安委員会への届出が済んでいる' })),
     msgLine(),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '保存する' }), closeBtn()));
