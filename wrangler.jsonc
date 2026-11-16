@@ -4,8 +4,6 @@
   "main": "cloudflare/worker.js",
   "compatibility_date": "2026-11-16",
   "workers_dev": true,
-  // 会社のドメインのサブドメインでも開けるようにする（DNS の設定は、配るときに Cloudflare が自動で作る）
-  "routes": [{ "pattern": "seri.news3r.co.jp", "custom_domain": true }],
   "observability": { "enabled": true },
   "vars": {
     // 1 = お試し用（認証番号を画面に出す。今日の開催を自動で作る）。本番の運用では使わない
