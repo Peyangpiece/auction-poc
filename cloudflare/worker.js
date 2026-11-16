@@ -1,10 +1,20 @@
 // Cloudflare の入口（Worker）。届いた通信を、そのまま、アプリの入ったコンテナ（1台）へ渡す。
 // 画面・API・WebSocket（入札）のすべてが、ここを通る。配り方は docs/03 の 32 章。
-import { DurableObject } from 'cloudflare:workers';
+import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
+import { handleStore } from './store.js';
 
 const PORT = 8080;
-// 通信が途絶えてから、コンテナを止めるまでの時間。止まると、中のデータは消える（お試し用のため）
+// コンテナの中のアプリが、データの保存先（R2）を呼ぶときの名前。外のインターネットには出ない
+const STORE_HOST = 'store.internal';
+// 通信が途絶えてから、コンテナを止めるまでの時間。止まっても、データは R2 から戻る
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+
+// コンテナからの「保存先」あての通信を受けて、R2 に出し入れする
+export class DataStore extends WorkerEntrypoint {
+  fetch(request) {
+    return handleStore(request, this.env.DATA);
+  }
+}
 
 export class AuctionApp extends DurableObject {
   starting;
@@ -40,12 +50,15 @@ export class AuctionApp extends DurableObject {
         POC_TRUST_PROXY: '1',
         POC_COOKIE_SECURE: '1',
         POC_IVS_MODE: 'always-live',
+        POC_PERSIST_URL: `http://${STORE_HOST}`,
         // お試し用: 認証番号を画面に出し、今日の開催を自動で作る（SMS がまだつながっていないため）
         ...(demo ? { POC_DEV_SHOW_CODES: '1', POC_SETUP_ARGS: '--with-event' } : {}),
         // 管理者（admin）の最初のパスワード。ソースには書かず、wrangler secret put ADMIN_PASSWORD で入れる
         ...(this.env.ADMIN_PASSWORD ? { POC_ADMIN_PASSWORD: this.env.ADMIN_PASSWORD } : {}),
       };
-      container.start({ image: container.images.base, instance: this.env.INSTANCE_TYPE || 'basic', enableInternet: false, env });
+      // コンテナごとに、登録し直す決まり
+      await container.interceptOutboundHttp(STORE_HOST, this.ctx.exports.DataStore);
+      container.start({ image: container.images.base, instance: this.env.INSTANCE_TYPE || 'standard-1', enableInternet: false, env });
     }
     await container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS);
     const port = container.getTcpPort(PORT);
@@ -64,6 +77,10 @@ export class AuctionApp extends DurableObject {
 export default {
   // データベースが1つなので、必ず同じ1台（main）へ渡す
   fetch(request, env) {
+    // 管理者のパスワードが入るまでは、動かさない（だれも入れない管理者が、消えないデータとして残るのを防ぐ）
+    if (!env.ADMIN_PASSWORD || env.ADMIN_PASSWORD.length < 12) {
+      return new Response('準備中です。管理者の最初のパスワードを入れてください: npx wrangler secret put ADMIN_PASSWORD（12文字以上）', { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    }
     return env.AUCTION_APP.getByName('main').fetch(request);
   },
 };

@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { loadConfig } from './config.js';
 import { openDb, hashToken } from './db.js';
+import { createSaver } from './persist.js';
 import { Metrics } from './metrics.js';
 import { StreamControl } from './stream.js';
 import { Auction } from './auction.js';
@@ -15,6 +16,8 @@ import { createApi } from './mvp/api.js';
 
 const config = loadConfig();
 const store = openDb(config.dbPath);
+// 外の保存先への保存（Cloudflare など、置き場が消える環境だけ）
+const saver = config.persistUrl ? createSaver({ db: store.db, config }) : null;
 const metrics = new Metrics(config.metricsDir, { level: config.metricsLevel, fileMb: config.metricsFileMb, maxMb: config.metricsMaxMb });
 
 // ---------------------------------------------------------------- 接続の管理
@@ -157,7 +160,7 @@ const server = http.createServer((req, res) => {
     let db = true;
     try { store.db.prepare('SELECT 1').get(); } catch { db = false; }
     res.statusCode = db ? 200 : 503;
-    return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, agent: stream.view().agentConnected }));
+    return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, agent: stream.view().agentConnected, ...(saver ? { persist: saver.status() } : {}) }));
   }
   if (url.pathname === '/hooks/ivs' && req.method === 'POST') return handleEventBridge(req, res);
   if (url.pathname.startsWith('/api/')) return api.handle(req, res, url);
@@ -505,6 +508,7 @@ const sysTimer = setInterval(() => {
 sysTimer.unref();
 
 server.listen(config.port, config.host, () => {
+  saver?.start();
   console.log(`[server] listening on ${config.host}:${server.address().port} ivsMode=${config.ivsMode} db=${config.dbPath}`);
   console.log(`[server] metrics -> ${metrics.file ?? '（記録しない）'}`);
 });
@@ -515,6 +519,8 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     for (const c of clients) c.ws.close(1001, 'server shutdown');
     server.close();
     await metrics.close();
+    // 止まる前に、まだ送っていない分を保存先へ送る
+    if (saver) { saver.stop(); await saver.flush(); }
     store.db.close();
     process.exit(0);
   });

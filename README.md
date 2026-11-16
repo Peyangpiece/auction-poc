@@ -129,4 +129,4 @@ node tools/aggregate.js --label P2-6
 
 ## Cloudflare（workers.dev）で試す
 
-`npx wrangler login` → `npx wrangler deploy` → `npx wrangler secret put ADMIN_PASSWORD`。Docker が要る。**データは残らない（お試し専用）。** くわしくは `docs/03-PoC報告書.md` の 32 章。
+GitHub に秘密の値を3つ入れて `deploy/cloudflare` ブランチへ push すると、配られる。データは R2 に自動で保存され、起動のたびに戻る。くわしくは `docs/03-PoC報告書.md` の 32 章。

@@ -16,5 +16,5 @@ ENV PORT=8080 HOST=0.0.0.0 POC_DATA_DIR=/app/data
 EXPOSE 8080
 VOLUME ["/app/data"]
 HEALTHCHECK --interval=30s --timeout=5s CMD node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-# 起動のたびに、最初の主催者管理者がいなければ作る（すでにいれば何もしない）。そのあと、サーバーを動かす
-CMD ["sh", "-c", "node tools/setup-first.js ${POC_SETUP_ARGS:-} && exec node server/src/index.js"]
+# 起動のたびに、外の保存先があればデータを戻し（POC_PERSIST_URL）、最初の主催者管理者がいなければ作る（すでにいれば何もしない）。そのあと、サーバーを動かす
+CMD ["sh", "-c", "node tools/persist-restore.js && node tools/setup-first.js ${POC_SETUP_ARGS:-} && exec node server/src/index.js"]

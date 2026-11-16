@@ -81,6 +81,10 @@ export function loadConfig(env = process.env) {
     trustProxy: env.POC_TRUST_PROXY === '1',
     // お試し用: SMS の認証番号と、スタッフの認証コードを、画面に出す（送信サービスをつなぐ前に、動きを確かめるため）。本番では必ず 0
     devShowCodes: env.POC_DEV_SHOW_CODES === '1',
+    // データの置き場が消える環境（Cloudflare のコンテナなど）で、外の保存先へ保存・復元する（server/src/persist.js）。空なら使わない
+    persistUrl: (env.POC_PERSIST_URL || '').replace(/\/$/, ''),
+    // 保存の間隔。書き込みがあったときだけ送る
+    persistIntervalMs: num(env.POC_PERSIST_INTERVAL_MS, 2000),
 
     // ---- 会員・スタッフ（MVP の 1・2）
     // クッキーに Secure を付ける（HTTPS だけで送る）。本番は必ず 1。手前のプロキシが x-forwarded-proto: https を付ける場合は自動で付く

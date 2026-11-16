@@ -1,0 +1,36 @@
+# Cloudflare（workers.dev）へ配る。deploy/cloudflare ブランチへ push したとき、または手動で動く。
+# 先に、GitHub の Settings → Secrets and variables → Actions に、次の3つを入れておく（値は、ここにもチャットにも書かない）:
+#   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / ADMIN_PASSWORD（管理者 admin の最初のパスワード。12文字以上）
+name: deploy-cloudflare
+on:
+  push:
+    branches: [deploy/cloudflare]
+  workflow_dispatch:
+
+concurrency: deploy-cloudflare
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      WRANGLER: npx --yes wrangler@4.163.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 3つの秘密の値が入っているかを確かめる
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN が入っていません"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID が入っていません"; exit 1; }
+          test "${#ADMIN_PASSWORD}" -ge 12 || { echo "ADMIN_PASSWORD を、12文字以上で入れてください"; exit 1; }
+      - name: データの保存先（R2 のバケット）を作る（すでにあれば、そのまま）
+        run: $WRANGLER r2 bucket create reiwa-no-seri-data || echo "すでにあるか、作れませんでした（次の段で分かる）"
+      - name: コンテナを組み立てて、配る
+        run: $WRANGLER deploy
+      - name: 管理者の最初のパスワードを入れる
+        run: printf '%s' "$ADMIN_PASSWORD" | $WRANGLER secret put ADMIN_PASSWORD
