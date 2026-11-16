@@ -63,6 +63,7 @@ function writePdf(file, c) {
     doc.registerFont('M', FONT).registerFont('B', FONT_BOLD);
     doc.lineWidth(0.9).strokeColor('#000').fillColor('#000');
     const L = 35, R = 560, PAD = 7, NUM_R = 6.7;
+    const LT = L + 0.2; // 左の文字の始まり（線は 35 ちょうど。文字は、原本と画像で比べて 0.2 だけ右）
     /** 文字を置く。top は、文字の上端の位置（原本から読み取った値） */
     const T = (str, x, top, size, { font = 'M', align = 'left', width = null, underline = false } = {}) => {
       doc.font(font).fontSize(size);
@@ -73,26 +74,26 @@ function writePdf(file, c) {
     };
     const right = (str, edge, top, size, opt = {}) => { doc.font(opt.font ?? 'M').fontSize(size); return T(str, edge - doc.widthOfString(str), top, size, opt); };
 
-    right(c.date, R, 28.7, 10);
-    right(`請求番号: ${c.number}`, R, 50.7, 10);
+    right(c.date, R + 0.2, 28.7, 10);
+    right(`請求番号: ${c.number}`, R + 0.2, 50.9, 10);
     doc.font('M').fontSize(24);
-    T(c.title, (595.28 - doc.widthOfString(c.title)) / 2, 81.6, 24);
+    T(c.title, (595.28 - doc.widthOfString(c.title)) / 2, 81.4, 24);
 
     // 左: 宛先（下線つき）・件名・ご請求金額（下線つき）・期限
-    const nameW = T(`${c.to.name} 様`, L, 125.6, 14);
+    const nameW = T(`${c.to.name} 様`, L, 125.7, 14);
     // 宛名の下線: 原本と同じ高さ（139.29）で、宛名の文字の幅ちょうど
     doc.moveTo(L, 139.29).lineTo(L + nameW, 139.29).stroke();
-    T(`件名 : ${c.subject}`, L, 158, 9.5, { width: 270 });
-    T('下記のとおりご請求申し上げます。', L, 180, 9.5);
-    T('ご請求金額', L, 205.1, 12);
+    T(`件名 : ${c.subject}`, LT, 158, 9.5, { width: 270 });
+    T('下記のとおりご請求申し上げます。', LT, 180, 9.5);
+    T('ご請求金額', LT, 205.1, 12);
     right(`¥ ${num(c.total)} -`, 264, 205.1, 12);
     doc.moveTo(L, 220.31).lineTo(265.1, 220.31).stroke();
-    T(c.due, L, 233.3, 9.5, { width: 270 });
+    T(c.due, LT, 233.3, 9.5, { width: 270 });
 
     // 右: 発行者（会社のシンボル、名称、住所、電話・メール・登録番号、印鑑）
     const rx = 320;
     doc.image(LOGO, 320.5, 125.8, { width: 60 });
-    T(c.issuer.name, rx, 193.1, 10.5);
+    T(c.issuer.name, rx, 192.9, 10.5);
     let ry = 218.4;
     for (const line of c.issuer.address) { T(line, rx, ry, 9); ry += 11.5; }
     ry += 10.8; // 住所と連絡先のあいだを、1行あける
@@ -127,7 +128,7 @@ function writePdf(file, c) {
     for (const [label, value] of [['小計', num(c.total)], [c.taxLabel, c.taxValue], ['合計', num(c.total)]]) {
       doc.rect(col[1], y, R - col[1], H).stroke();
       doc.moveTo(col[3], y).lineTo(col[3], y + H).stroke();
-      T(label, col[1] + 7.3, y + 7.9, 9.5);
+      T(label, col[1] + 7.1, y + 7.75, 9.5);
       right(value, col[4] - NUM_R, y + 7.9, 9.5);
       y += H;
     }
@@ -135,7 +136,7 @@ function writePdf(file, c) {
     if (y > 770) { doc.addPage(); y = 40; }
     if (c.bank) {
       T('お振込先：', L, y, 10, { font: 'B' });
-      T(c.bank, L, y + 12.6, 10, { width: R - L });
+      T(c.bank, LT, y + 12.6, 10, { width: R - L });
       y += 34;
     }
     for (const note of c.notes) { T(note, L, y, 9, { width: R - L }); y = doc.y + 3; }
