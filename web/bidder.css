@@ -165,3 +165,6 @@ details dd { overflow-wrap: anywhere; }
 .pick label.off { color: var(--ink-2); cursor: not-allowed; border-style: dashed; }
 .pick small { font-size: 12px; font-weight: 400; flex-basis: 100%; padding-left: 24px; }
 #joinTerms { white-space: pre-line; }
+#gateWait { font-weight: 700; color: var(--action); }
+#gateWait:empty { display: none; }
+.pick small[hidden] { display: none; }

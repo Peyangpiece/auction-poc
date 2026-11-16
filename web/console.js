@@ -200,7 +200,7 @@ function onMessage(msg, at) {
     }
     case 'comment': S.comments.push(msg); if (S.comments.length > 30) S.comments.shift(); renderComments(); break;
     case 'comment_hidden': S.comments = S.comments.filter((c) => c.id !== msg.id); renderComments(); break;
-    case 'presence': $('presence').textContent = msg.members; break;
+    case 'presence': $('presence').textContent = msg.members; $('presenceSplit').textContent = `（会場 ${msg.venue}・オンライン ${msg.online}）`; break;
     case 'error': log('エラー: ' + msg.message); break;
   }
 }

@@ -53,7 +53,7 @@ try {
   await admin.click('#loginForm button[type=submit]');
   await admin.waitForSelector('#tabs button');
   check((await admin.textContent('#who')).includes('主催者管理者'), '主催者管理者としてログインできる');
-  check((await admin.locator('#tabs button').count()) === 6, '主催者管理者には、6つの画面が出る（商品の事前登録はない）');
+  check((await admin.locator('#tabs button').count()) === 7, '主催者管理者には、7つの画面が出る');
 
   // 設定
   await admin.click('#tabs [data-key=settings]');
@@ -96,7 +96,7 @@ try {
   const auct = await staffLogin(auctAcc);
   await auct.click('#loginForm button[type=submit]');
   await auct.waitForSelector('#tabs button');
-  check((await auct.locator('#tabs button').count()) === 1, '進行役の管理画面には、SMS の制限だけが出る');
+  check((await auct.locator('#tabs button').count()) === 2, '進行役の管理画面には、受付と SMS の制限だけが出る');
 
   console.log('その場での登録（進行コンソール）');
   const con = await open(`/console.html?t=${sys.tokens.auctioneer}`, { viewport: { width: 1280, height: 860 } });
@@ -211,9 +211,72 @@ try {
   check(true, '登録した会員が、参加番号で入札できる');
   await shot(phone, 'mvp-15-bid');
 
+  console.log('会場参加（QR コード → 会員登録 → 参加手続き → 来場確認）');
+  await admin.click('#tabs [data-key=reception]');
+  await admin.waitForSelector('#panel table');
+  await admin.click('#panel >> text=会場の QR コード');
+  await admin.waitForFunction(() => { const i = document.querySelector('#dlg img.qr'); return i && i.complete && i.naturalWidth > 0; });
+  check(true, '受付の画面で、会場の QR コードを出せる');
+  await shot(admin, 'mvp-16-venue-qr');
+  await admin.click('#dlg >> text=閉じる');
+  const venueUrl = await admin.evaluate(() => fetch('/api/reception').then((r) => r.json()).then((j) => j.event.venueUrl));
+  const guest = await (await browser.newContext(devices['iPhone 13'])).newPage();
+  guest.on('pageerror', (e) => errors.push(`venue: ${e.message}`));
+  await guest.goto(venueUrl); // QR コードを読み取った
+  await guest.waitForURL(/login\.html\?next=bidder/);
+  await guest.click('main a[href*="register.html"]');
+  await guest.fill('[name=phone]', '090-0000-2222');
+  await guest.click('#stepPhone button[type=submit]');
+  await guest.waitForSelector('#stepCode:not([hidden])');
+  await guest.fill('[name=code]', lastCode());
+  await guest.click('#stepCode button[type=submit]');
+  await guest.waitForSelector('#stepProfile:not([hidden])');
+  await guest.fill('[name=name]', '会場 花子');
+  await guest.fill('[name=email]', 'hanako@example.com');
+  await guest.fill('[name=address]', '埼玉県◯◯市4-5-6');
+  await guest.check('[name=adult]');
+  await guest.click('#stepProfile button[type=submit]');
+  await guest.waitForSelector('#join:not([hidden])');
+  check(!new URL(guest.url()).search, '登録のあと、入札画面の参加手続きに進む（URL に合言葉を残さない）');
+  check((await guest.textContent('#gateEvent')).includes('会場参加') && (await guest.isEnabled('#join [name=payment][value=cash]')), '会場参加の手続きでは、当日現金を選べる');
+  await guest.check('#join [name=receive][value=pickup]');
+  await guest.check('#join [name=payment][value=cash]');
+  await shot(guest, 'mvp-17-venue-join');
+  await guest.click('#join button[type=submit]');
+  await guest.waitForFunction(() => document.getElementById('gateWait').textContent.includes('札'));
+  check((await guest.textContent('#gateEvent')).includes('参加番号2') && (await guest.isHidden('#enter')), '参加番号 2 が振られ、来場確認までは入れない');
+  await shot(guest, 'mvp-18-venue-wait');
+  await admin.click('#panel >> text=更新');
+  await admin.waitForSelector('#panel >> text=確認待ち 1 人');
+  await shot(admin, 'mvp-19-reception');
+  await admin.click('#panel td.act >> text=来場を確認');
+  await admin.waitForSelector('#panel >> text=確認待ち 0 人');
+  await guest.waitForSelector('#enter:not([hidden])', { timeout: 15000 });
+  check(true, '受付係が来場を確認すると、本人の画面が自動で進めるようになる');
+  await guest.click('#enter');
+  await guest.waitForFunction(() => document.getElementById('bid').textContent === '応札に切り替える');
+  check(await guest.isDisabled('#showVideo'), '会場参加の画面には、映像を出さない');
+  await guest.click('#bid');
+  await guest.waitForFunction(() => document.getElementById('bid').textContent.includes('で入札'));
+  await guest.click('#bid');
+  await con.waitForFunction(() => document.getElementById('history').textContent.includes('10,000'));
+  check(true, '会場参加の人が、同じ競りに入札できる');
+  await con.waitForFunction(() => document.getElementById('presenceSplit').textContent.includes('会場 1・オンライン 1'));
+  check(true, '進行コンソールに、会場とオンラインの人数が出る');
+  await shot(guest, 'mvp-20-venue-bidder', { fullPage: true });
+  // オンライン参加の人を、受付で会場参加に切り替える
+  await admin.click('#panel >> text=更新');
+  await admin.click('#panel td.act >> text=会場参加に切り替え');
+  await admin.click('#dlg button[type=submit]');
+  await admin.waitForFunction(() => document.querySelector('#dlg .msg')?.textContent.includes('支払方法'));
+  await admin.check('#dlg [name=payment][value=cash]');
+  await admin.click('#dlg button[type=submit]');
+  await admin.waitForFunction(() => document.querySelectorAll('#panel .state[data-on="1"]').length === 2);
+  check(true, 'オンライン参加の人を、支払方法を選び直して、会場参加に切り替えられる');
+
   // 会員の停止と、記録
   await admin.click('#tabs [data-key=members]');
-  await admin.click('#panel >> text=停止');
+  await admin.click('#panel tr:has-text("検証 太郎") td.act >> text=停止');
   await admin.fill('#dlg [name=reason]', '検証のための停止');
   await admin.click('#dlg button[type=submit]');
   await admin.waitForSelector('#panel .warn');

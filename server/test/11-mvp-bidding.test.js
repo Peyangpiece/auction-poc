@@ -208,3 +208,62 @@ test('開催の予定: 公開中の開催だけを出す。当日でなければ
     assert.equal((await a.post('/api/join', { receive: 'ship', payment: 'transfer' })).json.paddle, 1);
   } finally { await t.end(); }
 });
+
+test('会場参加: QR コード → 参加手続き（当日現金も選べる）→ 受付係の来場確認で有効になる（FR-MODE-002）', async () => {
+  const t = await setup();
+  try {
+    const a = await t.register('09055550001', '検証 一郎');
+    await t.publishEvent('本日の競り');
+    // 受付係を作って、ログインする
+    const made = (await t.staff.post('/api/staff/accounts', { loginId: 'uketsuke', name: '受付 三郎', role: 'reception' })).json;
+    const reception = browser(t.srv.httpUrl);
+    assert.equal((await reception.post('/api/staff/login', { loginId: 'uketsuke', password: made.initialPassword, code: totp(made.totpSecret) })).status, 200);
+    assert.equal((await a.get('/api/reception')).status, 401, '会員には、受付の画面を見せない');
+
+    const rec = (await reception.get('/api/reception')).json;
+    const code = new URL(rec.event.venueUrl).searchParams.get('venue');
+    assert.ok(code.length >= 10, 'QR コードには、開催ごとの合言葉が入る');
+    const qr = await fetch(t.srv.httpUrl + '/api/reception/qr.svg', { headers: { cookie: reception.cookie } });
+    assert.equal(qr.headers.get('content-type'), 'image/svg+xml');
+    assert.match(await qr.text(), /^<svg/);
+    assert.equal((await fetch(t.srv.httpUrl + '/api/reception/qr.svg')).status, 401, 'QR コードは、スタッフだけが出せる');
+
+    assert.equal((await a.get('/api/participation?venue=wrong')).json.venue, false);
+    assert.equal((await a.get(`/api/participation?venue=${code}`)).json.venue, true);
+    assert.equal((await a.post('/api/join', { receive: 'pickup', payment: 'cash', venueCode: 'wrong' })).status, 400, '合言葉が違えば、会場参加にできない');
+    const joined = (await a.post('/api/join', { receive: 'pickup', payment: 'cash', venueCode: code })).json;
+    assert.deepEqual([joined.paddle, joined.mode, joined.checkedIn], [1, 'venue', false], '参加番号は手続きの完了時に振る。来場確認は、まだ');
+    await assert.rejects(t.ws(a), /来場の確認/, '来場確認の前は、入札画面につなげない');
+
+    const list = (await reception.get('/api/reception')).json.participants;
+    assert.deepEqual(list.map((p) => [p.paddle, p.name, p.mode, p.payment, p.checkedIn]), [[1, '検証 一郎', 'venue', 'cash', false]]);
+    assert.equal((await a.post(`/api/reception/${list[0].id}/checkin`)).status, 401, '会員は、自分で来場確認できない');
+    assert.equal((await reception.post(`/api/reception/${list[0].id}/checkin`)).status, 200);
+    assert.equal((await a.get('/api/participation')).json.checkedIn, true);
+    const wa = await t.ws(a);
+    assert.equal(wa.paddle, 1);
+    wa.close();
+  } finally { await t.end(); }
+});
+
+test('オンライン参加から会場参加への変更は、受付係が来場を確認したときだけ。支払方法を選び直す（FR-MODE-004、FR-PAY-002）', async () => {
+  const t = await setup();
+  try {
+    const a = await t.register('09055550001', '検証 一郎');
+    await t.publishEvent('本日の競り');
+    assert.equal((await a.post('/api/join', { receive: 'ship', payment: 'cash' })).status, 400, 'オンライン参加は、当日現金を選べない');
+    await a.post('/api/join', { receive: 'ship', payment: 'transfer' });
+    const rec = (await t.staff.get('/api/reception')).json;
+    const code = new URL(rec.event.venueUrl).searchParams.get('venue');
+    // 本人が QR コードを読んでも、参加モードは変わらない
+    const again = (await a.post('/api/join', { receive: 'pickup', payment: 'cash', venueCode: code })).json;
+    assert.deepEqual([again.mode, again.paddle], ['online', 1]);
+    const id = rec.participants[0].id;
+    assert.equal((await t.staff.post(`/api/reception/${id}/checkin`)).status, 400, '切り替えには、支払方法の選び直しが要る');
+    assert.equal((await t.staff.post(`/api/reception/${id}/checkin`, { payment: 'cash' })).status, 200);
+    const p = (await a.get('/api/participation')).json;
+    assert.deepEqual([p.mode, p.payment, p.checkedIn, p.paddle], ['venue', 'cash', true, 1], '参加番号は変わらない');
+    const audit = (await t.staff.get('/api/audit')).json.entries.find((e) => e.type === 'reception.checkin');
+    assert.deepEqual(JSON.parse(audit.before), { mode: 'online', payment: 'transfer', checkedIn: false });
+  } finally { await t.end(); }
+});

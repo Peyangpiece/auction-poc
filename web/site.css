@@ -133,3 +133,10 @@ td.n { font-family: var(--digits); font-variant-numeric: tabular-nums; white-spa
   .brand__name { display: none; }
 }
 a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.qr { display: block; width: min(320px, 100%); height: auto; margin: 16px auto; background: #fff; }
+td.paddle { font-size: 20px; font-weight: 700; }
+@media print {
+  body > *:not(dialog) { display: none !important; }
+  dialog { position: static; border: 0; box-shadow: none; width: 100%; }
+  dialog .actions { display: none; }
+}

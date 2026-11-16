@@ -9,6 +9,7 @@ import {
   newOtpCode, normalizePhone, isEmail,
 } from './security.js';
 import { Notifier, outboxSender } from './notify.js';
+import QRCode from 'qrcode';
 
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
@@ -32,6 +33,7 @@ export function createApi({ store, config, nowMs }) {
   const db = store.db;
   db.exec(MVP_SCHEMA);
   // 以前の版のデータベースに、後から足した列を加える
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'venue_code'").get()) db.exec('ALTER TABLE events ADD COLUMN venue_code TEXT');
   if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'highlights'").get()) db.exec("ALTER TABLE events ADD COLUMN highlights TEXT NOT NULL DEFAULT ''");
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
 
@@ -368,7 +370,7 @@ export function createApi({ store, config, nowMs }) {
   route('POST', '/api/events', (ctx, body) => {
     needStaff(ctx, 'admin');
     const e = eventInput(body);
-    const info = db.prepare('INSERT INTO events (title, starts_at, ends_at, venue_name, venue_address, highlights, notified, created_at) VALUES (?,?,?,?,?,?,?,?)').run(e.title, e.startsAt, e.endsAt, e.venueName, e.venueAddress, e.highlights, e.notified, nowMs());
+    const info = db.prepare('INSERT INTO events (title, starts_at, ends_at, venue_name, venue_address, highlights, notified, venue_code, created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(e.title, e.startsAt, e.endsAt, e.venueName, e.venueAddress, e.highlights, e.notified, randomToken(9), nowMs());
     audit(ctx, 'event.create', { target: `event:${info.lastInsertRowid}`, after: e });
     return { ok: true, id: Number(info.lastInsertRowid) };
   });
@@ -409,8 +411,11 @@ export function createApi({ store, config, nowMs }) {
     const now = activeEvent();
     return { today, todayEvent: now ? pub(now) : null, events: events.map(pub) };
   });
-  const participant = (accountId, eventId) => db.prepare('SELECT id, paddle_no, name, account_id, event_id, receive, payment FROM members WHERE account_id = ? AND event_id = ?').get(accountId, eventId) ?? null;
+  const participant = (accountId, eventId) => db.prepare('SELECT id, paddle_no, name, account_id, event_id, receive, payment, mode, checked_in_at FROM members WHERE account_id = ? AND event_id = ?').get(accountId, eventId) ?? null;
   const RECEIVE = { pickup: '現地受け取り', ship: '配送' };
+  const PAYMENT = { transfer: '銀行振込', cash: '当日現金' };
+  /** 会場の QR コードの合言葉が、いまの開催のものか（FR-MODE-002） */
+  const venueMatches = (event, code) => !!event?.venue_code && !!code && safeEqual(event.venue_code, String(code));
   route('GET', '/api/participation', (ctx) => {
     const member = needMember(ctx);
     const event = activeEvent();
@@ -418,6 +423,9 @@ export function createApi({ store, config, nowMs }) {
     return {
       event: event ? { title: event.title, venueName: event.venue_name } : null,
       joined: !!p, paddle: p?.paddle_no ?? null, receive: p?.receive ?? null, payment: p?.payment ?? null,
+      mode: p?.mode ?? null, checkedIn: p ? p.mode !== 'venue' || !!p.checked_in_at : false,
+      // 会場の QR コードから来た人か（まだ手続きの前なら、会場参加として手続きできる）
+      venue: venueMatches(event, ctx.url.searchParams.get('venue')),
       suspended: !!member.suspended,
     };
   });
@@ -425,23 +433,75 @@ export function createApi({ store, config, nowMs }) {
     const member = needMember(ctx);
     const event = activeEvent();
     if (!event) throw new HttpError(409, '本日の開催はありません');
+    // 会場参加は、会場の QR コードから来た人だけ（FR-MODE-002）。それ以外は、オンライン参加
+    if (body.venueCode && !venueMatches(event, body.venueCode)) throw bad('会場の QR コードが、本日の開催のものではありません。受付で、もう一度読み取ってください');
+    const mode = body.venueCode ? 'venue' : 'online';
     const errors = {};
     if (!RECEIVE[body.receive]) errors.receive = '受け取り方法を選んでください';
-    // オンライン参加の人は、銀行振込だけを選べる（FR-PAY-002）。当日現金は、会場参加（MVP の 4）で選べるようにする
-    if (body.payment !== 'transfer') errors.payment = body.payment === 'cash' ? '当日現金は、会場で参加する方だけが選べます' : '支払方法を選んでください';
+    // オンライン参加の人は、銀行振込だけを選べる。会場参加の人は、当日現金と銀行振込のどちらも選べる（FR-PAY-002）
+    if (!PAYMENT[body.payment]) errors.payment = '支払方法を選んでください';
+    else if (mode === 'online' && body.payment === 'cash') errors.payment = '当日現金は、会場で参加する方だけが選べます';
     if (Object.keys(errors).length) throw bad('受け取り方法と支払方法の両方に、お答えください', { errors });
     const existing = participant(member.id, event.id);
-    if (existing) return { ok: true, paddle: existing.paddle_no };
+    // 1回の開催の中では、参加モードは変えられない（FR-MODE-004）。オンラインから会場への変更は、受付係の来場確認で行う
+    if (existing) return { ok: true, paddle: existing.paddle_no, mode: existing.mode, checkedIn: existing.mode !== 'venue' || !!existing.checked_in_at };
     // 参加番号は、開催ごとに1から。番号を取るのと書き込むのを、1つの処理にまとめる（2人に同じ番号を振らない）
     const paddle = db.transaction(() => {
       const next = db.prepare('SELECT COALESCE(MAX(paddle_no), 0) + 1 AS n FROM members WHERE event_id = ?').get(event.id).n;
       db.prepare('INSERT INTO members (paddle_no, name, token_hash, account_id, event_id, receive, payment, mode, joined_at) VALUES (?,?,?,?,?,?,?,?,?)')
-        .run(next, member.name, sha256(randomToken()), member.id, event.id, body.receive, 'transfer', 'online', nowMs());
+        .run(next, member.name, sha256(randomToken()), member.id, event.id, body.receive, body.payment, mode, nowMs());
       return next;
     })();
-    audit(ctx, 'event.join', { target: `event:${event.id}`, after: { paddle, receive: body.receive, payment: 'transfer', mode: 'online' } });
-    return { ok: true, paddle };
+    audit(ctx, 'event.join', { target: `event:${event.id}`, after: { paddle, receive: body.receive, payment: body.payment, mode } });
+    return { ok: true, paddle, mode, checkedIn: mode !== 'venue' };
   });
+
+  // ------------------------------------------------------------ 受付（来場確認。FR-MODE-002・004。主催者管理者・進行役・受付係）
+  const venueUrl = (ctx, event) => `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${ctx.req.headers.host}/bidder.html?venue=${event.venue_code}`;
+  const ensureVenueCode = (event) => {
+    if (!event.venue_code) { event.venue_code = randomToken(9); db.prepare('UPDATE events SET venue_code = ? WHERE id = ?').run(event.venue_code, event.id); }
+    return event;
+  };
+  route('GET', '/api/reception', (ctx) => {
+    needStaff(ctx, 'admin', 'auctioneer', 'reception');
+    const event = activeEvent();
+    if (!event) return { event: null, participants: [] };
+    ensureVenueCode(event);
+    const rows = db.prepare(`SELECT m.id, m.paddle_no, m.mode, m.receive, m.payment, m.checked_in_at, a.kind, a.name, a.company, a.contact_name
+      FROM members m JOIN member_accounts a ON a.id = m.account_id WHERE m.event_id = ? ORDER BY m.paddle_no`).all(event.id);
+    return {
+      event: { title: event.title, venueUrl: venueUrl(ctx, event) },
+      participants: rows.map((r) => ({
+        id: r.id, paddle: r.paddle_no, mode: r.mode, receive: r.receive, payment: r.payment, checkedIn: !!r.checked_in_at,
+        name: r.kind === 'b2b' ? `${r.company}　${r.contact_name}` : r.name,
+      })),
+    };
+  });
+  // 会場に貼る QR コード（開催ごと）。読み取ると、会場参加の手続きに進む
+  route('GET', '/api/reception/qr.svg', async (ctx) => {
+    needStaff(ctx, 'admin', 'auctioneer', 'reception');
+    const event = activeEvent();
+    if (!event) throw new HttpError(404, '本日の開催はありません');
+    return { svg: await QRCode.toString(venueUrl(ctx, ensureVenueCode(event)), { type: 'svg', errorCorrectionLevel: 'M', margin: 2 }) };
+  });
+  route('POST', '/api/reception/:id/checkin', (ctx, body, id) => {
+    needStaff(ctx, 'admin', 'auctioneer', 'reception');
+    const event = activeEvent();
+    const p = event && db.prepare('SELECT * FROM members WHERE id = ? AND event_id = ? AND account_id IS NOT NULL').get(id, event.id);
+    if (!p) throw new HttpError(404, '参加者が見つかりません');
+    if (p.mode === 'venue' && p.checked_in_at) return { ok: true };
+    const before = { mode: p.mode, payment: p.payment, checkedIn: false };
+    let payment = p.payment;
+    if (p.mode === 'online') {
+      // オンライン参加から会場参加への変更は、来場を確認したときだけ（FR-MODE-004）。支払方法は、本人に聞いて選び直す（FR-PAY-002）
+      if (!PAYMENT[body.payment]) throw bad('会場参加に切り替えます。支払方法を、本人に聞いて選んでください');
+      payment = body.payment;
+    }
+    db.prepare("UPDATE members SET mode = 'venue', payment = ?, checked_in_at = ? WHERE id = ?").run(payment, nowMs(), id);
+    audit(ctx, 'reception.checkin', { target: `participant:${id}`, before, after: { mode: 'venue', payment, checkedIn: true, paddle: p.paddle_no } });
+    return { ok: true };
+  });
+
   /** 入札画面の接続（WebSocket）を、ログインのクッキーで確かめる。参加手続きが済んでいれば、その参加者を返す */
   function participantFromCookie(req) {
     const ctx = { req };
@@ -451,6 +511,8 @@ export function createApi({ store, config, nowMs }) {
     if (!event) return { code: 'NO_EVENT', message: '本日の開催はありません' };
     const p = participant(ctx.member.id, event.id);
     if (!p) return { code: 'NOT_JOINED', message: '参加手続きを済ませてください' };
+    // 会場参加は、受付係の来場確認が済むまで有効にならない（FR-MODE-002）
+    if (p.mode === 'venue' && !p.checked_in_at) return { code: 'NOT_CHECKED_IN', message: '受付で、来場の確認を受けてください' };
     return { member: p };
   }
   /** 入札してよいか。停止中の会員は SUSPENDED（FR-AUTH-009）。停止の前に受理された入札は、有効のまま */
@@ -538,6 +600,7 @@ export function createApi({ store, config, nowMs }) {
       }
       const result = await hit.r.handler(ctx, body, ...hit.m.slice(1).map(Number));
       if (result?.redirect) { res.writeHead(302, { location: result.redirect }); return res.end(); }
+      if (result?.svg) { res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' }); return res.end(result.svg); }
       sendJson(res, 200, result ?? { ok: true });
     } catch (err) {
       if (err instanceof HttpError) return sendJson(res, err.status, { ok: false, message: err.message, ...err.extra });

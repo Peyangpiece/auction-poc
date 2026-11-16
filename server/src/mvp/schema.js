@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS events (
   title TEXT NOT NULL,
   starts_at TEXT NOT NULL, ends_at TEXT NOT NULL,   -- 日本時間の日時（例: 2026-12-05T09:00）
   venue_name TEXT NOT NULL, venue_address TEXT NOT NULL,
+  venue_code TEXT,                         -- 会場参加の QR コードに入れる合言葉（開催ごと。FR-MODE-002）
   highlights TEXT NOT NULL DEFAULT '',     -- 目玉商品（1行に1つ。トップページに出す）
   notified INTEGER NOT NULL DEFAULT 0,    -- 公安委員会への届出済みの印
   status TEXT NOT NULL DEFAULT 'preparing' CHECK (status IN ('preparing','published')),

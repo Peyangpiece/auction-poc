@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS members (
   receive TEXT,                           -- 受け取り方法: pickup（現地受け取り）/ ship（配送）（FR-SHIP-007）
   payment TEXT,                           -- 支払方法: transfer（銀行振込）/ cash（当日現金）（FR-PAY-009）
   mode TEXT NOT NULL DEFAULT 'online',    -- 参加モード（FR-MODE-001）。会場参加は MVP の 4
-  joined_at REAL
+  joined_at REAL,
+  checked_in_at REAL                      -- 会場参加の来場確認（受付係が確かめた時刻。FR-MODE-002）
 );
 CREATE TABLE IF NOT EXISTS staff (
   id INTEGER PRIMARY KEY,
@@ -106,6 +107,7 @@ function migrate(db) {
   if (!has('lots', 'reserve_price')) db.exec('ALTER TABLE lots ADD COLUMN reserve_price INTEGER');
   if (!has('members', 'account_id')) todo.push(['members', 'id, paddle_no, name, token_hash']);
   if (!has('lots', 'event_id')) todo.push(['lots', 'id, lot_no, title, start_price, unit_override, reserve_price, status, prep_from, no_video, current_bid_seq, close_seq, winner_bid_seq, updated_at']);
+  if (has('members', 'account_id') && !has('members', 'checked_in_at')) db.exec('ALTER TABLE members ADD COLUMN checked_in_at REAL');
   if (!todo.length) return;
   db.pragma('foreign_keys = OFF');
   db.pragma('legacy_alter_table = ON'); // 名前を戻すときに、ほかの表からの参照を書き換えさせない

@@ -71,9 +71,10 @@ const bidLimiters = new Map(); // 会員ごとの入札の計り（端末を増�
 const userConnections = new Map(); // 'member:3' -> 同時接続の数
 
 function presence() {
-  let members = 0;
-  for (const c of clients) if (c.role === 'member') members++;
-  const text = JSON.stringify({ type: 'presence', members, connections: clients.size });
+  // 参加者の数は、会場とオンラインに分けて出す（FR-CON-002）
+  let members = 0, venue = 0;
+  for (const c of clients) if (c.role === 'member') { members++; if (c.member?.mode === 'venue') venue++; }
+  const text = JSON.stringify({ type: 'presence', members, venue, online: members - venue, connections: clients.size });
   for (const c of clients) if (c.role === 'auctioneer' && c.ws.readyState === 1) c.ws.send(text);
 }
 
@@ -305,7 +306,7 @@ function onClient(ws, req) {
       metrics.write('connect', { conn: conn.id, role: conn.role, paddle: member?.paddle_no ?? null, label: msg.label ?? null });
       const shape = (m) => (conn.role === 'auctioneer' ? m : forMember(m));
       send(shape({
-        type: 'welcome', role: conn.role, paddle: member?.paddle_no ?? null, name: (member ?? staff).name,
+        type: 'welcome', role: conn.role, paddle: member?.paddle_no ?? null, mode: member?.mode ?? null, name: (member ?? staff).name,
         conn: conn.id, serverTime: nowMs(), stream: stream.view(), allowCrash: config.allowCrash,
         playerScriptUrl: config.ivsPlayerScriptUrl, venueContact: config.venueContact,
         commentMaxLength: config.commentMaxLength, comments: store.q.recentComments.all(), ...auction.snapshot(),

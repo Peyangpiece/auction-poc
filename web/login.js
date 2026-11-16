@@ -34,6 +34,8 @@ $('#resend').addEventListener('click', async (ev) => {
 });
 
 (async () => {
+  // 入札画面から来た人が会員登録へ進むときも、行き先を引き継ぐ
+  if (after === '/bidder.html') for (const link of document.querySelectorAll('a[href="/register.html"]')) link.href = '/register.html?next=bidder';
   const me = await setupNav();
   if (me.member) location.replace(after);
   else phoneForm.elements.phone.focus();

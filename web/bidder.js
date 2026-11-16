@@ -2,7 +2,7 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
 const net = params.get('net') || 'unlabeled'; // 測定の区別用: ?net=wifi / 4g / 5g
-const venue = params.get('mode') === 'venue'; // 会場参加は映像なし
+let venue = params.get('mode') === 'venue'; // 会場参加は映像なし（会員の場合は、参加手続きの内容で決まる）
 $('net').textContent = net;
 const store = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
 // 応札／観戦: 観戦の間は入札ボタンを押せない（誤って入札しないため）。最初は観戦にしておく
@@ -372,27 +372,59 @@ const getJson = async (url, body) => {
     return { status: res.status, ...(await res.json().catch(() => ({}))) };
   } catch { return { status: 0, message: 'サーバーにつながりません。通信の状態を確かめて、開き直してください' }; }
 };
-const showPaddle = (title, paddle) => {
-  $('gateEvent').replaceChildren(title, document.createElement('br'), '参加番号', Object.assign(document.createElement('b'), { textContent: String(paddle) }));
-  $('join').hidden = true; $('enter').hidden = false; ready = true;
+// 会場の QR コードの合言葉は、このタブの中だけに覚えさせ、URL からは消す（ログインや会員登録を挟んでも、会場参加の手続きに戻れる）
+let venueCode = params.get('venue');
+try {
+  if (venueCode) sessionStorage.setItem('auction-venue', venueCode);
+  else venueCode = sessionStorage.getItem('auction-venue');
+} catch { /* 保存できない設定でも、そのまま進む */ }
+if (params.has('venue')) history.replaceState(null, '', location.pathname);
+
+const showPaddle = (title, p) => {
+  venue = p.mode === 'venue';
+  const lines = [title, document.createElement('br'), venue ? '会場参加　参加番号' : '参加番号', Object.assign(document.createElement('b'), { textContent: String(p.paddle) })];
+  $('gateEvent').replaceChildren(...lines);
+  $('join').hidden = true;
+  // 会場参加は、受付係の来場確認が済むまで入れない（FR-MODE-002）。確認されたら、自動で進めるようになる
+  if (!p.checkedIn) {
+    $('gateWait').textContent = `受付で、参加番号 ${p.paddle} の札を受け取ってください。来場の確認が済むと、ここから入れます。`;
+    $('enter').hidden = true;
+    const timer = setInterval(async () => {
+      const now = await getJson('/api/participation');
+      if (now.status === 200 && now.checkedIn) { clearInterval(timer); showPaddle(title, now); }
+    }, 4000);
+    return;
+  }
+  $('gateWait').textContent = '';
+  $('enter').hidden = false; ready = true;
 };
 if (!token) (async () => {
   $('enter').hidden = true;
-  const p = await getJson('/api/participation');
+  const p = await getJson('/api/participation' + (venueCode ? `?venue=${encodeURIComponent(venueCode)}` : ''));
   if (p.status === 401) return location.replace('/login.html?next=bidder');
   if (p.status !== 200) { $('gateMsg').textContent = p.message ?? '開けませんでした。開き直してください'; return; }
   if (!p.event) { $('gateMsg').textContent = '本日の開催はありません。'; return; }
-  if (p.joined) return showPaddle(p.event.title, p.paddle);
+  if (p.joined) {
+    // 参加モードは、1回の開催の中では変えられない。オンラインで手続き済みの人が会場に来たら、受付で切り替える（FR-MODE-004）
+    if (p.venue && p.mode === 'online') $('gateMsg').textContent = 'オンライン参加で手続き済みです。会場で参加するには、受付にお申し出ください。';
+    return showPaddle(p.event.title, p);
+  }
   // 参加手続き: 受け取り方法と支払方法を、どちらも選ばれていない状態で聞く（FR-MODE-005）
-  $('gateEvent').textContent = p.event.title;
+  const asVenue = p.venue;
+  $('gateEvent').textContent = asVenue ? `${p.event.title}　会場参加` : p.event.title;
+  // 当日現金は、会場参加の人だけが選べる（FR-PAY-002）
+  const cash = $('join').elements.payment[1];
+  cash.disabled = !asVenue;
+  cash.closest('label').classList.toggle('off', !asVenue);
+  $('cashNote').hidden = asVenue;
   $('join').hidden = false;
   getJson('/api/terms').then((t) => { if (t.status === 200) $('joinTerms').textContent = `${t.shippingNotice}\n${t.returnPolicy}`; });
   $('join').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const data = new FormData($('join'));
     $('gateMsg').textContent = '';
-    const res = await getJson('/api/join', { receive: data.get('receive'), payment: data.get('payment') });
-    if (res.status === 200) showPaddle(p.event.title, res.paddle);
+    const res = await getJson('/api/join', { receive: data.get('receive'), payment: data.get('payment'), ...(asVenue ? { venueCode } : {}) });
+    if (res.status === 200) showPaddle(p.event.title, res);
     else $('gateMsg').textContent = res.message ?? 'うまくいきませんでした。やり直してください';
   });
 })();

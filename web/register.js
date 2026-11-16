@@ -44,13 +44,15 @@ function syncKind() {
 forms.profile.addEventListener('change', syncKind);
 onSubmit(forms.profile, async (data) => {
   const res = await api('POST', '/api/register/complete', { ...data, adult: data.adult === '1' });
-  if (res.ok) location.href = '/mypage.html?registered=1';
+  // 入札画面（会場の QR コードなど）から来た人は、登録のあと入札画面の参加手続きへ進める（FR-AUTH-007）
+  if (res.ok) location.href = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/mypage.html?registered=1';
   else if (res.status === 401) { res.message = '時間が空いたため、電話番号の確認からやり直してください'; show('phone'); }
   return res;
 });
 
 (async () => {
   const me = await setupNav();
+  if (new URLSearchParams(location.search).get('next') === 'bidder') for (const link of document.querySelectorAll('a[href="/login.html"]')) link.href = '/login.html?next=bidder';
   if (me.member) location.replace('/mypage.html');
   else if (me.registering) show('profile'); // 認証まで済ませて、読み込み直した場合
   syncKind();

@@ -1,4 +1,4 @@
-// スタッフ用の管理画面: 開催、会員、スタッフ、設定、記録。商品の登録は、進行コンソールで競りの最中に行う。
+// スタッフ用の管理画面: 受付（来場確認）、開催、会員、スタッフ、設定、記録。商品の登録は、進行コンソールで競りの最中に行う。
 // どの操作ができるかは、サーバーが役割で決める。ここでは、できない操作の入口を出さないだけ。
 'use strict';
 
@@ -89,6 +89,55 @@ async function membersPanel() {
       ? smallBtn('停止を解く', async () => { await api('POST', `/api/members/${m.id}/unsuspend`); show('members'); })
       : smallBtn('停止', () => askReason(`会員 ${m.id} を停止`, '停止の理由', true, (reason) => api('POST', `/api/members/${m.id}/suspend`, { reason })), 'btn-danger'))));
   return [table(['会員番号', '名前', '区分', '電話番号', 'メール', '状態', ''], rows, '会員はまだいません。')];
+}
+
+// ------------------------------------------------------------ 受付: 来場確認（FR-MODE-002・004）と、会場の QR コード
+const PAY = { transfer: '銀行振込', cash: '当日現金' };
+const RECV = { pickup: '現地受け取り', ship: '配送' };
+async function receptionPanel() {
+  const res = await api('GET', '/api/reception');
+  if (!res.ok) return [el('p', { class: 'msg', text: res.message })];
+  if (!res.event) return [el('p', { class: 'empty', text: '本日の開催はありません。' })];
+  const waiting = res.participants.filter((p) => p.mode === 'venue' && !p.checkedIn).length;
+  const rows = res.participants.map((p) => el('tr', {},
+    el('td', { class: 'n paddle', text: String(p.paddle) }),
+    el('td', { class: 'dyn', text: p.name }),
+    el('td', { text: p.mode === 'venue' ? '会場' : 'オンライン' }),
+    el('td', { text: `${RECV[p.receive]}・${PAY[p.payment]}` }),
+    el('td', {}, p.mode === 'venue' ? el('span', { class: 'state', 'data-on': p.checkedIn ? '1' : '0', text: p.checkedIn ? '来場確認済み' : '確認待ち' }) : ''),
+    act(
+      p.mode === 'venue' && !p.checkedIn && smallBtn('来場を確認', async () => { const r = await api('POST', `/api/reception/${p.id}/checkin`); if (!r.ok) alertLine(r.message); show('reception'); }, 'btn-primary'),
+      p.mode === 'online' && smallBtn('会場参加に切り替え', () => switchDialog(p)))));
+  return [
+    el('div', { class: 'toolbar' },
+      el('p', { class: 'dyn', text: `${res.event.title}　確認待ち ${waiting} 人` }),
+      el('div', {}, smallBtn('更新', () => show('reception')), ' ', smallBtn('会場の QR コード', () => qrDialog(res.event), 'btn-primary'))),
+    el('p', { class: 'note', text: '本人と参加番号を確かめてから「来場を確認」を押し、その番号の札を渡してください。' }),
+    el('p', { class: 'msg', id: 'line', role: 'alert' }),
+    table(['参加番号', '名前', '参加', '受け取り・支払', '来場', ''], rows, '参加手続きを済ませた人は、まだいません。'),
+  ];
+}
+function switchDialog(p) {
+  const form = el('form', { class: 'form', novalidate: true },
+    el('p', { text: `参加番号 ${p.paddle} を、オンライン参加から会場参加に切り替えます。支払方法を、本人に聞いて選んでください。` }),
+    el('fieldset', { class: 'choice' }, el('legend', { text: '支払方法' }),
+      el('label', {}, el('input', { type: 'radio', name: 'payment', value: 'cash' }), '当日現金'),
+      el('label', {}, el('input', { type: 'radio', name: 'payment', value: 'transfer' }), '銀行振込')),
+    msgLine(),
+    el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '切り替えて、来場を確認' }), closeBtn('やめる')));
+  onSubmit(form, async (data) => {
+    const res = await api('POST', `/api/reception/${p.id}/checkin`, { payment: data.payment });
+    if (res.ok) { dlg.close(); show('reception'); }
+    return res;
+  });
+  openDialog('会場参加に切り替え', form);
+}
+function qrDialog(event) {
+  openDialog('会場の QR コード',
+    el('p', { class: 'dyn', text: `${event.title}　会場参加の方は、このコードを読み取ってください。` }),
+    el('img', { class: 'qr', src: '/api/reception/qr.svg', alt: '会場参加の QR コード', width: 320, height: 320 }),
+    el('p', { class: 'note', text: 'このコードは、開催ごとに変わります。会場の中にだけ掲示してください。' }),
+    el('div', { class: 'actions' }, smallBtn('印刷', () => window.print()), closeBtn()));
 }
 
 // ------------------------------------------------------------ SMS の制限の解除（受付係もできる）
@@ -188,6 +237,7 @@ async function auditPanel() {
 
 // ------------------------------------------------------------ 切り替え
 const PANELS = {
+  reception: ['受付', receptionPanel, ['admin', 'auctioneer', 'reception']],
   events: ['開催', eventsPanel, ['admin']],
   members: ['会員', membersPanel, ['admin']],
   sms: ['SMS の制限', smsPanel, ['admin', 'auctioneer', 'reception']],
