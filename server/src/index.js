@@ -122,7 +122,7 @@ try { api.billing.sweep(); } catch (err) { console.error('[billing]', err); }
 setInterval(() => { try { api.billing.sweep(); } catch (err) { console.error('[billing]', err); } }, 3600000).unref();
 
 // ---------------------------------------------------------------- HTTP
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 
 // ブラウザに守らせる制限。スクリプトとスタイルは自分のサイトのファイルだけ（画面の中に直接書いたものは動かない）。
 // 映像の再生（Amazon IVS のプレーヤー）に要る許可は、公式の資料を見ずに書いた想定で【未検証】。実物で映像が出なければ、ここを直すか POC_CSP=off にする。
@@ -213,7 +213,7 @@ server.on('upgrade', (req, socket, head) => {
     if (origin) {
       let host = '';
       try { host = new URL(origin).host; } catch { /* 形の崩れた Origin は断る */ }
-      if (host !== req.headers.host && !config.allowedOrigins.includes(origin)) {
+      if (host !== req.headers.host && !(config.trustProxy && host === req.headers['x-forwarded-host']) && !config.allowedOrigins.includes(origin)) {
         metrics.write('rejected_origin', { origin });
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
         return socket.destroy();

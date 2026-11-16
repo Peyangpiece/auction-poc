@@ -452,6 +452,16 @@ onSubmit($('#loginForm'), async (data) => {
   return res;
 });
 
+// お試し用: 認証アプリの代わりに、いまの認証コードを入れるボタン（サーバーがお試し用の設定のときだけ出る）
+api('GET', '/api/terms').then((t) => {
+  if (!t.devShowCodes) return;
+  const form = $('#loginForm');
+  const b = el('button', { class: 'btn', type: 'button', text: '【お試し用】認証コードを入れる', onclick: async () => {
+    const r = await api('POST', '/api/dev/staff-code', { loginId: form.elements.loginId.value, password: form.elements.password.value });
+    if (r.ok) form.elements.code.value = r.code; else $('.msg', form).textContent = r.message;
+  } });
+  $('.actions', form).append(b);
+});
 (async () => {
   const state = await setupNav();
   me = state.staff;

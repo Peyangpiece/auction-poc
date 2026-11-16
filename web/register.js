@@ -18,6 +18,7 @@ onSubmit(forms.phone, async (data) => {
   phone = data.phone;
   const res = await api('POST', '/api/register/start', { phone });
   if (res.ok) { $('#sentTo').textContent = `${phone} に送りました。5分以内に入力してください`; show('code'); }
+  if (res.devCode) $('#sentTo').textContent += `　【お試し用】認証番号 ${res.devCode}`;
   else if (res.login) res.message = 'この電話番号は登録済みです。下の「ログイン」からお入りください';
   return res;
 });

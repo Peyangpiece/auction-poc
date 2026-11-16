@@ -12,6 +12,7 @@ onSubmit(phoneForm, async (data) => {
   const res = await api('POST', '/api/login/start', { phone });
   if (res.ok) {
     $('#sentTo').textContent = `登録済みの番号であれば、${phone} に認証番号を送りました`;
+    if (res.devCode) $('#sentTo').textContent += `　【お試し用】認証番号 ${res.devCode}`;
     phoneForm.hidden = true;
     codeForm.hidden = false;
     codeForm.elements.code.focus();

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { MVP_SCHEMA, DEFAULT_SETTINGS } from './schema.js';
 import {
-  randomToken, sha256, safeEqual, hashPassword, verifyPassword, newTotpSecret, verifyTotp, otpauthUrl,
+  randomToken, sha256, safeEqual, hashPassword, verifyPassword, newTotpSecret, verifyTotp, totp, otpauthUrl,
   newOtpCode, normalizePhone, isEmail,
 } from './security.js';
 import { Notifier, outboxSender } from './notify.js';
@@ -133,6 +133,7 @@ export function createApi({ store, config, nowMs }) {
     db.prepare('INSERT INTO otp_sends (phone, at) VALUES (?, ?)').run(phone, now);
     // 送信の失敗による自動の再送（IF-EXT-003）は、上の回数に数えない（1回の送信として記録済み）
     await notifier.sms(phone, 'otp', `【令和の競り】認証番号は ${code} です。5分以内に入力してください。`);
+    return code;
   }
   function checkOtp(phone, code) {
     const row = db.prepare('SELECT * FROM otp_codes WHERE phone = ?').get(phone);
@@ -159,7 +160,7 @@ export function createApi({ store, config, nowMs }) {
   async function sendEmailVerification(ctx, member) {
     const token = randomToken();
     db.prepare('INSERT INTO email_tokens (token_hash, member_id, expires_at) VALUES (?,?,?)').run(sha256(token), member.id, nowMs() + DAY);
-    const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${ctx.req.headers.host}`;
+    const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
     await notifier.email(member.email, 'verify_email', 'メールアドレスの確認', `次のリンクを開いて、メールアドレスを確認してください（24時間以内）。\n${origin}/api/email/verify?token=${token}`);
   }
 
@@ -182,8 +183,9 @@ export function createApi({ store, config, nowMs }) {
     // スタッフとして登録された番号では、会員登録できない（FR-AUTH-013）
     if (db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号では登録できません');
     if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号は登録済みです。ログインしてください', { login: true });
-    await sendOtp(phone);
-    return { ok: true };
+    const code = await sendOtp(phone);
+    // お試し用の設定のときだけ、認証番号を画面に出せるように返す（本番では返さない）
+    return { ok: true, ...(config.devShowCodes ? { devCode: code } : {}) };
   });
   route('POST', '/api/register/verify', (ctx, body) => {
     throttle(ctx);
@@ -282,8 +284,8 @@ export function createApi({ store, config, nowMs }) {
     throttle(ctx);
     const phone = phoneOf(body);
     // 登録のない番号でも、同じ返事をする（どの番号が登録済みかを、外から調べられないようにする）
-    if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone)) await sendOtp(phone);
-    return { ok: true };
+    const code = db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone) ? await sendOtp(phone) : null;
+    return { ok: true, ...(config.devShowCodes && code ? { devCode: code } : {}) };
   });
   route('POST', '/api/login/verify', (ctx, body) => {
     throttle(ctx);
@@ -348,6 +350,14 @@ export function createApi({ store, config, nowMs }) {
     db.prepare("DELETE FROM sessions WHERE kind = 'staff' AND subject_id = ? AND id_hash <> ?").run(me.id, ctx.sessionHash);
     audit(ctx, 'staff.password_change', { target: `staff:${me.id}` });
     return { ok: true };
+  });
+  // お試し用: スタッフの認証コード（認証アプリの代わり）。ID とパスワードが合っているときだけ返す。本番では使えない
+  route('POST', '/api/dev/staff-code', (ctx, body) => {
+    if (!config.devShowCodes) throw new HttpError(404, '見つかりません');
+    throttle(ctx);
+    const staff = db.prepare('SELECT * FROM staff_accounts WHERE login_id = ?').get(String(body.loginId ?? ''));
+    if (!staff || !staff.active || !verifyPassword(body.password ?? '', staff.password_hash)) throw new HttpError(401, 'ID かパスワードが違います');
+    return { ok: true, code: totp(staff.totp_secret, Date.now()) };
   });
   const staffView = (s) => ({ id: s.id, loginId: s.login_id, name: s.name, role: s.role, roleLabel: ROLE_LABEL[s.role], phone: s.phone, active: !!s.active });
   route('GET', '/api/staff/accounts', (ctx) => {
@@ -556,7 +566,7 @@ export function createApi({ store, config, nowMs }) {
   });
 
   // ------------------------------------------------------------ 受付（来場確認。FR-MODE-002・004。主催者管理者・進行役・受付係）
-  const venueUrl = (ctx, event) => `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${ctx.req.headers.host}/bidder.html?venue=${event.venue_code}`;
+  const venueUrl = (ctx, event) => `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}/bidder.html?venue=${event.venue_code}`;
   const ensureVenueCode = (event) => {
     if (!event.venue_code) { event.venue_code = randomToken(9); db.prepare('UPDATE events SET venue_code = ? WHERE id = ?').run(event.venue_code, event.id); }
     return event;
@@ -658,7 +668,7 @@ export function createApi({ store, config, nowMs }) {
   // ------------------------------------------------------------ 表示する文言
   // 商品は、競りの最中に進行コンソールからその場で登録する（発注者の決定）。事前の登録・審査・カタログは持たない。
   // 送料が含まれないことの表示（FR-SHIP-003）と、返品特約の表示（FR-LEG-002）。だれでも見られる
-  route('GET', '/api/terms', () => ({ orgName: setting('org_name'), shippingNotice: setting('shipping_notice'), returnPolicy: setting('return_policy'), premiumRate: billing.premiumRate() }));
+  route('GET', '/api/terms', () => ({ devShowCodes: config.devShowCodes, orgName: setting('org_name'), shippingNotice: setting('shipping_notice'), returnPolicy: setting('return_policy'), premiumRate: billing.premiumRate() }));
 
   // ------------------------------------------------------------ 主催者設定（FR-ORG-001 の一部）・監査ログ・知らせ
   // 請求書・手数料に使う設定（FR-ORG-001 の一部）。未入力でも動くが、請求書には「（未設定）」と出る
@@ -744,7 +754,7 @@ export function createApi({ store, config, nowMs }) {
         if (origin) {
           let host = '';
           try { host = new URL(origin).host; } catch { /* 形の崩れた Origin は断る */ }
-          if (host !== req.headers.host && !config.allowedOrigins.includes(origin)) throw new HttpError(403, 'このページからは操作できません');
+          if (host !== req.headers.host && !(config.trustProxy && host === req.headers['x-forwarded-host']) && !config.allowedOrigins.includes(origin)) throw new HttpError(403, 'このページからは操作できません');
         }
         // 印鑑の画像だけは、大きさの上限を広げる（2MB まで）
         const raw = await readBody(req, url.pathname === '/api/settings/seal' ? 3 * 1024 * 1024 : url.pathname === '/api/settings/legal' ? 512 * 1024 : 64 * 1024);

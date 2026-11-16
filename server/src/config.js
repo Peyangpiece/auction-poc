@@ -76,6 +76,12 @@ export function loadConfig(env = process.env) {
     // ブラウザに守らせる読み込みの制限（Content-Security-Policy）。off で付けない
     csp: env.POC_CSP || 'on',
 
+    // ---- 動かす場所に合わせる設定
+    // 手前にプロキシ（HTTPS を受ける装置や、クラウドの入口）がある場合は 1。x-forwarded-host を、自分のサイトの名前として信用する
+    trustProxy: env.POC_TRUST_PROXY === '1',
+    // お試し用: SMS の認証番号と、スタッフの認証コードを、画面に出す（送信サービスをつなぐ前に、動きを確かめるため）。本番では必ず 0
+    devShowCodes: env.POC_DEV_SHOW_CODES === '1',
+
     // ---- 会員・スタッフ（MVP の 1・2）
     // クッキーに Secure を付ける（HTTPS だけで送る）。本番は必ず 1。手前のプロキシが x-forwarded-proto: https を付ける場合は自動で付く
     cookieSecure: env.POC_COOKIE_SECURE === '1',
