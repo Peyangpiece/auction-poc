@@ -73,7 +73,7 @@ const recovered = auction.recover();
 if (recovered.length) console.log('[recovery]', JSON.stringify(recovered));
 
 // ---------------------------------------------------------------- HTTP
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png' };
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');

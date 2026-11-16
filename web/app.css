@@ -1,135 +1,172 @@
-/* 検証用の画面の共通スタイル。色・余白・角丸はすべてここのトークンから取る。 */
+/*
+ * 株式会社NEWS ライブオークション 画面の共通スタイル。
+ * 見た目は、NEWS のコーポレートサイト（News-HP）に合わせる:
+ *   色   … エンブレムの紺 #242a5e を要所に。赤 #d24040 は細い線だけ。地は白
+ *   書体 … 日本語は BIZ UDゴシック、数字と英字は Inter
+ *   角丸 … 6px、ボタンは高さ 48px・太字
+ * この画面だけのしるしは1つ: 競り場の「表示板」（紺の板・赤い細線・大きな数字・2つのランプ）。それ以外は静かにする。
+ */
+@font-face { font-family: "BIZ UDPGothic"; src: local("BIZ UDPGothic"), url("bizudp-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "BIZ UDPGothic"; src: local("BIZ UDPGothic Bold"), url("bizudp-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+/* impeccable-disable overused-font: Inter は News-HP（株式会社NEWS のサイト）で決まっている数字用の書体 */
+@font-face { font-family: "Inter"; src: url("inter.woff2") format("woff2"); font-weight: 400 700; font-display: swap; unicode-range: U+0020-007E, U+00A5; }
+
 :root {
   color-scheme: light dark;
-  --bg: #f2f2f5;
-  --surface: #ffffff;
-  --surface-2: #f5f5f7;
-  --ink: #16181d;
-  --ink-2: #4a4f5a;      /* 補助の文字（白の上で 7.9:1） */
-  --ink-3: #5f6573;      /* 注記（背景色の上でも 4.5:1 以上） */
-  --line: rgba(22, 24, 29, .10);
-  --accent: #1d4ed8;
-  --accent-ink: #ffffff;
-  --accent-soft: #e8eefc;
-  --ok: #17703a;
-  --ok-soft: #e3f4e8;
-  --warn: #8a5200;
-  --warn-soft: #fdf0d5;
-  --danger: #b3261e;
-  --danger-soft: #fbe9e7;
-  --right: #c2410c;      /* 権利表示 */
-  --shadow: 0 0 0 1px rgba(22, 24, 29, .05), 0 1px 3px rgba(22, 24, 29, .05);
-  --shadow-lg: 0 2px 6px rgba(22, 24, 29, .10), 0 16px 40px rgba(22, 24, 29, .16);
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 20px;
-  --font: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, system-ui, sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --navy: #242a5e;         /* エンブレムの紺。白地で 13.4:1 */
+  --navy-dk: #181b40;
+  --red: #d24040;          /* エンブレムの赤。細い線だけに使う */
+  --red-text: #b8302f;     /* 文字に使う赤。白地で 6.0:1 */
+
+  --ground: #ffffff;
+  --ground-alt: #f4f5f7;
+  --ink: #1f2328;
+  --ink-2: #5b6370;        /* 補助の文字。白地で 6.0:1 */
+  --ink-3: #5b6370;
+  --line: #e1e4e9;
+  --edge: #868e9b;         /* 入力欄の縁。白地で 3.3:1 */
+  --field: #ffffff;
+  --action: var(--navy);
+  --action-hover: var(--navy-dk);
+  --action-ink: #ffffff;
+  --danger: var(--red-text);
+  --danger-ink: #ffffff;
+  --alarm: var(--red-text); /* 上回られたときに、画面全体に敷く色 */
+  --ok: #1f6b3a;
+
+  /* 表示板。エンブレムと同じ、紺の地に赤い線 */
+  --board: var(--navy-dk);
+  --board-ink: #ffffff;
+  --board-ink-2: #c9cbe0;  /* 板の上で 10.2:1 */
+  --board-line: rgba(255, 255, 255, .18);
+  --board-ng: #f08a8a;     /* 板の上の赤。5.5:1 */
+  --lamp-off: #5a6096;
+  --lamp-green: #ffffff;
+  --lamp-amber: #ffffff;
+
+  --r: 6px;
+  --font: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+  --digits: "Inter", "Helvetica Neue", Arial, var(--font);
+  --ease: cubic-bezier(.16, 1, .3, 1);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1115;
-    --surface: #181b21;
-    --surface-2: #1f232b;
-    --ink: #f1f2f4;
-    --ink-2: #b9bec9;
-    --ink-3: #9299a6;
-    --line: rgba(255, 255, 255, .12);
-    --accent: #5b8cff;
-    --accent-ink: #0b1020;
-    --accent-soft: #1b2744;
-    --ok: #5fd08a;
-    --ok-soft: #14301f;
-    --warn: #f2b84b;
-    --warn-soft: #33270f;
-    --danger: #ff8a80;
-    --danger-soft: #3a1917;
-    --right: #ff9a5c;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px rgba(0, 0, 0, .3);
-    --shadow-lg: 0 2px 6px rgba(0, 0, 0, .5), 0 16px 40px rgba(0, 0, 0, .5);
+    --ground: #0e1028;
+    --ground-alt: #151838;
+    --ink: #eef0f6;
+    --ink-2: #b4b9c8;
+    --ink-3: #b4b9c8;
+    --line: rgba(255, 255, 255, .16);
+    --edge: #7d84a6;
+    --field: #151838;
+    --action: #c3c9ff;
+    --action-hover: #dfe2ff;
+    --action-ink: #181b40;
+    --danger: #f08a8a;
+    --danger-ink: #181b40;   /* 明るい赤の上の文字。6.6:1 */
+    --alarm: #8f2423;
+    --ok: #86d994;
+    --board: #1f2452;
   }
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scrollbar-color: var(--ink-3) transparent; }
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--ground);
   color: var(--ink);
-  font-family: var(--font);
-  font-size: 17px; /* スマホの本文の既定の大きさ（typography.md › Specifications） */
-  line-height: 1.5;
+  font: 400 16px/1.7 var(--font);
+  letter-spacing: .04em;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+  accent-color: var(--action);
+  caret-color: var(--action);
 }
-h1, h2, h3, p { margin: 0; }
-h1, h2, h3 { text-wrap: balance; line-height: 1.35; }
+::selection { background: var(--action); color: var(--action-ink); }
+h1, h2, h3, p, dl, dd, ul { margin: 0; }
+h1, h2, h3 { font-weight: 700; line-height: 1.4; text-wrap: balance; }
+h2 { font-size: 15px; letter-spacing: .12em; color: var(--action); }
 p { text-wrap: pretty; }
-.num { font-variant-numeric: tabular-nums; font-feature-settings: "palt" 0; }
+.num { font-variant-numeric: tabular-nums; }
+.digits { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-
-/* ---- 面 */
-.card { background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 20px; min-width: 0; }
-.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--ink-3); }
 .note { font-size: 13px; color: var(--ink-3); }
+:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }
 
-/* ---- ボタン */
+/* ---- ボタン: 形は1種類。主・従・取り消せない操作は、塗りと色だけで分ける */
 .btn {
-  appearance: none; font: inherit; font-weight: 600; color: var(--ink);
-  min-height: 44px; padding: 10px 18px; border: 0; border-radius: var(--r-md);
-  background: var(--surface); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(22, 24, 29, .06);
-  cursor: pointer; touch-action: manipulation;
-  transition: transform .12s ease, background-color .15s ease, box-shadow .15s ease, opacity .15s ease;
+  appearance: none; font: 700 15px/1.4 var(--font); letter-spacing: .06em; color: var(--action); white-space: nowrap;
+  min-height: 48px; padding: 8px 20px; border: 1px solid var(--action); border-radius: var(--r);
+  background: var(--field); cursor: pointer; touch-action: manipulation;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease), transform .1s var(--ease), opacity .15s var(--ease);
 }
-.btn:hover:not(:disabled) { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--ink-3), 0 1px 2px rgba(22, 24, 29, .06); }
-.btn:active:not(:disabled) { transform: scale(.97); }
-.btn:disabled { opacity: .4; cursor: not-allowed; }
-.btn-primary { background: var(--accent); color: var(--accent-ink); box-shadow: 0 1px 2px rgba(22, 24, 29, .2), 0 6px 16px color-mix(in srgb, var(--accent) 30%, transparent); }
-.btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, #000); box-shadow: 0 1px 2px rgba(22, 24, 29, .2), 0 8px 20px color-mix(in srgb, var(--accent) 36%, transparent); }
-.btn-danger { color: var(--danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent); }
-.btn-danger:hover:not(:disabled) { background: var(--danger-soft); box-shadow: inset 0 0 0 1px var(--danger); }
-.btn-lg { min-height: 60px; padding: 14px 28px; font-size: 20px; border-radius: 16px; }
-
-/* ---- 状態のピル */
-.pill {
-  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
-  padding: 4px 12px 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 700;
-  background: var(--surface-2); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line);
-}
-.pill.plain { padding-left: 12px; }
-.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .7; }
-.pill.plain::before { display: none; }
-.pill[data-state="open"] { background: var(--ok-soft); color: var(--ok); box-shadow: none; }
-.pill[data-state="open"]::before { opacity: 1; }
-.pill[data-state="preparing"], .pill[data-state="suspended"] { background: var(--warn-soft); color: var(--warn); box-shadow: none; }
-.pill[data-state="preparing_warn"] { background: var(--danger-soft); color: var(--danger); box-shadow: none; }
-.pill[data-state="sold"] { background: var(--ok-soft); color: var(--ok); box-shadow: none; }
+.btn:hover:not(:disabled) { background: var(--action); color: var(--action-ink); }
+.btn:active:not(:disabled) { transform: scale(.98); }
+.btn:disabled { opacity: .38; cursor: not-allowed; }
+.btn-primary { background: var(--action); border-color: var(--action); color: var(--action-ink); }
+.btn-primary:hover:not(:disabled) { background: var(--action-hover); border-color: var(--action-hover); }
+.btn-danger { color: var(--danger); border-color: var(--danger); }
+.btn-danger:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); color: var(--danger-ink); }
+.btn-lg { min-height: 60px; font-size: 18px; }
 
 /* ---- 入力 */
-.field { display: grid; gap: 4px; font-size: 13px; font-weight: 700; color: var(--ink-2); min-width: 0; }
+.field { display: grid; gap: 4px; font-size: 13px; font-weight: 700; color: var(--ink); min-width: 0; }
 .input {
-  font: inherit; font-weight: 400; color: var(--ink); min-height: 44px; padding: 8px 12px; width: 100%;
-  border: 0; border-radius: var(--r-sm); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line);
+  font: inherit; font-weight: 400; color: var(--ink); min-height: 48px; padding: 8px 12px; width: 100%;
+  border: 1px solid var(--edge); border-radius: var(--r); background: var(--field);
 }
-.input:focus-visible { outline-offset: 0; }
+.input::placeholder { color: var(--ink-3); }
+.input:focus-visible { outline-offset: 0; border-color: var(--action); }
+
+/* ---- 表示板（この画面のしるし） */
+.board { background: var(--board); color: var(--board-ink); border-top: 3px solid var(--red); padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.board-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--board-ink-2); }
+.board-top b { color: var(--board-ink); font-weight: 600; }
+.price { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -.02em; font-size: 72px; transition: transform .2s var(--ease); transform-origin: left bottom; }
+.price.tick { transform: scale(1.03); }
+/* ロットがない間は、数字の場所を空けずに、案内だけを出す */
+.board.idle .pricewrap { display: none; }
+.board-result { font-size: 18px; font-weight: 700; }
+.board-result:empty { display: none; }
+
+.lamps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--board-line); padding-top: 12px; }
+.lamp { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; align-items: center; min-width: 0; }
+.lamp + .lamp { border-left: 1px solid var(--board-line); padding-left: 12px; }
+/* ランプは、点灯＝塗りつぶし、消灯＝輪郭。色に頼らず形でも分かる */
+.bulb { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--lamp-off); grid-row: span 2; transition: background-color .2s var(--ease), border-color .2s var(--ease); }
+.lamp b { font-size: 16px; font-weight: 700; color: var(--board-ink-2); line-height: 1.3; }
+.lamp small { font-size: 13px; color: var(--board-ink-2); line-height: 1.3; overflow-wrap: anywhere; }
+.lamp.on b, .lamp.won b { color: var(--board-ink); }
+#urikiri.on .bulb { background: var(--lamp-green); border-color: var(--lamp-green); }
+#right.on .bulb { background: var(--lamp-amber); border-color: var(--lamp-amber); }
+#right.won .bulb { background: var(--lamp-green); border-color: var(--lamp-green); }
+
+/* ---- 状態の文字（点＋言葉。枠で囲まない） */
+.state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; white-space: nowrap; }
+.state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
+.state[data-on="1"]::before { background: currentColor; }
+
+/* ---- 表（区切りは細い線だけ） */
+.rows { list-style: none; padding: 0; }
+.rows > li { border-top: 1px solid var(--line); }
+.rows > li:first-child { border-top: 0; }
 
 /* ---- 再接続中（大きく表示する。FR-UI-001） */
 .overlay {
   position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; text-align: center;
-  padding: 24px; background: rgba(10, 12, 16, .86); color: #fff; font-size: clamp(28px, 7vw, 40px); font-weight: 800;
-  overscroll-behavior: contain;
+  padding: 24px; background: rgba(24, 27, 64, .94); color: #fff; font-size: 32px; font-weight: 700; overscroll-behavior: contain;
 }
-.overlay small { display: block; font-size: 15px; font-weight: 400; opacity: .8; margin-top: 8px; }
+.overlay small { display: block; font-size: 15px; font-weight: 400; color: rgba(255, 255, 255, .78); margin-top: 8px; }
 
-/* ---- ダイアログ */
+/* ---- ダイアログ（取り消せない操作の確認だけに使う） */
 dialog {
-  border: 0; padding: 24px; width: min(440px, calc(100vw - 32px)); border-radius: var(--r-lg);
-  background: var(--surface); color: var(--ink); box-shadow: var(--shadow-lg); overscroll-behavior: contain;
+  border: 1px solid var(--line); padding: 24px; width: min(440px, calc(100vw - 32px)); border-radius: var(--r);
+  background: var(--ground); color: var(--ink); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); overscroll-behavior: contain;
 }
-dialog::backdrop { background: rgba(10, 12, 16, .55); }
-dialog h2 { font-size: 18px; margin-bottom: 8px; }
+dialog::backdrop { background: rgba(24, 27, 64, .5); }
+dialog h2 { font-size: 18px; margin-bottom: 8px; letter-spacing: .06em; color: var(--ink); }
 dialog p { color: var(--ink-2); font-size: 15px; }
 dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 dialog .error { color: var(--danger); font-size: 13px; min-height: 20px; }
@@ -138,4 +175,19 @@ dialog .error { color: var(--danger); font-size: 13px; min-height: 20px; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
-@media (min-width: 960px) { body { font-size: 16px; } }
+/* 折りたたみ: 開閉の印は線で描く */
+details > summary { list-style: none; gap: 10px; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform .15s var(--ease); flex: none; }
+details[open] > summary::before { transform: rotate(45deg); }
+
+/* ---- NEWS のヘッダー（コーポレートサイトと同じ: 左にエンブレムと社名） */
+.brandbar { background: var(--ground); border-bottom: 1px solid var(--line); }
+.brandbar > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; margin: 0 auto; }
+.brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; color: var(--ink); text-decoration: none; }
+.brand img { width: 40px; height: 40px; flex: none; }
+.brand__text { display: grid; line-height: 1.3; min-width: 0; }
+.brand__name { font-weight: 700; font-size: 17px; letter-spacing: .1em; white-space: nowrap; }
+.brand__service { font-size: 12px; font-weight: 700; letter-spacing: .12em; color: var(--action); white-space: nowrap; }
+/* 後から入る文字（商品名・コメント）は、切り出した書体に無い字が混ざらないよう、端末の書体で通して表示する */
+.dyn { font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", "Noto Sans JP", sans-serif; letter-spacing: .02em; }

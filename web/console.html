@@ -3,180 +3,191 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#f2f2f5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
-<title>進行コンソール — ライブオークション PoC</title>
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1028" media="(prefers-color-scheme: dark)">
+<title>進行コンソール｜株式会社NEWS ライブオークション</title>
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<!-- impeccable-disable overused-font: Inter は News-HP（株式会社NEWS のサイト）で決まっている数字用の書体 -->
+<link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 <style>
-  .appbar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 1px 0 var(--line); }
-  .appbar > div { max-width: 1240px; margin: 0 auto; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  .appbar h1 { font-size: 16px; }
-  .appbar .meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  #clock { font-family: var(--mono); font-size: 22px; font-weight: 700; letter-spacing: .01em; }
-  main { max-width: 1240px; margin: 0 auto; padding: 20px; display: grid; gap: 20px; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; }
-  .col { display: grid; gap: 20px; min-width: 0; }
-  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px; gap: 12px; } .col { gap: 12px; } }
-  .cardhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-  .cardhead h2 { font-size: 15px; }
+  .brandbar > div, main { max-width: 1240px; margin: 0 auto; padding-left: 24px; padding-right: 24px; }
+  .brandbar > div { min-height: 80px; }
+  .brand img { width: 48px; height: 48px; }
+  .brand__name { font-size: 20px; }
+  .meta { display: flex; align-items: baseline; gap: 24px; color: var(--ink-2); font-size: 14px; }
+  .meta b { color: var(--ink); }
+  #clock { font-family: var(--digits); font-weight: 600; font-size: 24px; letter-spacing: 0; color: var(--action); min-width: 8.2ch; text-align: right; font-variant-numeric: tabular-nums; }
+  main { display: grid; gap: 40px; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; padding-top: 24px; padding-bottom: 48px; }
+  .col { display: grid; gap: 32px; min-width: 0; align-content: start; }
+  @media (max-width: 900px) { .brandbar > div, main { padding-left: 16px; padding-right: 16px; } main { grid-template-columns: minmax(0, 1fr); gap: 32px; } }
+  section > h2 { margin-bottom: 8px; }
+  .sechead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .sechead h2 { margin: 0; }
+  .count { font-size: 13px; color: var(--ink-3); }
 
-  /* 進行中のロット */
-  #title { font-size: 20px; font-weight: 700; overflow-wrap: anywhere; }
-  #price { font-size: clamp(48px, 7vw, 76px); font-weight: 700; line-height: 1.05; letter-spacing: -.02em; margin: 4px 0 12px; }
-  #price small { font-size: 16px; font-weight: 700; color: var(--ink-3); letter-spacing: 0; margin-left: 8px; }
-  .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 16px; }
-  .facts dd small { display: block; font-size: 12px; font-weight: 700; color: var(--ink-3); }
-  .facts dd small[data-on="1"] { color: var(--ok); }
-  .facts div { background: var(--surface-2); border-radius: var(--r-sm); padding: 8px 12px; }
-  .facts dt { font-size: 12px; font-weight: 700; color: var(--ink-3); }
-  .facts dd { margin: 0; font-size: 20px; font-weight: 700; }
-  .alert { display: none; gap: 4px; padding: 12px 16px; border-radius: var(--r-md); background: var(--danger-soft); color: var(--danger); font-weight: 700; margin-bottom: 16px; }
-  .alert span { font-weight: 400; color: var(--ink-2); font-size: 14px; }
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .actions .spacer { flex: 1 1 24px; }
-  #b_close { min-width: 200px; }
-  .sub { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
-  .sub h3 { font-size: 13px; color: var(--ink-3); margin-bottom: 8px; }
+  /* 表示板と、その下の操作 */
+  .board { padding: 20px; gap: 14px; }
+  .board-top { font-size: 15px; }
+  #lotNo { font-size: 20px; margin-right: 10px; color: var(--board-ink-2); }
+  #lotNo:empty { display: none; }
+  #title { color: var(--board-ink); font-weight: 700; font-size: 18px; overflow-wrap: anywhere; }
+  .board .state { color: var(--board-ink); }
+  .plabel { font-size: 13px; color: var(--board-ink-2); margin-bottom: 4px; }
+  .price { font-size: 92px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  .actions [hidden] { display: none; }
+  #b_close { min-width: 220px; }
+  .actions .push { margin-left: auto; }
 
-  .mono { font-family: var(--mono); font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; overscroll-behavior: contain; background: var(--surface-2); border-radius: var(--r-sm); padding: 10px 12px; }
-  .mono:empty::before { content: attr(data-empty); color: var(--ink-3); font-family: var(--font); }
-
-  /* 配信 */
-  .status { display: grid; gap: 2px; margin: 0 0 16px; }
-  .status div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
-  .status div:first-child { border-top: 0; }
-  .status dt { color: var(--ink-2); font-size: 14px; }
-  .status dd { margin: 0; font-weight: 700; text-align: right; }
-  .dot { display: inline-flex; align-items: center; gap: 8px; }
-  .dot::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--ink-3); }
-  .dot[data-on="1"]::before { background: var(--ok); box-shadow: 0 0 0 4px var(--ok-soft); }
-  .dot[data-on="0"]::before { background: var(--danger); }
-  .inline { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
-  .inline .field { flex: 1 1 200px; max-width: 280px; }
-
-  /* ロット一覧 */
-  .tablewrap { overflow-x: auto; margin: 0 -8px; }
+  /* 表 */
+  .tablewrap { overflow: auto; overscroll-behavior: contain; }
+  #histWrap { max-height: 260px; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th { text-align: left; font-size: 12px; color: var(--ink-3); font-weight: 700; padding: 6px 8px; white-space: nowrap; }
-  td { padding: 8px; border-top: 1px solid var(--line); vertical-align: middle; }
-  td:last-child { text-align: right; white-space: nowrap; }
-  tr.focus td { background: var(--accent-soft); }
-  tr.focus td:first-child { border-radius: var(--r-sm) 0 0 var(--r-sm); }
-  tr.focus td:last-child { border-radius: 0 var(--r-sm) var(--r-sm) 0; }
-  td .btn { min-height: 40px; padding: 6px 14px; font-size: 14px; }
-  #lotsEmpty { color: var(--ink-3); font-size: 14px; padding: 12px 0; }
-  .addlot { display: grid; grid-template-columns: minmax(0, 1fr) 130px 150px auto; gap: 8px; align-items: end; margin-top: 16px; }
+  th { text-align: left; font-size: 12px; font-weight: 700; color: var(--ink-2); padding: 6px 8px 6px 0; white-space: nowrap; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--ground); }
+  td { padding: 8px 8px 8px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  td:last-child { text-align: right; white-space: nowrap; padding-right: 0; }
+  td.amt { font-size: 18px; line-height: 1; }
+  td.digits { font-size: 16px; }
+  tr.void td { text-decoration: line-through; color: var(--ink-3); }
+  tr.focus td { font-weight: 700; background: var(--ground-alt); }
+  td .btn { min-height: 40px; padding: 4px 14px; font-size: 14px; }
+  .empty { color: var(--ink-3); font-size: 14px; padding: 10px 0; }
+  .addlot { display: grid; grid-template-columns: minmax(0, 1fr) 130px 170px auto; gap: 8px; align-items: end; margin-top: 16px; }
   @media (max-width: 640px) { .addlot { grid-template-columns: minmax(0, 1fr); } }
 
-  .cmtlist { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; overscroll-behavior: contain; }
-  .cmtlist li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; overflow-wrap: anywhere; }
-  .cmtlist li:first-child { border-top: 0; }
-  .cmtlist .who { font-weight: 700; color: var(--ink-3); white-space: nowrap; }
-  .cmtlist .btn { min-height: 36px; padding: 4px 12px; font-size: 13px; }
-  .dangerzone { box-shadow: var(--shadow), inset 0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent); }
-  .stack { display: grid; gap: 8px; justify-items: start; }
+  /* 配信 */
+  .kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0; font-size: 14px; }
+  .kv dt, .kv dd { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .kv dt { color: var(--ink-2); padding-right: 16px; }
+  .kv dd { text-align: right; font-weight: 600; }
+  .inline { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .inline .field { flex: 1 1 200px; max-width: 260px; }
+
+  #comments { list-style: none; padding: 0; max-height: 200px; overflow: auto; overscroll-behavior: contain; }
+  #comments li { display: grid; grid-template-columns: 3.5em minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; overflow-wrap: anywhere; }
+  #comments .who { color: var(--ink-3); }
+  #comments .btn { min-height: 32px; padding: 2px 10px; font-size: 13px; }
+  #log { font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; overscroll-behavior: contain; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  #log:empty::before { content: attr(data-empty); color: var(--ink-3); }
+
+  details summary { cursor: pointer; font-size: 15px; font-weight: 700; letter-spacing: .12em; color: var(--action); min-height: 44px; display: flex; align-items: center; }
+  details .stack { display: grid; gap: 8px; justify-items: start; margin-top: 8px; }
 </style>
 </head>
 <body>
 <div class="overlay" id="overlay" role="alert"><div><span id="overlayText">再接続中…</span><small id="overlaySub">サーバーが戻りしだい、自動でつなぎ直します</small></div></div>
 
-<header class="appbar">
+<header class="brandbar">
   <div>
-    <div><p class="eyebrow">ライブオークション PoC（検証用）</p><h1>進行コンソール</h1></div>
-    <div class="meta">
-      <span class="pill plain">参加者 <span class="num" id="presence">—</span> 人</span>
-      <span class="num" id="clock" title="サーバー時刻（日本時間）。映像に映して遅延を測るときに使う">—</span>
-    </div>
+  <h1 class="brand">
+    <img src="emblem-120.webp" width="48" height="48" alt="">
+    <span class="brand__text"><span class="brand__name">株式会社NEWS</span><span class="brand__service">ライブオークション 進行コンソール</span></span>
+  </h1>
+  <div class="meta">
+    <span>参加者 <b class="num" id="presence">0</b> 人</span>
+    <span id="clock" title="サーバー時刻（日本時間）。映像に映して遅延を測るときに使う"></span>
+  </div>
   </div>
 </header>
 
 <main>
   <div class="col">
-    <section class="card" aria-labelledby="curTitle">
-      <div class="cardhead"><h2 id="curTitle" class="eyebrow">進行中のロット</h2><span class="pill" id="status" data-state="">—</span></div>
-      <p id="title">進行中のロットはありません</p>
-      <div class="num" id="price" aria-live="polite">—</div>
-      <dl class="facts num">
-        <div><dt>次の入札額</dt><dd id="min">—</dd></div>
-        <div><dt>最高入札者</dt><dd id="highest">—</dd></div>
-        <div><dt>最低落札額（公開）</dt><dd><span id="reserve">—</span><small id="urikiri"></small></dd></div>
-      </dl>
-      <div class="alert" id="warn" role="alert">配信が始まりません（60秒経過）<span>「映像なしで開始」か「待機に戻す」を選んでください。</span></div>
+    <section aria-label="進行中のロット">
+      <div class="board" id="board">
+        <div class="board-top">
+          <span><span class="digits" id="lotNo"></span><span class="dyn" id="title">進行中のロットはありません</span></span>
+          <span class="state" id="status">待機中</span>
+        </div>
+        <div class="pricewrap">
+          <div class="plabel" id="priceLabel">現在価格</div>
+          <div class="price" id="price" aria-live="polite"></div>
+        </div>
+        <p class="board-result" id="result" role="status"></p>
+        <div class="lamps">
+          <div class="lamp" id="urikiri" role="status"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub">最低落札額なし</small></div>
+          <div class="lamp" id="right" role="status"><span class="bulb"></span><b id="rightLabel">最高入札者</b><small class="num" id="rightSub">なし</small></div>
+        </div>
+      </div>
       <div class="actions">
         <button class="btn btn-primary btn-lg" id="b_close" data-act="close" type="button">締め</button>
         <button class="btn" id="b_suspend" data-act="suspend" type="button">中断</button>
-        <button class="btn" id="b_resume" data-act="resume" type="button">再開</button>
-        <span class="spacer"></span>
-        <button class="btn" id="b_nv" data-act="start_without_video" type="button">映像なしで開始</button>
+        <button class="btn btn-primary" id="b_resume" data-act="resume" type="button">再開</button>
+        <button class="btn btn-primary" id="b_nv" data-act="start_without_video" type="button">映像なしで開始</button>
         <button class="btn" id="b_back" data-act="back_to_waiting" type="button">待機に戻す</button>
-        <button class="btn btn-danger" id="b_cancel" data-act="cancel" data-reason="1" type="button">取りやめ…</button>
-      </div>
-      <div class="sub">
-        <h3>入札の履歴（全件・受付順）</h3>
-        <div class="mono num" id="history" data-empty="まだ入札はありません。" tabindex="0" aria-label="入札の履歴"></div>
+        <button class="btn btn-danger push" id="b_cancel" data-act="cancel" data-reason="1" type="button">取りやめ…</button>
       </div>
     </section>
 
-    <section class="card" aria-labelledby="lotsTitle">
-      <div class="cardhead"><h2 id="lotsTitle" class="eyebrow">ロット一覧</h2></div>
-      <div class="tablewrap">
-        <table><thead><tr><th scope="col">番号</th><th scope="col">商品</th><th scope="col">開始価格</th><th scope="col">最低落札額</th><th scope="col">状態</th><th scope="col">結果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="lots" class="num"></tbody></table>
+    <section aria-labelledby="histTitle">
+      <div class="sechead"><h2 id="histTitle">入札の履歴</h2><span class="count num" id="histCount">0件</span></div>
+      <div class="tablewrap" id="histWrap" tabindex="0" aria-label="入札の履歴">
+        <table><thead><tr><th scope="col">受付連番</th><th scope="col">受付時刻</th><th scope="col">参加番号</th><th scope="col">入札額</th><th scope="col"><span class="sr-only">状態</span></th></tr></thead><tbody id="history"></tbody></table>
       </div>
-      <p id="lotsEmpty">ロットがまだありません。下の欄から追加してください。</p>
+      <p class="empty" id="histEmpty">入札はまだありません。</p>
+    </section>
+
+    <section aria-labelledby="lotsTitle">
+      <h2 id="lotsTitle">ロット一覧</h2>
+      <div class="tablewrap">
+        <table><thead><tr><th scope="col">番号</th><th scope="col">商品</th><th scope="col">開始価格</th><th scope="col">最低落札額</th><th scope="col">状態</th><th scope="col">結果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="lots"></tbody></table>
+      </div>
+      <p class="empty" id="lotsEmpty">ロットがまだありません。下の欄から追加してください。</p>
       <form class="addlot" id="addLot">
         <label class="field">商品名<input class="input" id="newTitle" name="title" value="テスト品" autocomplete="off" required></label>
-        <label class="field">開始価格（円・税込）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" value="9500" autocomplete="off" required></label>
-        <label class="field">最低落札額（任意・公開）<input class="input num" id="newReserve" name="reserve" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="なし…"></label>
+        <label class="field">開始価格（税込）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" value="9500" autocomplete="off" required></label>
+        <label class="field">最低落札額（任意、公開）<input class="input num" id="newReserve" name="reserve" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="なし"></label>
         <button class="btn" id="create" type="submit">ロットを追加</button>
       </form>
     </section>
   </div>
 
   <div class="col">
-    <section class="card" aria-labelledby="strTitle">
-      <div class="cardhead"><h2 id="strTitle" class="eyebrow">配信</h2><span class="pill" id="s_live" data-state="">—</span></div>
-      <dl class="status">
-        <div><dt>LIVE の判定（方法ごと）</dt><dd id="s_by">—</dd></div>
-        <div><dt>配信エージェント</dt><dd><span class="dot" id="s_agent">—</span></dd></div>
-        <div><dt>OBS</dt><dd><span class="dot" id="s_obs">—</span></dd></div>
-        <div><dt>自動停止まで</dt><dd class="num" id="s_auto">—</dd></div>
+    <section aria-labelledby="strTitle">
+      <div class="sechead"><h2 id="strTitle">配信</h2><span class="state" id="s_live">停止</span></div>
+      <dl class="kv">
+        <dt>配信エージェント</dt><dd><span class="state" id="s_agent">未接続</span></dd>
+        <dt>OBS</dt><dd><span class="state" id="s_obs">不明</span></dd>
+        <dt>LIVE の判定</dt><dd id="s_by">未取得</dd>
+        <dt>自動停止まで</dt><dd class="num" id="s_auto">未取得</dd>
       </dl>
       <div class="actions">
-        <button class="btn" data-cmd="stream_start" type="button">配信開始（手動）</button>
-        <button class="btn" data-cmd="stream_stop" type="button">配信停止（手動）</button>
+        <button class="btn" data-cmd="stream_start" type="button">配信を開始</button>
+        <button class="btn" data-cmd="stream_stop" type="button">配信を停止</button>
         <button class="btn" data-cmd="stream_status" type="button">状態を問い合わせる</button>
       </div>
-      <form class="sub inline" id="autoForm">
+      <form class="inline" id="autoForm">
         <label class="field">自動停止までの待ち時間（秒）<input class="input num" id="autoSec" name="sec" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" required></label>
         <button class="btn" id="autoSet" type="submit">変更</button>
       </form>
-      <p class="note" style="margin-top:12px">時刻の差 <span class="num" id="offset">—</span> ms・往復 <span class="num" id="rtt">—</span> ms</p>
     </section>
 
-    <section class="card" aria-labelledby="logTitle">
-      <div class="cardhead"><h2 id="logTitle" class="eyebrow">操作の記録</h2></div>
-      <div class="mono num" id="log" role="log" aria-live="polite" tabindex="0" data-empty="まだ記録はありません。"></div>
-      <form class="sub inline" id="markForm">
-        <label class="field">測定のラベル<input class="input" id="markLabel" name="label" placeholder="例: P1-1…" autocomplete="off"></label>
-        <button class="btn" data-mark="start" type="button">測定開始の印</button>
-        <button class="btn" data-mark="end" type="button">測定終了の印</button>
+    <section aria-labelledby="cmtTitle">
+      <h2 id="cmtTitle">参加者のコメント</h2>
+      <ul id="comments"></ul>
+      <p class="empty" id="cmtEmpty">コメントはまだありません。</p>
+    </section>
+
+    <section aria-labelledby="logTitle">
+      <h2 id="logTitle">操作の記録</h2>
+      <div id="log" role="log" aria-live="polite" tabindex="0" data-empty="記録はまだありません。"></div>
+    </section>
+
+    <details>
+      <summary>測定と障害の模擬</summary>
+      <p class="note">時刻の差 <span class="num" id="offset">0</span> ms、往復 <span class="num" id="rtt">0</span> ms</p>
+      <form class="inline" id="markForm">
+        <label class="field">測定のラベル<input class="input" id="markLabel" name="label" placeholder="例: P1-1" autocomplete="off"></label>
+        <button class="btn" data-mark="start" type="button">開始の印</button>
+        <button class="btn" data-mark="end" type="button">終了の印</button>
       </form>
-    </section>
-
-    <section class="card" aria-labelledby="cmtTitle">
-      <div class="cardhead"><h2 id="cmtTitle" class="eyebrow">参加者のコメント</h2></div>
-      <ul id="comments" class="cmtlist"></ul>
-      <p class="note" id="cmtEmpty">まだコメントはありません。</p>
-    </section>
-
-    <section class="card dangerzone" aria-labelledby="dzTitle">
-      <div class="cardhead"><h2 id="dzTitle" class="eyebrow">障害の模擬（検証用）</h2></div>
       <div class="stack">
         <button class="btn btn-danger" data-crash="now" type="button">サーバーを強制終了する…</button>
         <button class="btn btn-danger" data-crash="after_close_record" type="button">次の「締め」の記録直後に強制終了…</button>
         <button class="btn btn-danger" data-crash="before_close_record" type="button">次の「締め」の記録前に強制終了…</button>
       </div>
-      <p class="note" id="crashNote" style="margin-top:12px">強制終了の後は、サーバーが自動で起動し直すのを待ちます。</p>
-    </section>
+      <p class="note" id="crashNote">強制終了の後は、サーバーが自動で起動し直すのを待ちます。</p>
+    </details>
   </div>
 </main>
 
@@ -184,7 +195,7 @@
   <form method="dialog" id="dlgForm">
     <h2 id="dlgTitle"></h2>
     <p id="dlgBody"></p>
-    <label class="field" id="dlgReasonWrap" style="margin-top:16px">理由（必須）<input class="input" id="dlgReason" name="reason" autocomplete="off" placeholder="例: 商品の取り違え…"></label>
+    <label class="field" id="dlgReasonWrap" style="margin-top:16px">理由（必須）<input class="input" id="dlgReason" name="reason" autocomplete="off" placeholder="例: 商品の取り違え"></label>
     <p class="error" id="dlgError" role="alert"></p>
     <div class="actions">
       <button class="btn" type="button" id="dlgCancel">やめる</button>
@@ -201,8 +212,8 @@ function renderComments() {
   $('comments').replaceChildren(...S.comments.map((c) => {
     const li = document.createElement('li');
     const who = document.createElement('span'); who.className = 'who num'; who.textContent = `${c.paddle}番`;
-    const body = document.createElement('span'); body.textContent = c.text;
-    const hide = document.createElement('button'); hide.type = 'button'; hide.className = 'btn'; hide.textContent = '非表示にする';
+    const body = document.createElement('span'); body.className = 'dyn'; body.textContent = c.text;
+    const hide = document.createElement('button'); hide.type = 'button'; hide.className = 'btn'; hide.textContent = '非表示';
     hide.setAttribute('aria-label', `${c.paddle}番のコメント「${c.text}」を非表示にする`);
     hide.onclick = () => cmd('hide_comment', { id: c.id });
     li.append(who, body, hide);
@@ -214,25 +225,48 @@ function renderComments() {
 const log = (text) => { const el = $('log'); el.textContent += `${jst(link ? link.serverNow() : Date.now())} ${text}\n`; el.scrollTop = el.scrollHeight; };
 
 function focusLot() { return S.lots.get(S.focus) ?? null; }
+function setLamp(id, on, sub) {
+  const el = $(id);
+  el.className = on ? 'lamp on' : 'lamp';
+  $(id + 'Sub').textContent = sub;
+  el.setAttribute('aria-label', `${$(id + 'Label').textContent}、${on ? '点灯' : '消灯'}。${sub}`);
+}
 function render() {
   const lot = focusLot();
   const st = lot?.status;
-  $('status').textContent = lot ? STATE_LABEL[st] + (lot.noVideo && st === 'open' ? '・映像なし' : '') : '—';
-  $('status').dataset.state = st ?? '';
-  $('title').textContent = lot ? `ロット ${lot.lotNo}　${lot.title}` : '進行中のロットはありません';
-  $('price').textContent = lot ? yen(lot.currentPrice ?? lot.startPrice) : '—';
-  if (lot && lot.currentPrice === null) { const sm = document.createElement('small'); sm.textContent = '開始価格・入札なし'; $('price').appendChild(sm); }
-  $('min').textContent = lot && lot.status !== 'sold' && lot.status !== 'unsold' ? yen(lot.minBid) : '—';
-  $('highest').textContent = lot?.highestPaddle ? `${lot.highestPaddle}番` : '—';
-  $('reserve').textContent = lot ? (lot.reservePrice === null ? 'なし' : yen(lot.reservePrice)) : '—';
-  $('urikiri').textContent = lot ? (lot.urikiri ? 'うりきり（締めれば売れる）' : 'うりきり前（締めると流札）') : '';
-  $('urikiri').dataset.on = lot?.urikiri ? '1' : '';
-  $('warn').style.display = st === 'preparing_warn' ? 'grid' : 'none';
-  $('b_close').disabled = st !== 'open'; $('b_suspend').disabled = st !== 'open';
-  $('b_resume').disabled = st !== 'suspended'; $('b_cancel').disabled = st !== 'suspended';
-  $('b_nv').disabled = st !== 'preparing_warn'; $('b_back').disabled = st !== 'preparing' && st !== 'preparing_warn';
-  $('history').textContent = S.history.map((h) => `${String(h.seq).padStart(7)}  ${jst(h.received_at)}  ${String(h.paddle).padStart(3)}番  ${yen(h.amount).padStart(10)}${h.valid ? '' : '  （無効）'}`).join('\n');
-  $('history').scrollTop = $('history').scrollHeight;
+  $('board').classList.toggle('idle', !lot);
+  $('status').textContent = lot ? STATE_LABEL[st] + (lot.noVideo && st === 'open' ? '（映像なし）' : '') : '待機中';
+  $('status').dataset.on = st === 'open' ? '1' : '';
+  $('lotNo').textContent = lot ? `No.${lot.lotNo}` : '';
+  $('title').textContent = lot ? lot.title : '進行中のロットはありません';
+  $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札価格' : lot.currentPrice === null ? '開始価格' : '現在価格';
+  $('price').textContent = lot ? yen(lot.currentPrice ?? lot.startPrice) : '';
+  // 落札の条件は、うりきり（最低落札額に届いている）と、最高入札者がいることの両方
+  setLamp('urikiri', !!lot?.urikiri, !lot ? '最低落札額なし' : lot.reservePrice === null ? '最低落札額なし' : `最低落札額 ${yen(lot.reservePrice)}`);
+  setLamp('right', !!lot?.highestPaddle && st !== 'unsold', lot?.highestPaddle ? `${lot.highestPaddle}番` : 'なし');
+  $('result').textContent = !lot ? 'ロット一覧から「競り開始」を押してください'
+    : st === 'sold' ? `${lot.highestPaddle}番 落札`
+    : st === 'unsold' ? (lot.currentPrice !== null ? '流札（最低落札額に届きませんでした）' : '流札')
+    : st === 'open' ? (lot.currentPrice === null ? '入札はまだありません。いま締めると流札になります' : lot.urikiri ? `いま締めると、${lot.highestPaddle}番が落札します` : 'いま締めると流札になります（最低落札額に届いていません）')
+    : st === 'preparing' ? '配信が始まるのを待っています'
+    : st === 'preparing_warn' ? '配信が始まりません（60秒経過）。映像なしで開始するか、待機に戻してください'
+    : st === 'suspended' ? '中断しています' : '';
+  // その状態でできる操作だけを出す
+  const show = (id, on) => { $(id).hidden = !on; };
+  show('b_close', !lot || st === 'open' || st === 'sold' || st === 'unsold'); $('b_close').disabled = st !== 'open';
+  show('b_suspend', st === 'open'); show('b_resume', st === 'suspended'); show('b_cancel', st === 'suspended');
+  show('b_nv', st === 'preparing_warn'); show('b_back', st === 'preparing' || st === 'preparing_warn');
+
+  const cell = (text, cls) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; return td; };
+  $('history').replaceChildren(...S.history.map((h) => {
+    const tr = document.createElement('tr');
+    if (!h.valid) tr.className = 'void';
+    tr.append(cell(h.seq, 'num'), cell(jst(h.received_at), 'num'), cell(`${h.paddle}番`, 'num'), cell(yen(h.amount), 'digits amt'), cell(h.valid ? '' : '無効'));
+    return tr;
+  }));
+  $('histEmpty').style.display = S.history.length ? 'none' : 'block';
+  $('histCount').textContent = `${S.history.filter((h) => h.valid).length}件`;
+  $('histWrap').scrollTop = $('histWrap').scrollHeight;
 
   const busy = [...S.lots.values()].some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status));
   const tb = $('lots'); tb.replaceChildren();
@@ -240,9 +274,8 @@ function render() {
   for (const l of S.lots.values()) {
     const tr = document.createElement('tr');
     if (l.id === S.focus) tr.className = 'focus';
-    const cells = [l.lotNo, l.title, yen(l.startPrice), l.reservePrice === null ? 'なし' : yen(l.reservePrice), STATE_LABEL[l.status],
-      l.status === 'sold' ? `${l.highestPaddle}番 ${yen(l.currentPrice)}` : l.status === 'unsold' && l.currentPrice !== null ? '最低落札額に届かず' : ''];
-    for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
+    tr.append(cell(l.lotNo, 'digits'), cell(l.title, 'dyn'), cell(yen(l.startPrice), 'num'), cell(l.reservePrice === null ? 'なし' : yen(l.reservePrice), 'num'), cell(STATE_LABEL[l.status]),
+      cell(l.status === 'sold' ? `${l.highestPaddle}番 ${yen(l.currentPrice)}` : l.status === 'unsold' && l.currentPrice !== null ? '最低落札額に届かず' : '', 'num'));
     const td = document.createElement('td');
     if (l.status === 'waiting') {
       const b1 = document.createElement('button'); b1.type = 'button'; b1.textContent = '競り開始'; b1.className = 'btn btn-primary'; b1.disabled = busy;
@@ -259,17 +292,17 @@ function render() {
 function renderStream() {
   const s = S.stream; if (!s) return;
   $('s_live').textContent = s.mode === 'always-live' ? '常に LIVE とみなす' : s.live ? 'LIVE' : s.waiting ? 'LIVE を待っています' : '停止';
-  $('s_live').dataset.state = s.live ? 'open' : s.waiting ? 'preparing' : '';
-  const yn = (v) => (v ? 'LIVE' : '—');
-  $('s_by').textContent = `問い合わせ ${yn(s.liveBy.poll)}／イベント ${yn(s.liveBy.event)}` + (s.mode === 'mock' ? `／代役 ${yn(s.liveBy.mock)}` : '');
-  $('s_agent').textContent = s.agentConnected ? '接続中' : '未接続'; $('s_agent').dataset.on = s.agentConnected ? '1' : '0';
-  $('s_obs').textContent = s.obsActive === null ? '不明' : s.obsActive ? '配信中' : '停止'; $('s_obs').dataset.on = s.obsActive === null ? '' : s.obsActive ? '1' : '';
+  $('s_live').dataset.on = s.live ? '1' : '';
+  const yn = (v) => (v ? 'LIVE' : '未検出');
+  $('s_by').textContent = `問い合わせ ${yn(s.liveBy.poll)}、イベント ${yn(s.liveBy.event)}` + (s.mode === 'mock' ? `、代役 ${yn(s.liveBy.mock)}` : '');
+  $('s_agent').textContent = s.agentConnected ? '接続中' : '未接続'; $('s_agent').dataset.on = s.agentConnected ? '1' : '';
+  $('s_obs').textContent = s.obsActive === null ? '不明' : s.obsActive ? '配信中' : '停止'; $('s_obs').dataset.on = s.obsActive ? '1' : '';
   if (document.activeElement !== $('autoSec')) $('autoSec').value = Math.round(s.autoStopMs / 1000);
 }
 setInterval(() => {
   if (!link) return;
   $('clock').textContent = jst(link.serverNow());
-  $('offset').textContent = link.offset.toFixed(1); $('rtt').textContent = link.rtt?.toFixed(1) ?? '—';
+  $('offset').textContent = link.offset.toFixed(1); $('rtt').textContent = link.rtt?.toFixed(1) ?? '0';
   const due = S.stream?.autoStopDueAt;
   $('s_auto').textContent = due ? `あと ${Math.max(0, Math.ceil((due - link.serverNow()) / 1000))} 秒` : '数えていません';
 }, 50);
@@ -278,7 +311,7 @@ async function cmd(action, extra = {}) {
   const reqId = ++link.reqId, sent = localNow();
   const res = await link.request(reqId, { type: 'cmd', reqId, action, ...extra, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
   if (!res) log(`${action}: 応答なし`);
-  else if (!res.ok) log(`${action}: 拒否 — ${res.message}`);
+  else if (!res.ok) log(`${action}: 拒否（${res.message}）`);
   else log(`${action}: OK${res.status ? `（${STATE_LABEL[res.status]}${res.reason === 'reserve_not_met' ? '・最低落札額に届かず' : ''} ${res.paddle ?? ''} ${res.amount ? yen(res.amount) : ''}）` : ''} ${Math.round(res.clientRecvAt - sent)}ms`);
   return res;
 }
