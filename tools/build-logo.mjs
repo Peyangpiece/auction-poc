@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 「令和の競り」のロゴを作る。毛筆の楷書の書体（Yuji Syuku。SIL OFL）の文字を図形に変換し、会社のシンボルの色で組む。
 //   node tools/build-logo.mjs docs/brand
+//   LOGO_FONT=<書体のファイル> LOGO_STYLE=gyosho node tools/build-logo.mjs <出力先>   … 別の書体（行書など）で作る
 // 実行には、書体と変換の部品が要る（npm install --no-save opentype.js @fontsource/yuji-syuku）。
 // できあがるロゴは図形だけなので、使う側に書体は要らない。
 import fs from 'node:fs';
@@ -11,13 +12,22 @@ const { chromium } = require('playwright');
 const ROOT = new URL('..', import.meta.url).pathname;
 const OUT = process.argv[2];
 if (!OUT) { console.error('使い方: node tools/build-logo.mjs <出力先のフォルダ>'); process.exit(1); }
-const buf = fs.readFileSync(require.resolve('@fontsource/yuji-syuku/files/yuji-syuku-japanese-400-normal.woff'));
+// 書体は、既定では Yuji Syuku（楷書。SIL OFL）。LOGO_FONT で、手元にある別の書体のファイルを指定できる
+// （利用条件は、書体ごとに確かめること。書体のファイルそのものは、このリポジトリに入れない）
+const buf = fs.readFileSync(process.env.LOGO_FONT ?? require.resolve('@fontsource/yuji-syuku/files/yuji-syuku-japanese-400-normal.woff'));
+const GYOSHO = process.env.LOGO_STYLE === 'gyosho';
 const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
 const NAVY = '#000156', GOLD = '#d4aa00', RED = '#ff0000', WHITE = '#ffffff';
 
 // 文字ごとに、大きさ・上下の位置・詰め具合を決める（「の」を小さく赤に、「競り」を大きく。「令和」は、会社の名前の読みを漢字にしたもの）
-// 楷書らしく、字の大きさと下の線をそろえ、間を均等にとる。「の」だけ少し小さくして赤に
-const glyphs = [
+// 楷書: 字の大きさと下の線をそろえ、間を均等にとる。行書: 字に大小と流れをつけ、間を詰める。「の」は小さくして赤に
+const glyphs = GYOSHO ? [
+  { ch: '令', size: 178, dy: 0, gap: -6, role: 'main' },
+  { ch: '和', size: 170, dy: 2, gap: -14, role: 'main' },
+  { ch: 'の', size: 118, dy: -6, gap: -6, role: 'accent' },
+  { ch: '競', size: 190, dy: 6, gap: -24, role: 'main' },
+  { ch: 'り', size: 168, dy: 0, gap: 0, role: 'main' },
+] : [
   { ch: '令', size: 176, dy: 0, gap: -10, role: 'main' },
   { ch: '和', size: 176, dy: 0, gap: -4, role: 'main' },
   { ch: 'の', size: 118, dy: -8, gap: 0, role: 'accent' },
