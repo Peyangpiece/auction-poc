@@ -11,6 +11,7 @@ import { Metrics } from './metrics.js';
 import { StreamControl } from './stream.js';
 import { Auction } from './auction.js';
 import { nowMs } from './clock.js';
+import { createApi } from './mvp/api.js';
 
 const config = loadConfig();
 const store = openDb(config.dbPath);
@@ -113,6 +114,9 @@ const auction = new Auction({ store, config, metrics, broadcast, stream, crashPo
 const recovered = auction.recover();
 if (recovered.length) console.log('[recovery]', JSON.stringify(recovered));
 
+// 会員登録・ログイン・スタッフ・商品・審査・カタログ（MVP の 1・2）
+const api = createApi({ store, config, nowMs });
+
 // ---------------------------------------------------------------- HTTP
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png' };
 
@@ -152,6 +156,7 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, agent: stream.view().agentConnected }));
   }
   if (url.pathname === '/hooks/ivs' && req.method === 'POST') return handleEventBridge(req, res);
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) return api.handle(req, res, url);
   if (req.method !== 'GET') return res.writeHead(405).end();
 
   const name = url.pathname === '/' ? 'index.html' : path.basename(url.pathname);
@@ -360,7 +365,19 @@ function onAuctioneer(conn, msg, send) {
       case 'stream_stop': stream.manual('stop'); return ok();
       case 'stream_status': stream.manual('status'); return ok();
       case 'set_auto_stop': stream.setAutoStopMs(Number(msg.ms)); return ok();
-      case 'create_lot': return ok({ lot: auction.createLot(msg) });
+      case 'create_lot': {
+        // 商品は、競りの最中にその場で登録する（発注者の決定）。別の人による事前の審査は通らないので、
+        // 出品禁止の言葉が品名に含まれていたら、登録する本人に判断の理由を求め、記録に残す（FR-ITEM-006・007 の趣旨）。
+        const words = api.bannedIn(msg.title);
+        const reason = String(msg.reason ?? '').trim().slice(0, 1000);
+        if (words.length && !reason) {
+          return send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: false, action: msg.action, code: 'BANNED_WORD', words,
+            message: `出品禁止の言葉（${words.join('、')}）が含まれています。登録するには、判断の理由が必要です` });
+        }
+        const lot = auction.createLot(msg);
+        api.audit({ system: true }, 'lot.create', { target: `lot:${lot.id}`, after: { via: 'console', staff: conn.staff.id, title: lot.title, startPrice: lot.startPrice, warnings: words }, reason: reason || null });
+        return ok({ lot });
+      }
       case 'lot_log': return ok({ log: auction.lotLog(Number(msg.lotId)) });
       case 'hide_comment': // 不適切なコメントを全員の画面から消す（記録は残す）
         store.q.hideComment.run(Number(msg.id));

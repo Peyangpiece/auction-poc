@@ -76,6 +76,12 @@ export function loadConfig(env = process.env) {
     // ブラウザに守らせる読み込みの制限（Content-Security-Policy）。off で付けない
     csp: env.POC_CSP || 'on',
 
+    // ---- 会員・スタッフ（MVP の 1・2）
+    // クッキーに Secure を付ける（HTTPS だけで送る）。本番は必ず 1。手前のプロキシが x-forwarded-proto: https を付ける場合は自動で付く
+    cookieSecure: env.POC_COOKIE_SECURE === '1',
+    // 認証の試行（認証番号の送信・照合、スタッフのログイン）の上限。同じ接続元から1分あたり。0 で外す
+    authRatePerMin: num(env.POC_AUTH_RATE, 20),
+
     sysSampleMs: num(env.POC_SYS_SAMPLE_MS, 10000),
   };
 }

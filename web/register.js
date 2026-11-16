@@ -1,0 +1,57 @@
+// 会員登録: 電話番号 → SMS の認証番号 → お客様の情報。
+'use strict';
+
+const forms = { phone: $('#stepPhone'), code: $('#stepCode'), profile: $('#stepProfile') };
+let phone = '';
+
+function show(step) {
+  const order = ['phone', 'code', 'profile'];
+  order.forEach((name, i) => {
+    forms[name].hidden = name !== step;
+    const li = $('#steps').children[i];
+    if (name === step) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
+  });
+  forms[step].querySelector('input:not([type=radio])')?.focus();
+}
+
+onSubmit(forms.phone, async (data) => {
+  phone = data.phone;
+  const res = await api('POST', '/api/register/start', { phone });
+  if (res.ok) { $('#sentTo').textContent = `${phone} に送りました。5分以内に入力してください`; show('code'); }
+  else if (res.login) res.message = 'この電話番号は登録済みです。下の「ログイン」からお入りください';
+  return res;
+});
+onSubmit(forms.code, async (data) => {
+  const res = await api('POST', '/api/register/verify', { phone, code: data.code });
+  if (res.ok) show('profile');
+  else forms.code.elements.code.value = '';
+  return res;
+});
+$('#resend').addEventListener('click', async (ev) => {
+  ev.target.disabled = true;
+  const res = await api('POST', '/api/register/start', { phone });
+  const msg = $('.msg', forms.code);
+  msg.classList.toggle('ok', res.ok);
+  msg.textContent = res.ok ? '認証番号を送り直しました' : res.message;
+  setTimeout(() => { ev.target.disabled = false; }, 10000); // 続けて押せないようにする
+});
+
+function syncKind() {
+  const corp = forms.profile.elements.kind.value === 'b2b';
+  $('#corp').hidden = !corp;
+  $('#adultRow').hidden = corp; // 18歳以上の申告は、個人だけ
+}
+forms.profile.addEventListener('change', syncKind);
+onSubmit(forms.profile, async (data) => {
+  const res = await api('POST', '/api/register/complete', { ...data, adult: data.adult === '1' });
+  if (res.ok) location.href = '/mypage.html?registered=1';
+  else if (res.status === 401) { res.message = '時間が空いたため、電話番号の確認からやり直してください'; show('phone'); }
+  return res;
+});
+
+(async () => {
+  const me = await setupNav();
+  if (me.member) location.replace('/mypage.html');
+  else if (me.registering) show('profile'); // 認証まで済ませて、読み込み直した場合
+  syncKind();
+})();

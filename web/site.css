@@ -1,0 +1,113 @@
+/* 会員登録・ログイン・マイページ・カタログ・スタッフ用の管理画面のスタイル。色と書体は app.css（News-HP に合わせたもの）を使う。 */
+.brandbar > div { max-width: 1080px; padding: 0 16px; }
+.brandbar nav { display: flex; align-items: center; gap: 4px; flex: none; }
+.brandbar nav a, .linkbtn { white-space: nowrap; }
+.brandbar nav a, .linkbtn {
+  appearance: none; border: 0; background: none; cursor: pointer; font: 700 14px/1.4 var(--font); letter-spacing: .06em;
+  color: var(--action); text-decoration: none; padding: 12px 10px; min-height: 44px; display: inline-flex; align-items: center; border-radius: var(--r);
+}
+.brandbar nav a:hover, .linkbtn:hover { text-decoration: underline; text-underline-offset: 4px; }
+[hidden] { display: none !important; }
+
+main { max-width: 1080px; margin: 0 auto; padding: 32px 16px 80px; }
+main.narrow { max-width: 520px; }
+.pagehead { margin-bottom: 24px; }
+.pagehead h1 { font-size: 26px; letter-spacing: .08em; }
+.pagehead p { color: var(--ink-2); margin-top: 4px; }
+.rule { width: 40px; height: 3px; background: var(--red); margin: 12px 0 0; border: 0; }
+
+/* ---- 入力の画面 */
+.form { display: grid; gap: 16px; }
+.form .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.form .btn-primary { flex: 1 1 200px; }
+.field small { font-weight: 400; color: var(--ink-2); }
+.field .err { font-weight: 400; color: var(--danger); min-height: 0; }
+.field .err:empty { display: none; }
+.input[aria-invalid="true"] { border-color: var(--danger); border-width: 2px; }
+textarea.input { min-height: 96px; resize: vertical; line-height: 1.6; }
+select.input { appearance: auto; }
+.code { font-family: var(--digits); font-size: 28px; letter-spacing: .3em; text-align: center; font-variant-numeric: tabular-nums; }
+.choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; border: 0; padding: 0; margin: 0; }
+.choice legend { font-size: 13px; font-weight: 700; padding: 0; margin-bottom: 4px; }
+.choice label { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: var(--r); cursor: pointer; font-weight: 700; }
+.choice label:has(input:checked) { border-color: var(--action); border-width: 2px; padding: 7px 11px; color: var(--action); }
+.check { display: flex; align-items: flex-start; gap: 10px; font-weight: 700; cursor: pointer; min-height: 44px; padding: 8px 0; }
+.check .err { display: block; font-weight: 400; color: var(--danger); font-size: 13px; }
+.check input { width: 20px; height: 20px; margin: 3px 0 0; flex: none; }
+.msg { font-size: 14px; min-height: 22px; color: var(--danger); }
+.msg.ok { color: var(--ok); }
+.msg:empty { min-height: 0; }
+.steps { display: flex; gap: 16px; list-style: none; padding: 0; margin: 0 0 24px; font-size: 13px; font-weight: 700; color: var(--ink-2); }
+.steps li { display: flex; align-items: center; gap: 6px; }
+.steps li::before { content: attr(data-n); font-family: var(--digits); width: 22px; height: 22px; border-radius: 50%; border: 1px solid currentColor; display: grid; place-items: center; font-size: 12px; }
+.steps li[aria-current] { color: var(--action); }
+.steps li[aria-current]::before { background: var(--action); color: var(--action-ink); border-color: var(--action); }
+.aside { margin-top: 24px; font-size: 14px; color: var(--ink-2); }
+.aside a, .text a { color: var(--action); font-weight: 700; text-underline-offset: 4px; }
+
+/* ---- 内容の一覧（名前と値） */
+.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0; }
+.facts dt { padding-right: 24px; }
+.facts dt, .facts dd { padding: 12px 0; border-top: 1px solid var(--line); }
+.facts dt { line-height: 1.95; font-size: 13px; font-weight: 700; color: var(--ink-2); }
+.facts dt:first-of-type, .facts dt:first-of-type + dd { border-top: 0; }
+.facts dd { overflow-wrap: anywhere; }
+.banner { border-top: 3px solid var(--red); background: var(--ground-alt); padding: 12px 16px; margin-bottom: 24px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+
+/* ---- カタログ */
+.event { margin-bottom: 48px; }
+.event > header { border-top: 3px solid var(--red); background: var(--board); color: var(--board-ink); padding: 16px; }
+.event > header h2 { color: var(--board-ink); font-size: 20px; letter-spacing: .06em; }
+.event > header p { color: var(--board-ink-2); font-size: 14px; }
+.cards { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 24px 16px; padding-top: 24px; }
+.card { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.card button { appearance: none; border: 0; padding: 0; background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; display: grid; gap: 8px; }
+.thumb { aspect-ratio: 4 / 3; width: 100%; object-fit: cover; background: var(--ground-alt); border-radius: var(--r); display: block; }
+div.thumb { display: grid; place-items: center; color: var(--ink-2); font-size: 13px; }
+.card .no { font-size: 13px; font-weight: 700; color: var(--action); letter-spacing: .08em; }
+.card h3 { font-size: 16px; overflow-wrap: anywhere; }
+.card .from { font-size: 13px; color: var(--ink-2); }
+.card .from b { font-size: 20px; color: var(--ink); margin-left: 6px; }
+.empty { padding: 48px 0; color: var(--ink-2); text-align: center; }
+.terms { border-top: 1px solid var(--line); padding-top: 24px; display: grid; gap: 16px; font-size: 14px; color: var(--ink-2); }
+.terms h2 { margin-bottom: 4px; }
+.pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+dialog.wide { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 12px 0; }
+.gallery figure { margin: 0; position: relative; }
+.gallery img { aspect-ratio: 4 / 3; width: 100%; object-fit: cover; border-radius: var(--r); display: block; background: var(--ground-alt); }
+.gallery button { position: absolute; top: 4px; right: 4px; min-height: 32px; padding: 2px 8px; font-size: 12px; }
+.hero { aspect-ratio: 4 / 3; width: 100%; object-fit: contain; background: var(--ground-alt); border-radius: var(--r); }
+
+/* ---- スタッフ用の管理 */
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); margin-bottom: 24px; overflow-x: auto; }
+.tabs button { appearance: none; border: 0; background: none; font: 700 15px/1.4 var(--font); letter-spacing: .06em; color: var(--ink-2); padding: 12px 16px; min-height: 48px; cursor: pointer; white-space: nowrap; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+.tabs button[aria-selected="true"] { color: var(--action); border-bottom-color: var(--red); }
+.toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { text-align: left; font-size: 12px; letter-spacing: .08em; color: var(--ink-2); padding: 8px 12px 8px 0; border-bottom: 1px solid var(--edge); white-space: nowrap; }
+td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); vertical-align: middle; overflow-wrap: anywhere; }
+td.act { white-space: nowrap; text-align: right; padding-right: 0; }
+td.act .btn { min-height: 40px; padding: 4px 12px; font-size: 13px; margin-left: 4px; }
+td.n { font-family: var(--digits); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.warn { color: var(--danger); font-weight: 700; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: end; }
+.photos { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
+.photos:empty { display: none; }
+.secret { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 14px; letter-spacing: 0; overflow-wrap: anywhere; user-select: all; background: var(--ground-alt); padding: 8px 12px; border-radius: var(--r); }
+.narrowcol, #login { max-width: 520px; }
+@media (max-width: 560px) {
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .pagehead h1 { font-size: 22px; }
+  .brand__service { display: none; }
+  .brand__name { font-size: 15px; letter-spacing: .04em; }
+  .brandbar nav a, .linkbtn { font-size: 13px; padding: 12px 6px; letter-spacing: .02em; }
+  .brandbar > div { gap: 8px; }
+  .brand { gap: 8px; }
+}
+@media (max-width: 370px) {
+  /* 幅の狭い端末では、社名はエンブレムに任せて、メニューを1行に収める */
+  .brand__name { display: none; }
+}

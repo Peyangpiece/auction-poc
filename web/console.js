@@ -161,7 +161,17 @@ document.querySelectorAll('[data-crash]').forEach((b) => b.addEventListener('cli
 }));
 document.querySelectorAll('[data-mark]').forEach((b) => b.addEventListener('click', () => cmd('mark', { label: $('markLabel').value || 'unnamed', phase: b.dataset.mark })));
 $('markForm').addEventListener('submit', (ev) => ev.preventDefault());
-$('addLot').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('create_lot', { title: $('newTitle').value, startPrice: Number($('newPrice').value), reservePrice: $('newReserve').value === '' ? null : Number($('newReserve').value) }); });
+$('addLot').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const lot = { title: $('newTitle').value, startPrice: Number($('newPrice').value), reservePrice: $('newReserve').value === '' ? null : Number($('newReserve').value) };
+  const res = await cmd('create_lot', lot);
+  // 出品禁止の言葉が含まれていたら、判断の理由を聞いてから登録する（理由は記録に残る）
+  if (res && !res.ok && res.code === 'BANNED_WORD') {
+    const answer = await ask({ title: '出品禁止の言葉が含まれています', body: `「${res.words.join('」「')}」が品名に含まれています。出品してよいと判断した理由を入力してください。`, needReason: true, okLabel: '登録する', danger: true });
+    if (answer) await cmd('create_lot', { ...lot, reason: answer.reason });
+    else $('cmdMsg').textContent = '';
+  }
+});
 
 function onMessage(msg, at) {
   switch (msg.type) {
