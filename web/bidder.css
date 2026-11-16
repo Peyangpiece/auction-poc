@@ -159,6 +159,15 @@ details dd { overflow-wrap: anywhere; }
 #gateEvent b { font-family: var(--digits); font-size: 28px; color: var(--action); margin-left: 8px; }
 #join { display: grid; gap: 16px; text-align: left; }
 #join[hidden], #enter[hidden] { display: none; }
+/* 参加のしかた（オンライン・会場）を選ぶ、大きな2つのボタン */
+.pickhead { font-size: 16px; letter-spacing: .06em; color: var(--ink); margin: 0 0 12px; }
+.modes { display: grid; gap: 12px; }
+.mode { display: grid; gap: 6px; text-align: left; padding: 18px 20px; min-height: 96px; border: 1px solid var(--edge); border-radius: var(--r); background: var(--ground); color: var(--ink); font: inherit; cursor: pointer; }
+.mode b { font-size: 20px; color: var(--action); letter-spacing: .04em; }
+.mode span { font-size: 14px; color: var(--ink-2); line-height: 1.6; }
+.mode:hover { border-color: var(--action); background: var(--ground-alt); }
+.mode:active { border-width: 2px; padding: 17px 19px; }
+#join .textbtn { background: none; border: 0; padding: 12px 4px; font: inherit; font-size: 14px; color: var(--ink-2); text-decoration: underline; text-underline-offset: 4px; cursor: pointer; justify-self: center; }
 .pick { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .pick legend { font-size: 13px; font-weight: 700; padding: 0; margin-bottom: 4px; }
 .pick label { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; min-height: 48px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: var(--r); font-weight: 700; cursor: pointer; }

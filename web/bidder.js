@@ -432,22 +432,38 @@ if (!token) (async () => {
     if (p.venue && p.mode === 'online') $('gateMsg').textContent = 'オンライン参加で手続き済みです。会場で参加するには、受付にお申し出ください。';
     return showPaddle(p.event.title, p);
   }
-  // 参加手続き: 受け取り方法と支払方法を、どちらも選ばれていない状態で聞く（FR-MODE-005）
-  const asVenue = p.venue;
-  $('gateEvent').textContent = asVenue ? `${p.event.title}　会場参加` : p.event.title;
-  // 当日現金は、会場参加の人だけが選べる（FR-PAY-002）
-  const cash = $('join').elements.payment[1];
-  cash.disabled = !asVenue;
-  cash.closest('label').classList.toggle('off', !asVenue);
-  $('cashNote').hidden = asVenue;
-  $('join').hidden = false;
+  // まず、オンラインか会場かを選んでもらう（発注者の指示）。会場の QR コードから来た人は、会場参加に決まっているので聞かない
   getJson('/api/terms').then((t) => { if (t.status === 200) $('joinTerms').textContent = `${premiumText(t)}${t.shippingNotice}\n${t.returnPolicy}`; });
+  let asVenue = p.venue;
+  // 参加手続き: 受け取り方法と支払方法を、どちらも選ばれていない状態で聞く（FR-MODE-005）
+  const showJoin = () => {
+    $('gateEvent').textContent = `${p.event.title}　${asVenue ? '会場参加' : 'オンライン参加'}`;
+    // 当日現金は、会場参加の人だけが選べる（FR-PAY-002）
+    const cash = $('join').elements.payment[1];
+    cash.disabled = !asVenue;
+    if (!asVenue) cash.checked = false;
+    cash.closest('label').classList.toggle('off', !asVenue);
+    $('cashNote').hidden = asVenue;
+    $('modePick').hidden = true;
+    $('join').hidden = false;
+    $('backToMode').hidden = p.venue;
+    $('gateMsg').textContent = '';
+  };
+  const showPick = () => {
+    $('gateEvent').textContent = p.event.title;
+    $('join').hidden = true;
+    $('modePick').hidden = false;
+    $('gateMsg').textContent = '';
+  };
+  for (const b of document.querySelectorAll('[data-pick]')) b.addEventListener('click', () => { asVenue = b.dataset.pick === 'venue'; showJoin(); $('join').querySelector('input').focus(); });
+  $('backToMode').addEventListener('click', showPick);
+  if (p.venue) showJoin(); else showPick();
   $('join').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const data = new FormData($('join'));
     $('gateMsg').textContent = '';
-    const res = await getJson('/api/join', { receive: data.get('receive'), payment: data.get('payment'), ...(asVenue ? { venueCode } : {}) });
-    if (res.status === 200) showPaddle(p.event.title, res);
+    const res = await getJson('/api/join', { receive: data.get('receive'), payment: data.get('payment'), ...(asVenue ? (p.venue ? { venueCode } : { mode: 'venue' }) : {}) });
+    if (res.status === 200) { $('join').hidden = true; showPaddle(p.event.title, res); }
     else $('gateMsg').textContent = res.message ?? 'うまくいきませんでした。やり直してください';
   });
 })();

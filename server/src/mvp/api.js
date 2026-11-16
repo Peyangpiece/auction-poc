@@ -642,9 +642,10 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const member = needMember(ctx);
     const event = activeEvent();
     if (!event) throw new HttpError(409, '本日の開催はありません');
-    // 会場参加は、会場の QR コードから来た人だけ（FR-MODE-002）。それ以外は、オンライン参加
+    // 会場参加は、会場の QR コードから来た人と、画面で「会場で参加」を選んだ人（発注者の指示）。それ以外は、オンライン参加。
+    // どちらの場合も、会場参加の人は、受付係の来場確認が済むまで入札できない（下の bidGate）ので、自分で選んだだけでは会場参加として動けない
     if (body.venueCode && !venueMatches(event, body.venueCode)) throw bad('会場の QR コードが、本日の開催のものではありません。受付で、もう一度読み取ってください');
-    const mode = body.venueCode ? 'venue' : 'online';
+    const mode = body.venueCode || body.mode === 'venue' ? 'venue' : 'online';
     const errors = {};
     if (!RECEIVE[body.receive]) errors.receive = '受け取り方法を選んでください';
     // オンライン参加の人は、銀行振込だけを選べる。会場参加の人は、当日現金と銀行振込のどちらも選べる（FR-PAY-002）

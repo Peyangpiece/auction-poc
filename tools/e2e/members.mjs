@@ -194,7 +194,15 @@ try {
 
   console.log('参加手続きと入札');
   await phone.click('text=競りに参加する');
+  await phone.waitForSelector('#modePick:not([hidden])');
+  check((await phone.locator('[data-pick]').count()) === 2 && await phone.isHidden('#join'), '参加の前に、オンラインか会場かの2択が出る');
+  await phone.click('[data-pick=venue]');
   await phone.waitForSelector('#join:not([hidden])');
+  check(await phone.isEnabled('#join [name=payment][value=cash]'), '会場を選ぶと、当日現金が選べる');
+  await phone.click('#backToMode');
+  await phone.click('[data-pick=online]');
+  await phone.waitForSelector('#join:not([hidden])');
+  check(await phone.isDisabled('#join [name=payment][value=cash]') && (await phone.textContent('#gateEvent')).includes('オンライン参加'), '選び直して、オンラインにできる');
   check((await phone.locator('#join input:checked').count()) === 0, '受け取り方法と支払方法は、どちらも選ばれていない状態で聞く');
   check(await phone.isHidden('#enter'), '答えるまで、入札画面に進むボタンは出ない');
   await phone.waitForFunction(() => document.getElementById('joinTerms').textContent.includes('買歩銭'));

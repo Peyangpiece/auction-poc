@@ -394,3 +394,14 @@ test('休憩と開催終了（FR-CON-003、FR-EVT-003）', async () => {
     w1.close(); con.close();
   } finally { await t.end(); }
 });
+
+test('画面で「会場で参加」を選んだ人は、会場参加になる。来場確認が済むまでは、入札画面につなげない', async () => {
+  const t = await setup();
+  try {
+    const a = await t.register('09055550011', '検証 一郎');
+    await t.publishEvent('12月の競り');
+    const res = await a.post('/api/join', { receive: 'pickup', payment: 'cash', mode: 'venue' });
+    assert.deepEqual([res.status, res.json.mode, res.json.checkedIn], [200, 'venue', false], '会場参加なので、当日現金も選べる');
+    await assert.rejects(t.ws(a), /来場の確認/, '受付の来場確認の前は、つなげない');
+  } finally { await t.end(); }
+});
