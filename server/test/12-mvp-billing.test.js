@@ -569,3 +569,19 @@ test('違約金・遅延損害金の金額の案、帳簿の出力、請求書�
     assert.equal((await reception.get('/api/billing/ledger.csv')).status, 403);
   } finally { await t.close(); }
 });
+
+test('請求書の件名は「開催日 令和の競り」だけ（開催の名前は入れない）', async () => {
+  const t = await setup();
+  try {
+    const a = await t.member(1, { venue: true });
+    t.sold('飯ごう', [[a, 2000]]);
+    const inv = (await t.admin.post('/api/billing/settle', { lineIds: [(await t.line('飯ごう')).id] })).json.invoice;
+    // Excel の中身から、件名を読む（PDF は、文字が埋め込みの書体の番号になっているため）
+    const { default: ExcelJS } = await import('exceljs');
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load((await t.admin.get(`/api/billing/invoices/${inv.id}/xlsx`)).buf);
+    const cells = [];
+    book.worksheets[0].eachRow((row) => cells.push(String(row.getCell(1).value ?? '')));
+    assert.ok(cells.includes('件名 : 12.7 令和の競り'), cells.find((c) => c.startsWith('件名')));
+  } finally { await t.close(); }
+});
