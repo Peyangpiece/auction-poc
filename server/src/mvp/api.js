@@ -30,7 +30,7 @@ class HttpError extends Error {
 }
 const bad = (message, extra) => new HttpError(400, message, extra);
 
-export function createApi({ store, config, nowMs }) {
+export function createApi({ store, config, nowMs, persistStatus = () => null }) {
   const db = store.db;
   // 以前の版のデータベース: スタッフの役割に「開発・運営者」を足すには、表を作り直すしかない（SQLite の制約）。行の id は変えない
   const oldStaff = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'staff_accounts'").get();
@@ -174,6 +174,8 @@ export function createApi({ store, config, nowMs }) {
     member: ctx.member ? memberView(ctx.member) : null,
     staff: ctx.staff ? { loginId: ctx.staff.login_id, name: ctx.staff.name, role: ctx.staff.role, roleLabel: ROLE_LABEL[ctx.staff.role] } : null,
     registering: !!ctx.registerPhone,
+    // 外の保存先への保存が、30秒より長く失敗し続けているか（スタッフにだけ知らせる。画面に警告を出す）
+    ...(ctx.staff ? { storageFailing: (() => { const st = persistStatus(); return !!(st && st.failingSince && nowMs() - st.failingSince > 30000); })() } : {}),
   }));
 
   // 登録: 電話番号 → SMS 認証 → 入力

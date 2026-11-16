@@ -75,10 +75,20 @@ function field(label, name, props = {}, hint = '') {
   return el('label', { class: 'field' }, label, hint && el('small', { text: hint }), input, el('span', { class: 'err', role: 'alert' }));
 }
 
+/** スタッフ向け: データの保存が失敗し続けているときに、画面の上に警告を出す（1分ごとに確かめる） */
+function watchStorage(first) {
+  const bar = el('p', { class: 'alarm', role: 'alert', hidden: true, text: 'データの保存に失敗しています。競りを進める前に、システムの担当者へ連絡してください。' });
+  document.body.prepend(bar);
+  const show = (me) => { bar.hidden = !me?.storageFailing; };
+  show(first);
+  setInterval(async () => show(await api('GET', '/api/me')), 60000);
+}
+
 /** ヘッダーの右側（ログインの状態に合わせる） */
 async function setupNav() {
   const nav = $('#nav');
   const me = await api('GET', '/api/me');
+  if (me.staff) watchStorage(me);
   if (nav) {
     const link = (href, text) => el('a', { href, text });
     const here = location.pathname;

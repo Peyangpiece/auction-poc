@@ -174,7 +174,7 @@ try {
   await phone.click('#stepProfile button[type=submit]');
   await phone.waitForURL(/mypage\.html/);
   await phone.waitForSelector('#facts dd');
-  check((await phone.textContent('#facts')).includes('09000001111'), '登録が済み、マイページに内容が出る');
+  check((await phone.textContent('#facts')).includes('090-0000-1111'), '登録が済み、マイページに内容が出る');
   check(await phone.isVisible('#emailBanner'), 'メールアドレスが未確認であることを出す');
   await shot(phone, 'mvp-10-mypage');
   const link = /https?:\/\/\S+/.exec(outbox().find((m) => m.channel === 'email').body)[0];
@@ -386,7 +386,7 @@ try {
   await phone.waitForSelector('#suspended:not([hidden])');
   check(true, '主催者管理者が会員を停止でき、本人の画面に出る');
   await admin.click('#tabs [data-key=audit]');
-  await admin.waitForFunction(() => ['member.suspend', 'lot.create'].every((t) => document.querySelector('#panel').textContent.includes(t)));
+  await admin.waitForFunction(() => ['会員を停止', '品を登録'].every((t) => document.querySelector('#panel').textContent.includes(t)));
   check(true, '会員の停止と、その場での商品登録が、記録に残る');
   await shot(admin, 'mvp-12-audit');
 

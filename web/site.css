@@ -155,7 +155,18 @@ td .note { font-size: 12px; }
 .seal { width: 96px; height: 96px; object-fit: contain; background: #fff; border: 1px solid var(--line); border-radius: var(--r); }
 @media (max-width: 560px) { .brand__logo { height: 40px; } }
 @media (max-width: 370px) { .brand__logo { height: 34px; } }
-.legal-links { display: flex; gap: 4px 24px; flex-wrap: wrap; margin-top: 32px; font-size: 14px; }
-.legal-links a, .check a { color: var(--action); font-weight: 700; text-underline-offset: 4px; }
+/* 文の中に置く、控えめなボタン（退会など、目立たせたくない操作） */
+.textbtn { background: none; border: 0; padding: 12px 4px; font: inherit; color: var(--ink-2); text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
+.textbtn:hover { color: var(--action); }
+.notfound { margin-bottom: 32px; }
+/* ---- フッター（会社名と規約へのリンク） */
+.sitefoot { border-top: 1px solid var(--line); margin-top: 64px; padding: 24px 16px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; gap: 8px 32px; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--ink-2); max-width: 1080px; margin-inline: auto; }
+.sitefoot p { font-weight: 700; letter-spacing: .08em; }
+.sitefoot nav { display: flex; flex-wrap: wrap; gap: 4px 24px; }
+.sitefoot a { color: var(--ink-2); text-underline-offset: 4px; padding: 8px 0; }
+.sitefoot a:hover { color: var(--action); }
+/* ---- スタッフ向けの警告（データの保存の失敗） */
+.alarm { background: #c40000; color: #fff; font-weight: 700; padding: 12px 16px; text-align: center; }
+.check a { color: var(--action); font-weight: 700; text-underline-offset: 4px; }
 .legaldoc { margin-bottom: 48px; scroll-margin-top: 16px; }
 .legaldoc h2 { font-size: 20px; color: var(--ink); margin-bottom: 12px; }

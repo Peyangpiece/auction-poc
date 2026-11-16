@@ -415,13 +415,26 @@ async function settingsPanel() {
 }
 
 // ------------------------------------------------------------ 記録（監査ログ・知らせ）
+// 記録の「操作」を、読める言葉にする（無いものは、そのまま出す）
+const AUDIT_TEXT = {
+  'staff.login': 'スタッフがログイン', 'staff.create': 'スタッフを登録', 'staff.reset': 'スタッフのパスワードを再発行', 'staff.stop': 'スタッフを停止', 'staff.password_change': 'スタッフがパスワードを変更',
+  'member.register': '会員登録', 'member.update': '会員が登録内容を変更', 'member.withdraw': '会員が退会', 'member.suspend': '会員を停止', 'member.unsuspend': '会員の停止を解除', 'member.phone_change': '会員の電話番号を変更',
+  'event.create': '開催を登録', 'event.update': '開催を変更', 'event.publish': '開催を公開', 'event.join': '参加手続き', 'participation.change': '参加の内容を変更',
+  'lot.create': '品を登録', 'proxy.bid': '代理で入札', 'proxy.cancel': '代理の入札を取り消し',
+  'reception.checkin': '来場を確認', 'reception.join': '参加手続きを代行',
+  'billing.settle': '当日現金で精算', 'billing.clear': '入金を消し込み', 'billing.unclear': '消し込みを取り消し', 'billing.deliver': '引き渡し', 'billing.undeliver': '引き渡しを取り消し',
+  'billing.cancel': '落札を解除', 'billing.penalty': '違約金を請求', 'billing.refund': '返金', 'billing.offer': '繰り上げを案内', 'billing.dun': '督促', 'billing.memo': 'メモを変更', 'billing.receive': '受け取り方法を変更',
+  'billing.shipping': '送料を入力', 'billing.shipping_export': '配送の一覧を書き出し', 'billing.ledger_export': '帳簿用の記録を書き出し',
+  'invoice.issue_on_end': '請求書を発行', 'invoice.sent': '請求書を送付済みに', 'invoice.unsent': '送付済みを取り消し', 'offer.accept': '繰り上げを承諾', 'offer.decline': '繰り上げを辞退',
+  'fee.confirm': '手数料の明細を確認', 'settings.update': '設定を変更', 'settings.legal': '規約を変更', 'settings.seal': '印鑑の画像を変更', 'sms.limit_reset': 'SMS の制限を解除',
+};
 async function auditPanel() {
   const [audit, notices] = await Promise.all([api('GET', '/api/audit'), api('GET', '/api/notices')]);
   const who = (e) => (e.actor_kind === 'staff' ? `スタッフ ${e.actor_id}` : e.actor_kind === 'member' ? `会員 ${e.actor_id}` : e.actor_kind === 'system' ? 'システム' : '');
   return [
     (notices.notices ?? []).length ? el('div', { class: 'banner', role: 'alert' }, el('span', { text: `送信に失敗した知らせが ${notices.notices.length} 件あります（SMS・メール）。` })) : null,
     table(['日時', '操作', '誰が', '対象', '前', '後', '理由'], audit.entries.map((e) => el('tr', {},
-      el('td', { class: 'n', text: dateFmt.format(e.at) }), el('td', { text: e.type }), el('td', { text: who(e) }), el('td', { text: e.target }),
+      el('td', { class: 'n', text: dateFmt.format(e.at) }), el('td', { text: AUDIT_TEXT[e.type] ?? e.type }), el('td', { text: who(e) }), el('td', { text: e.target }),
       el('td', { class: 'dyn', text: e.before ?? '' }), el('td', { class: 'dyn', text: e.after ?? '' }), el('td', { class: 'dyn', text: e.reason ?? '' }))), '記録はまだありません。'),
   ];
 }

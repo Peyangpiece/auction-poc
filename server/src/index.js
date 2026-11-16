@@ -115,7 +115,7 @@ function onComment(conn, msg, send) {
 
 const stream = new StreamControl({ config, metrics, broadcast });
 // 会員登録・ログイン・スタッフ・開催・参加手続き。商品は、進行コンソールからその場で登録する
-const api = createApi({ store, config, nowMs });
+const api = createApi({ store, config, nowMs, persistStatus: () => saver?.status() ?? null });
 const auction = new Auction({ store, config, metrics, broadcast, stream, crashPoint, eventId: api.eventId, bidGate: api.bidGate });
 const recovered = auction.recover();
 if (recovered.length) console.log('[recovery]', JSON.stringify(recovered));
@@ -169,7 +169,16 @@ const server = http.createServer((req, res) => {
   const name = url.pathname === '/' ? 'index.html' : path.basename(url.pathname);
   const file = path.join(config.webDir, name);
   fs.readFile(file, (err, body) => {
-    if (err) return res.writeHead(404).end('not found');
+    if (err) {
+      // 画面を開こうとした場合（.html か、拡張子なし）は、案内のページを返す。部品（画像・スクリプトなど）は短い返事だけ
+      const wantsPage = ['', '.html'].includes(path.extname(name));
+      if (!wantsPage) return res.writeHead(404).end('not found');
+      return fs.readFile(path.join(config.webDir, '404.html'), (e2, page) => {
+        if (e2) return res.writeHead(404).end('not found');
+        res.writeHead(404, { 'content-type': MIME['.html'], 'cache-control': 'no-store' });
+        res.end(page);
+      });
+    }
     const ext = path.extname(file);
     if (!MIME[ext]) return res.writeHead(404).end('not found'); // 画面に使う種類のファイルだけを配る
     // 書体と画像は1日おぼえさせる。画面とスクリプトは毎回取り直す（直した内容がすぐ届く）

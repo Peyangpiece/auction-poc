@@ -2,6 +2,8 @@
 'use strict';
 
 let profile = null;
+// 電話番号を、読みやすく区切る（携帯の 11 桁は 3-4-4。それ以外は、そのまま）
+const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.slice(3, 7)}-${p.slice(7)}` : p);
 (async () => {
   const me = await setupNav();
   const m = me.member;
@@ -21,7 +23,7 @@ let profile = null;
   $('#emailBanner').hidden = m.emailVerified;
   const rows = [
     ['区分', m.kind === 'b2b' ? '法人' : '個人'],
-    ['会社名', m.company], ['担当者名', m.contactName], ['氏名', m.name], ['電話番号', m.phone],
+    ['会社名', m.company], ['担当者名', m.contactName], ['氏名', m.name], ['電話番号', telFmt(m.phone)],
     ['メールアドレス', m.email + (m.emailVerified ? '（確認済み）' : '（未確認）')],
     ['住所', m.address], ['配送先', m.shipTo], ['請求先', m.billing],
   ];

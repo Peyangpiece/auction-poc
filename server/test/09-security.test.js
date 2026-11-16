@@ -137,3 +137,17 @@ test('バックアップ: 動かしたまま取れ、世代を残し、復元で
   assert.deepEqual(log.bids.map((x) => x.amount), [1000]);
   await srv.stop(); cleanup(ctx);
 });
+
+test('見つからないページは、案内のページを 404 で返す。部品は短い返事だけ', async () => {
+  const ctx = makeEnv();
+  const srv = await startServer(ctx);
+  try {
+    const page = await fetch(`${srv.httpUrl}/nai-page.html`);
+    assert.equal(page.status, 404);
+    assert.match(page.headers.get('content-type'), /text\/html/);
+    assert.match(await page.text(), /ページが見つかりません/);
+    const part = await fetch(`${srv.httpUrl}/nai.js`);
+    assert.equal(part.status, 404);
+    assert.equal(await part.text(), 'not found');
+  } finally { await srv.stop(); cleanup(ctx); }
+});
