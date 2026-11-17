@@ -37,9 +37,9 @@ const open = async (url, opts) => {
 };
 const staffLogin = async (staff) => {
   const page = await open('/staff.html', { viewport: { width: 1280, height: 860 } });
-  await page.fill('[name=loginId]', staff.id);
-  await page.fill('[name=password]', staff.password);
-  await page.fill('[name=code]', totp(staff.secret));
+  await page.fill('#loginForm [name=email]', staff.id);
+  await page.fill('#loginForm [name=password]', staff.password);
+  await page.click('#loginForm button[type=submit]');
   return page;
 };
 

@@ -170,13 +170,13 @@ test('ログイン: 電話番号と SMS の認証番号。最後の操作から3
   } finally { await t.close(); }
 });
 
-test('スタッフ: ID・パスワード・二段階認証。誤り5回で15分ロック、12時間で切れる（FR-AUTH-012）', async () => {
+test('スタッフ（前からのログイン ID の形）: パスワード。誤り5回で15分ロック、12時間で切れる（FR-AUTH-012）', async () => {
   const t = await setup();
   try {
     const s = t.api.createStaff({ loginId: 'kanri', name: '管理 花子', role: 'admin' });
     const b = t.browser();
     const good = () => ({ loginId: 'kanri', password: s.initialPassword, code: totp(s.totpSecret) });
-    assert.equal((await b.post('/api/staff/login', { ...good(), code: '000000' === totp(s.totpSecret) ? '111111' : '000000' })).status, 401, '二段階認証が違えば入れない');
+    assert.equal((await b.post('/api/staff/login', { ...good(), password: 'x' })).status, 401, 'パスワードが違えば入れない（認証アプリのコードは、使わなくなった）');
     assert.equal((await b.post('/api/staff/login', { ...good(), password: 'x' })).status, 401);
     for (let i = 0; i < 3; i++) await b.post('/api/staff/login', { ...good(), password: 'x' });
     assert.equal((await b.post('/api/staff/login', good())).status, 423, '5回誤ると、正しくても入れない');
@@ -460,5 +460,48 @@ test('会員登録を承認しないと、電話番号が空き、もう一度�
     assert.equal((await admin.get('/api/members')).json.members[0].rejected, true);
     assert.ok(t.outbox().some((m) => m.channel === 'email' && /お受けできませんでした/.test(m.body)));
     assert.equal((await register(t, t.browser(), phone)).json.pending, true, '同じ番号で、もう一度申し込める');
+  } finally { await t.close(); }
+});
+
+test('スタッフ: 主催者管理者がメールアドレスを登録する。本人は、最初のログインで、確認コードを入れてパスワードを決める', async () => {
+  const t = await setup();
+  try {
+    const admin = await t.staffLogin('admin', 'kanri', null);
+    const made = await admin.post('/api/staff/accounts', { email: 'Uketsuke@Example.com', name: '受付 太郎', role: 'reception' });
+    assert.equal(made.status, 200);
+    assert.deepEqual([made.json.email, made.json.setupCode.length], ['uketsuke@example.com', 8]);
+    assert.equal((await admin.post('/api/staff/accounts', { email: 'uketsuke@example.com', name: '二重', role: 'reception' })).status, 409);
+    assert.equal((await admin.post('/api/staff/accounts', { email: 'x', name: 'x', role: 'reception' })).status, 400);
+    const mail = t.outbox().filter((m) => m.channel === 'email' && m.to === 'uketsuke@example.com').at(-1);
+    assert.match(mail.body, new RegExp(`確認コード: ${made.json.setupCode}`));
+    // パスワードは、元に戻せない形で保存する（データベースに、確認コードもパスワードも、そのままの文字では無い）
+    const row = () => t.store.db.prepare('SELECT * FROM staff_accounts WHERE email = ?').get('uketsuke@example.com');
+    assert.equal(row().password_hash, '');
+    assert.ok(!row().setup_hash.includes(made.json.setupCode));
+    const b = t.browser();
+    // パスワードを決める前は、ログインできない。確認コードが違えば、決められない
+    assert.equal((await b.post('/api/staff/login', { email: 'uketsuke@example.com', password: '' })).status, 401);
+    assert.equal((await b.post('/api/staff/setup', { email: 'uketsuke@example.com', code: 'chigau00', password: 'tadashii-password-1' })).status, 401);
+    assert.ok((await b.post('/api/staff/setup', { email: 'uketsuke@example.com', code: made.json.setupCode, password: 'short' })).json.errors.password);
+    const ok = await b.post('/api/staff/setup', { email: 'UKETSUKE@example.com', code: made.json.setupCode, password: 'tadashii-password-1' });
+    assert.equal(ok.status, 200);
+    assert.equal((await b.get('/api/me')).json.staff.role, 'reception');
+    assert.ok(row().password_hash.length > 40 && !row().password_hash.includes('tadashii-password-1'), 'パスワードは、ハッシュで保存する');
+    assert.equal(row().setup_hash, null, '確認コードは、1回で使えなくなる');
+    assert.equal((await t.browser().post('/api/staff/setup', { email: 'uketsuke@example.com', code: made.json.setupCode, password: 'betsuno-password-2' })).status, 401);
+    // 次からは、メールアドレスとパスワード
+    assert.equal((await t.browser().post('/api/staff/login', { email: 'uketsuke@example.com', password: 'chigau' })).status, 401);
+    assert.equal((await t.browser().post('/api/staff/login', { email: 'Uketsuke@example.com', password: 'tadashii-password-1' })).status, 200);
+    // 出し直し: パスワードが消え、それまでのログインは切れる。新しい確認コードで、決め直す
+    const id = (await admin.get('/api/staff/accounts')).json.staff.find((x) => x.email === 'uketsuke@example.com').id;
+    const reset = await admin.post(`/api/staff/accounts/${id}/reset`);
+    assert.equal(reset.status, 200);
+    assert.equal((await b.get('/api/me')).json.staff, null);
+    assert.equal((await t.browser().post('/api/staff/login', { email: 'uketsuke@example.com', password: 'tadashii-password-1' })).status, 401);
+    assert.equal((await t.browser().post('/api/staff/setup', { email: 'uketsuke@example.com', code: reset.json.setupCode, password: 'atarashii-password-3' })).status, 200);
+    // 確認コードの期限は 7 日
+    const late = await admin.post('/api/staff/accounts', { email: 'osoi@example.com', name: '遅い', role: 'operator' });
+    t.advance(8 * 24 * 60 * MIN);
+    assert.equal((await t.browser().post('/api/staff/setup', { email: 'osoi@example.com', code: late.json.setupCode, password: 'tadashii-password-1' })).status, 401);
   } finally { await t.close(); }
 });

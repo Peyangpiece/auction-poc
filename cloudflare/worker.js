@@ -65,6 +65,8 @@ export class AuctionApp extends DurableObject {
         ...(demo ? { POC_DEV_SHOW_CODES: '1', POC_SETUP_ARGS: '--with-event' } : {}),
         // 管理者（admin）の最初のパスワード。ソースには書かず、wrangler secret put ADMIN_PASSWORD で入れる
         ...(this.env.ADMIN_PASSWORD ? { POC_ADMIN_PASSWORD: this.env.ADMIN_PASSWORD } : {}),
+        // 最初の主催者管理者のメールアドレス（秘密の値。ソースには書かない）。あれば、起動のときに登録する
+        ...(this.env.ADMIN_EMAIL ? { POC_ADMIN_EMAIL: this.env.ADMIN_EMAIL } : {}),
       };
       // コンテナごとに、登録し直す決まり
       await container.interceptOutboundHttp(STORE_HOST, this.ctx.exports.DataStore);

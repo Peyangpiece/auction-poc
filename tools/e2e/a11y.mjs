@@ -49,8 +49,7 @@ for (const scheme of ['light', 'dark']) {
   const sc = await mk({ width: 1280, height: 900 });
   let sp = await sc.newPage(); await sp.goto(B + '/staff.html'); await sp.waitForTimeout(700); await scan(sp, 'staff-login', scheme); await sp.close();
   const password = fs.readFileSync(D + '/staff-initial-admin.txt', 'utf8').match(/仮のパスワード: (\S+)/)[1];
-  const code = (await post(sc, '/api/dev/staff-code', { loginId: 'admin', password })).code;
-  await post(sc, '/api/staff/login', { loginId: 'admin', password, code });
+  await post(sc, '/api/staff/login', { email: 'admin', password });
   sp = await sc.newPage(); await sp.goto(B + '/staff.html'); await sp.waitForTimeout(1000);
   const n = await sp.locator('#tabs button').count();
   for (let i = 0; i < n; i++) { await sp.click(`#tabs button:nth-child(${i + 1})`); await sp.waitForTimeout(600); await scan(sp, 'staff-tab-' + (await sp.textContent(`#tabs button:nth-child(${i + 1})`)), scheme); }

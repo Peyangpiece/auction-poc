@@ -17,6 +17,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
       WRANGLER: npx --yes wrangler@4.163.0
     steps:
       - uses: actions/checkout@v4
@@ -35,3 +36,6 @@ jobs:
         run: $WRANGLER deploy --var BUILD:${{ github.sha }}
       - name: 管理者の最初のパスワードを入れる
         run: printf '%s' "$ADMIN_PASSWORD" | $WRANGLER secret put ADMIN_PASSWORD
+      - name: 最初の主催者管理者のメールアドレスを入れる（GitHub に ADMIN_EMAIL があるときだけ）
+        if: env.ADMIN_EMAIL != ''
+        run: printf '%s' "$ADMIN_EMAIL" | $WRANGLER secret put ADMIN_EMAIL

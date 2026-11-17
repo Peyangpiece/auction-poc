@@ -320,22 +320,32 @@ function smsPanel() {
 }
 
 // ------------------------------------------------------------ スタッフ
+// メールアドレスを登録した（または、確認コードを出し直した）あとの知らせ。確認コードは、この1回だけ出す
+function inviteDialog(title, res) {
+  openDialog(title,
+    el('p', { text: `${res.email} に、確認コードをメールで送りました。メールが届かない場合は、次の確認コードを、本人に安全な方法で渡してください。この画面を閉じると、二度と表示できません。` }),
+    el('dl', { class: 'facts' },
+      el('dt', { text: 'メールアドレス' }), el('dd', { class: 'dyn', text: res.email }),
+      el('dt', { text: '確認コード' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.setupCode })))),
+    el('p', { class: 'note', text: '本人は、スタッフのログインの画面の「はじめての方」から、メールアドレスと確認コードを入れて、パスワードを決めます。確認コードの期限は、7日です。' }),
+    el('div', { class: 'actions' }, closeBtn('渡したので閉じる')));
+}
 async function staffPanel() {
   const res = await api('GET', '/api/staff/accounts');
   const rows = res.staff.map((s) => el('tr', {},
-    el('td', { text: s.loginId }), el('td', { class: 'dyn', text: s.name }), el('td', { text: s.roleLabel }),
-    el('td', { text: s.active ? '利用中' : '停止' }),
-    act(s.active && smallBtn('再発行', async () => { const r = await api('POST', `/api/staff/accounts/${s.id}/reset`); if (r.ok) secretsDialog('パスワードと認証アプリを再発行しました', r); else alertLine(r.message); }),
+    el('td', { class: 'dyn', text: s.email ?? `${s.loginId}（ログイン ID）` }), el('td', { class: 'dyn', text: s.name }), el('td', { text: s.roleLabel }),
+    el('td', { text: !s.active ? '停止' : s.ready ? '利用中' : 'パスワードの登録待ち' }),
+    act(s.active && smallBtn(s.email ? '確認コードを出し直す' : '再発行', async () => { const r = await api('POST', `/api/staff/accounts/${s.id}/reset`); if (!r.ok) return alertLine(r.message); await show('staff'); if (r.setupCode) inviteDialog('確認コードを出し直しました', r); else secretsDialog('パスワードと認証アプリを再発行しました', r); }),
       s.active && s.loginId !== me.loginId && smallBtn('停止', async () => { const r = await api('POST', `/api/staff/accounts/${s.id}/stop`); if (!r.ok) alertLine(r.message); else show('staff'); }, 'btn-danger'))));
   return [
-    el('div', { class: 'toolbar' }, smallBtn('パスワードを変える', passwordDialog), smallBtn('スタッフを作る', staffDialog, 'btn-primary')),
+    el('div', { class: 'toolbar' }, smallBtn('パスワードを変える', passwordDialog), smallBtn('スタッフのメールアドレスを登録', staffDialog, 'btn-primary')),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
-    table(['ログイン ID', '名前', '役割', '状態', ''], rows, ''),
+    table(['メールアドレス', '名前', '役割', '状態', ''], rows, ''),
   ];
 }
 function staffDialog() {
   const form = el('form', { class: 'form', novalidate: true },
-    field('ログイン ID', 'loginId', { required: true, autocapitalize: 'none', spellcheck: false }, '半角の英小文字・数字で 3〜32 文字'),
+    field('メールアドレス', 'email', { type: 'email', inputMode: 'email', required: true, autocapitalize: 'none', spellcheck: false }, 'このメールアドレスで、ログインします。パスワードは、本人が最初のログインで決めます'),
     field('名前', 'name', { required: true }),
     field('役割', 'role', { options: [['auctioneer', '進行役'], ['reception', '受付係'], ['admin', '主催者管理者'], ['operator', '開発・運営者（手数料と記録を見るだけ）']] }),
     field('電話番号', 'phone', { type: 'tel', inputMode: 'tel' }, '任意。この番号では会員登録できなくなります'),
@@ -344,12 +354,12 @@ function staffDialog() {
   onSubmit(form, async (data) => {
     const res = await api('POST', '/api/staff/accounts', data);
     if (res.ok) {
-      show('staff');
-      secretsDialog('スタッフを作りました', res);
+      await show('staff');
+      inviteDialog('スタッフのメールアドレスを登録しました', res);
     }
     return res;
   });
-  openDialog('スタッフを作る', form);
+  openDialog('スタッフのメールアドレスを登録', form);
 }
 function passwordDialog() {
   const form = el('form', { class: 'form', novalidate: true },
@@ -497,28 +507,27 @@ async function show(key) {
   if (current === key) panel.replaceChildren(...nodes.filter(Boolean));
 }
 
+// ログインのあとの行き先（進行コンソール・会場モニターから来た人は、そこへ戻す）
+const afterLogin = (role) => { location.href = toMonitor ? '/monitor.html' : toConsole && ['admin', 'auctioneer'].includes(role) ? '/console.html' : '/staff.html'; };
 onSubmit($('#loginForm'), async (data) => {
-  const res = await api('POST', '/api/staff/login', data);
-  // 進行コンソールから来た人は、ログインのあと進行コンソールへ戻す
-  if (res.ok) { if (toMonitor) location.href = '/monitor.html'; else if (toConsole && ['admin', 'auctioneer'].includes(res.staff.role)) location.href = '/console.html'; else location.href = '/staff.html'; }
-  else $('#loginForm').elements.code.value = '';
+  const res = await api('POST', '/api/staff/login', { email: data.email, password: data.password });
+  if (res.ok) afterLogin(res.staff.role);
+  else $('#loginForm').elements.password.value = '';
   return res;
 });
-
-// お試し用: 認証アプリの代わりに、いまの認証コードを入れるボタン（サーバーがお試し用の設定のときだけ出る）
-api('GET', '/api/terms').then((t) => {
-  if (!t.devShowCodes) return;
-  const form = $('#loginForm');
-  const b = el('button', { class: 'btn', type: 'button', text: '【お試し用】認証コードを入れる', onclick: async () => {
-    const r = await api('POST', '/api/dev/staff-code', { loginId: form.elements.loginId.value, password: form.elements.password.value });
-    if (r.ok) form.elements.code.value = r.code; else $('.msg', form).textContent = r.message;
-  } });
-  $('.actions', form).append(b);
+// はじめての方: メールアドレスと確認コードを入れて、パスワードを自分で決める
+onSubmit($('#setupForm'), async (data) => {
+  if (data.password !== data.password2) return { ok: false, message: '入力を確かめてください', errors: { password2: '新しいパスワードが、2つの欄で違っています' } };
+  const res = await api('POST', '/api/staff/setup', { email: data.email, code: data.code, password: data.password });
+  if (res.ok) afterLogin(res.staff.role);
+  return res;
 });
+$('#firstTime').addEventListener('click', () => { $('#loginForm').hidden = true; $('#setupForm').hidden = false; $('#setupForm').elements.email.value = $('#loginForm').elements.email.value; $('#setupForm').elements.email.focus(); });
+$('#backToLogin').addEventListener('click', () => { $('#setupForm').hidden = true; $('#loginForm').hidden = false; $('#loginForm').elements.email.focus(); });
 (async () => {
   const state = await setupNav();
   me = state.staff;
-  if (!me) { $('#login').hidden = false; $('#loginForm').elements.loginId.focus(); return; }
+  if (!me) { $('#login').hidden = false; $('#loginForm').elements.email.focus(); return; }
   $('#app').hidden = false;
   $('#who').textContent = `${me.name}（${me.roleLabel}）`;
   // 競りの進行は、主催者管理者と進行役（8.14）

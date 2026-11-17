@@ -60,6 +60,11 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     })();
   }
   db.exec(MVP_SCHEMA);
+  // スタッフのログインを、メールアドレスとパスワードにする（発注者の指示）。パスワードは、最初のログインで本人が決める。
+  // setup_hash: 最初のログインで入れる確認コード（ハッシュで持つ）。password_hash が空のあいだは、パスワードがまだ無い
+  for (const [col, type] of [['email', 'TEXT'], ['setup_hash', 'TEXT'], ['setup_expires', 'REAL NOT NULL DEFAULT 0']]) {
+    if (!db.prepare("SELECT 1 FROM pragma_table_info('staff_accounts') WHERE name = ?").get(col)) db.exec(`ALTER TABLE staff_accounts ADD COLUMN ${col} ${type}`);
+  }
   // 承認（発注者の指示）: 会員登録は、主催者管理者が承認するまで「承認待ち」。前からの会員は、承認済みとして扱う
   if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = 'approved_at'").get()) {
     db.exec('ALTER TABLE member_accounts ADD COLUMN approved_at REAL');
@@ -478,26 +483,54 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   });
 
   // ------------------------------------------------------------ スタッフ
+  // スタッフのログイン: メールアドレスとパスワード（発注者の指示。認証アプリのコードは、使わなくなった）。
+  // メールアドレスを登録していない、前からのアカウントは、ログイン ID でも入れる
+  const staffByLogin = (raw) => {
+    const id = String(raw ?? '').trim().toLowerCase();
+    return (id.includes('@') ? db.prepare('SELECT * FROM staff_accounts WHERE lower(email) = ?').get(id) : db.prepare('SELECT * FROM staff_accounts WHERE login_id = ?').get(id)) ?? null;
+  };
+  const staffFailed = (ctx, staff, now) => {
+    const failed = staff.failed_count + 1;
+    const lock = failed >= LOCK_AFTER;
+    db.prepare('UPDATE staff_accounts SET failed_count = ?, locked_until = ? WHERE id = ?').run(lock ? 0 : failed, lock ? now + LOCK_FOR : 0, staff.id);
+    if (lock) audit({ ...ctx, system: true }, 'staff.locked', { target: `staff:${staff.id}` });
+  };
+  const staffOut = (staff) => ({ loginId: staff.login_id, email: staff.email ?? null, name: staff.name, role: staff.role, roleLabel: ROLE_LABEL[staff.role] });
   route('POST', '/api/staff/login', (ctx, body) => {
     throttle(ctx);
-    const staff = db.prepare('SELECT * FROM staff_accounts WHERE login_id = ?').get(String(body.loginId ?? ''));
-    const fail = new HttpError(401, 'ID・パスワード・認証コードのどれかが違います');
+    const staff = staffByLogin(body.email ?? body.loginId);
+    // どれが違ったか（登録の有無・パスワードが未登録か）は、伝えない
+    const fail = new HttpError(401, 'メールアドレスかパスワードが違います。はじめてログインする方は、下の「はじめての方」からお進みください');
     if (!staff || !staff.active) throw fail;
     const now = nowMs();
     if (staff.locked_until > now) throw new HttpError(423, `誤りが続いたため、ロックしています。${Math.ceil((staff.locked_until - now) / MIN)} 分後にやり直してください`);
-    // パスワードと二段階認証の両方を確かめる。どちらが違ったかは伝えない
-    const ok = verifyPassword(body.password ?? '', staff.password_hash) && verifyTotp(staff.totp_secret, body.code, Date.now());
-    if (!ok) {
-      const failed = staff.failed_count + 1;
-      const lock = failed >= LOCK_AFTER;
-      db.prepare('UPDATE staff_accounts SET failed_count = ?, locked_until = ? WHERE id = ?').run(lock ? 0 : failed, lock ? now + LOCK_FOR : 0, staff.id);
-      if (lock) audit({ ...ctx, system: true }, 'staff.locked', { target: `staff:${staff.id}` });
+    if (!staff.password_hash || !verifyPassword(body.password ?? '', staff.password_hash)) {
+      if (staff.password_hash) staffFailed(ctx, staff, now);
       throw fail;
     }
     db.prepare('UPDATE staff_accounts SET failed_count = 0, locked_until = 0 WHERE id = ?').run(staff.id);
     startSession(ctx, 'staff', staff.id, STAFF_LIFETIME);
     audit({ ...ctx, staff }, 'staff.login', { target: `staff:${staff.id}` });
-    return { ok: true, staff: { loginId: staff.login_id, name: staff.name, role: staff.role, roleLabel: ROLE_LABEL[staff.role] } };
+    return { ok: true, staff: staffOut(staff) };
+  });
+  // 最初のログイン: メールアドレスと、登録のときに出た確認コードを入れて、パスワードを自分で決める。
+  // 確認コードは、そのメールアドレスの持ち主だけが知っている（メールで届く。または、登録した主催者管理者から受け取る）。
+  // これが無いと、メールアドレスを知っているだけの他人が、先にパスワードを決めて、管理者になれてしまう
+  route('POST', '/api/staff/setup', (ctx, body) => {
+    throttle(ctx);
+    const staff = staffByLogin(body.email);
+    const fail = new HttpError(401, 'メールアドレスか確認コードが違います。確認コードの期限が切れた場合は、主催者管理者に、出し直しを頼んでください');
+    if (!staff || !staff.active || !staff.email || staff.password_hash || !staff.setup_hash) throw fail;
+    const now = nowMs();
+    if (staff.locked_until > now) throw new HttpError(423, `誤りが続いたため、ロックしています。${Math.ceil((staff.locked_until - now) / MIN)} 分後にやり直してください`);
+    if (now > staff.setup_expires || !safeEqual(staff.setup_hash, sha256(`${staff.id}:${String(body.code ?? '').trim()}`))) { staffFailed(ctx, staff, now); throw fail; }
+    const password = String(body.password ?? '');
+    if (password.length < 12 || password.length > 200) throw bad('入力を確かめてください', { errors: { password: 'パスワードは、12文字以上にしてください' } });
+    // パスワードは、元に戻せない形（scrypt のハッシュ）で保存する。確認コードは、1回で使えなくなる
+    db.prepare('UPDATE staff_accounts SET password_hash = ?, setup_hash = NULL, setup_expires = 0, failed_count = 0, locked_until = 0 WHERE id = ?').run(hashPassword(password), staff.id);
+    startSession(ctx, 'staff', staff.id, STAFF_LIFETIME);
+    audit({ ...ctx, staff }, 'staff.setup', { target: `staff:${staff.id}` });
+    return { ok: true, staff: staffOut(staff) };
   });
   // パスワードの変更（最初に渡された仮のパスワードを、本人が変える）
   route('POST', '/api/staff/password', (ctx, body) => {
@@ -513,31 +546,41 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     audit(ctx, 'staff.password_change', { target: `staff:${me.id}` });
     return { ok: true };
   });
-  // お試し用: スタッフの認証コード（認証アプリの代わり）。ID とパスワードが合っているときだけ返す。本番では使えない
-  route('POST', '/api/dev/staff-code', (ctx, body) => {
-    if (!config.devShowCodes) throw new HttpError(404, '見つかりません');
-    throttle(ctx);
-    const staff = db.prepare('SELECT * FROM staff_accounts WHERE login_id = ?').get(String(body.loginId ?? ''));
-    if (!staff || !staff.active || !verifyPassword(body.password ?? '', staff.password_hash)) throw new HttpError(401, 'ID かパスワードが違います');
-    return { ok: true, code: totp(staff.totp_secret, Date.now()) };
-  });
-  const staffView = (s) => ({ id: s.id, loginId: s.login_id, name: s.name, role: s.role, roleLabel: ROLE_LABEL[s.role], phone: s.phone, active: !!s.active });
+  const staffView = (s) => ({ id: s.id, loginId: s.login_id, email: s.email ?? null, ready: !!s.password_hash, name: s.name, role: s.role, roleLabel: ROLE_LABEL[s.role], phone: s.phone, active: !!s.active });
   route('GET', '/api/staff/accounts', (ctx) => {
     needStaff(ctx, 'admin');
     return { staff: db.prepare('SELECT * FROM staff_accounts ORDER BY id').all().map(staffView) };
   });
   route('POST', '/api/staff/accounts', async (ctx, body) => {
     needStaff(ctx, 'admin');
-    const created = createStaff({ loginId: body.loginId, name: body.name, role: body.role, phone: body.phone });
-    audit(ctx, 'staff.create', { target: `staff:${created.id}`, after: { loginId: created.loginId, role: created.role } });
-    // 仮のパスワードと、認証アプリに登録する情報は、この1回だけ返す（あとからは見られない）
-    return { ok: true, ...created, qrSvg: await QRCode.toString(created.otpauthUrl, { type: 'svg', margin: 2 }) };
+    // 前からの形（ログイン ID と、仮のパスワード）。画面からは使わない。自動テストと、道具（tools/）のために残してある
+    if (!body.email && body.loginId) {
+      const made = createStaff({ loginId: body.loginId, name: body.name, role: body.role, phone: body.phone });
+      audit(ctx, 'staff.create', { target: `staff:${made.id}`, after: { loginId: made.loginId, role: made.role } });
+      return { ok: true, ...made, qrSvg: await QRCode.toString(made.otpauthUrl, { type: 'svg', margin: 2 }) };
+    }
+    // 主催者管理者が、新しいスタッフのメールアドレスを登録する（発注者の指示）。パスワードは、本人が最初のログインで決める
+    const created = inviteStaff({ email: body.email, name: body.name, role: body.role, phone: body.phone });
+    audit(ctx, 'staff.create', { target: `staff:${created.id}`, after: { email: created.email, role: created.role } });
+    await sendStaffInvite(ctx, created);
+    // 確認コードは、この1回だけ返す（あとからは見られない）。メールでも送る
+    return { ok: true, ...created };
   });
   // パスワードと認証アプリの再発行（端末をなくした・忘れたとき）。それまでのログインは、すべて切る
   route('POST', '/api/staff/accounts/:id/reset', async (ctx, body, id) => {
     needStaff(ctx, 'admin');
     const target = db.prepare('SELECT * FROM staff_accounts WHERE id = ?').get(id);
     if (!target) throw new HttpError(404, 'スタッフが見つかりません');
+    if (target.email) {
+      // メールアドレスのスタッフ: パスワードを消して、確認コードを出し直す。本人が、もう一度「はじめての方」から決める
+      const setupCode = newSetupCode();
+      db.prepare("UPDATE staff_accounts SET password_hash = '', setup_hash = ?, setup_expires = ?, failed_count = 0, locked_until = 0 WHERE id = ?").run(sha256(`${id}:${setupCode}`), nowMs() + SETUP_LIFETIME, id);
+      db.prepare("DELETE FROM sessions WHERE kind = 'staff' AND subject_id = ?").run(id);
+      audit(ctx, 'staff.reset', { target: `staff:${id}` });
+      const out = { id: Number(id), email: target.email, role: target.role, setupCode };
+      await sendStaffInvite(ctx, out);
+      return { ok: true, ...out };
+    }
     const password = randomToken(12), secret = newTotpSecret();
     db.prepare('UPDATE staff_accounts SET password_hash = ?, totp_secret = ?, failed_count = 0, locked_until = 0 WHERE id = ?').run(hashPassword(password), secret, id);
     db.prepare("DELETE FROM sessions WHERE kind = 'staff' AND subject_id = ? AND id_hash <> ?").run(id, ctx.sessionHash);
@@ -556,6 +599,29 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return { ok: true };
   });
   /** スタッフを作る。最初の主催者管理者は、tools/create-admin.js から呼ぶ */
+  // ---- メールアドレスで登録するスタッフ（パスワードは、本人が最初のログインで決める）
+  const SETUP_LIFETIME = 7 * DAY; // 確認コードの期限
+  const newSetupCode = () => randomToken(6); // 8文字
+  function inviteStaff({ email, name, role, phone, setupCode = newSetupCode() }) {
+    const mail = String(email ?? '').trim().toLowerCase();
+    if (!isEmail(mail)) throw bad('メールアドレスを正しく入力してください');
+    if (!ROLE_LABEL[role]) throw bad('役割を選んでください');
+    const fullName = String(name ?? '').trim().slice(0, 100);
+    if (!fullName) throw bad('名前を入力してください');
+    const tel = phone ? normalizePhone(phone) : null;
+    if (phone && !tel) throw bad('電話番号を、国内の番号で入力してください');
+    if (tel && db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(tel)) throw new HttpError(409, 'この電話番号は、会員として登録されています');
+    if (db.prepare('SELECT 1 FROM staff_accounts WHERE lower(email) = ? OR login_id = ?').get(mail, mail)) throw new HttpError(409, 'このメールアドレスは、スタッフとして登録済みです');
+    const info = db.prepare("INSERT INTO staff_accounts (login_id, email, name, role, phone, password_hash, totp_secret, created_at) VALUES (?,?,?,?,?,'',?,?)")
+      .run(mail, mail, fullName, role, tel, newTotpSecret(), nowMs());
+    const id = Number(info.lastInsertRowid);
+    db.prepare('UPDATE staff_accounts SET setup_hash = ?, setup_expires = ? WHERE id = ?').run(sha256(`${id}:${setupCode}`), nowMs() + SETUP_LIFETIME, id);
+    return { id, email: mail, role, setupCode };
+  }
+  async function sendStaffInvite(ctx, s) {
+    const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
+    await notifier.email(s.email, 'staff_invite', '【令和の競り】スタッフの登録のお知らせ', `スタッフとして登録されました。\n次のページの「はじめての方」から、メールアドレスと確認コードを入れて、パスワードを決めてください（7日以内）。\n\n${origin}/staff.html\n確認コード: ${s.setupCode}\n\nお心当たりがない場合は、このメールを破棄してください。`);
+  }
   function createStaff({ loginId, name, role, phone, password: given }) {
     const id = String(loginId ?? '').trim();
     if (!/^[a-z0-9._-]{3,32}$/.test(id)) throw bad('ログイン ID は、半角の英小文字・数字・記号（. _ -）で 3〜32 文字にしてください');
@@ -1055,7 +1121,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return p;
   }
   return {
-    handle, createStaff, audit, participantFromCookie, bidGate, eventId: () => activeEvent()?.id ?? null,
+    handle, createStaff, inviteStaff, audit, participantFromCookie, bidGate, eventId: () => activeEvent()?.id ?? null,
     staffFromCookie, viewerFromCookie, signedIn, eventState, setPhase, proxyTarget, billing,
   };
 }
