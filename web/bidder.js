@@ -72,7 +72,8 @@ function render() {
     $('status').textContent = '待機中'; $('status').dataset.on = '';
     $('priceLabel').textContent = '現在価格'; $('price').textContent = ''; $('result').textContent = '';
     setLamp('urikiri', '', 'うりきり', ''); setLamp('right', '', '権利', '');
-    $('bid').disabled = true; $('bid').textContent = '次の品をお待ちください'; S.shownPrice = null; return;
+    $('priceTotal').textContent = ''; $('toPay').hidden = true; $('board').classList.remove('lead', 'won');
+    $('bid').disabled = true; $('bid').textContent = '入札は、品が出てから'; S.shownPrice = null; return;
   }
   const st = lot.status;
   const mine = lot.highestPaddle !== null && lot.highestPaddle === S.paddle;
@@ -88,6 +89,8 @@ function render() {
     $('price').classList.add('tick'); setTimeout(() => $('price').classList.remove('tick'), 200);
   }
   S.shownPrice = price;
+  // 買歩銭を足した、支払う金額の目安（落札額のほかにかかることを、入札の前に数字で見せる）
+  $('priceTotal').textContent = S.premiumRate > 0 ? `買歩銭（${S.premiumRate}%）込み ${yen(price + Math.floor(price * S.premiumRate / 100))}` : '';
 
   // 「うりきり」: 最低落札額（公開）に届いていて、この価格で締めれば売れる。「権利」: 最高入札者。両方が点いた人が落札する
   const urikiri = !!lot.urikiri;
@@ -98,6 +101,10 @@ function render() {
     lot.highestPaddle === null ? '' : mine ? 'あなた' : `${lot.highestPaddle}番`);
 
   $('result').textContent = st === 'sold' ? (mine ? 'あなたが落札しました' : `${lot.highestPaddle}番 落札`) : st === 'unsold' ? '流札' : '';
+  // 良い知らせも、目で分かるようにする: 最高入札者のあいだは金の枠、落札したら金の帯と、お支払いへの入口
+  $('board').classList.toggle('lead', mine && st === 'open');
+  $('board').classList.toggle('won', mine && st === 'sold');
+  $('toPay').hidden = !(mine && st === 'sold') || !!token;
 
   // 入札ボタン。観戦中は「応札に切り替える」ボタンとして働く（切り替えの場所を探させない）
   const watching = S.mode !== 'bid';
@@ -403,7 +410,7 @@ if (params.has('venue')) history.replaceState(null, '', location.pathname);
 
 // 買歩銭（落札額のほかにかかる手数料）は、入札の前と、入札画面の中の両方に出す
 const premiumText = (t) => (t.premiumRate > 0 ? `落札額のほかに、買歩銭（落札額の${t.premiumRate}%）がかかります。\n` : '');
-getJson('/api/terms').then((t) => { if (t.status === 200) $('premiumNote').textContent = premiumText(t).trim(); });
+getJson('/api/terms').then((t) => { if (t.status === 200) { $('premiumNote').textContent = premiumText(t).trim(); S.premiumRate = Number(t.premiumRate) || 0; render(); } });
 const showPaddle = (title, p) => {
   venue = p.mode === 'venue';
   const lines = [title, document.createElement('br'), venue ? '会場参加　参加番号' : '参加番号', Object.assign(document.createElement('b'), { textContent: String(p.paddle) })];
@@ -522,6 +529,8 @@ $('enter').addEventListener('click', async () => {
   $('audio').textContent = audioCtx ? audioCtx.state : '使えない';
   $('vib').textContent = 'vibrate' in navigator ? '対応' : '非対応';
   $('gate').style.display = 'none';
+  // 検証用の情報は、検証用の合言葉で入った人にだけ出す。会員には、ほかのページへの入口を出す
+  $('devInfo').hidden = !token; $('siteLinks').hidden = !!token;
   // 会員には、参加のしかたの切り替えを出す（検証用の合言葉で入った人には出さない）
   $('modeLine').hidden = !!token;
   $('modeNow').textContent = switchPlan().now; $('toVenue').textContent = switchPlan().button;
@@ -538,3 +547,8 @@ $('enter').addEventListener('click', async () => {
   const wake = await requestWake();
   setTimeout(() => link.event('device', { ua: navigator.userAgent, wake, audio: audioCtx?.state ?? null, vibrate: 'vibrate' in navigator, net, venue }), 3000);
 });
+
+// 下に固定した表示板の高さに合わせて、本文の下の余白を取る（板が、コメントの欄や注意書きを隠さないように）
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty('--board-h', `${Math.ceil(entry.target.getBoundingClientRect().height)}px`);
+}).observe($('board'));

@@ -62,9 +62,9 @@
 
 <header class="brandbar">
   <div>
-    <span class="brand">
+    <a class="brand" href="/" aria-label="令和の競り トップページへ">
       <picture><source srcset="logo-dark.svg" media="(prefers-color-scheme: dark)"><img class="brand__logo" src="logo.svg" width="178" height="48" alt="令和の競り（株式会社レイワ）"></picture>
-    </span>
+    </a>
     <div class="seg" role="radiogroup" aria-label="参加のしかた">
       <button type="button" role="radio" data-mode="bid" aria-checked="false">応札</button>
       <button type="button" role="radio" data-mode="watch" aria-checked="true">観戦</button>
@@ -78,7 +78,7 @@
 <main>
   <div id="videoBox">
     <video id="video" playsinline muted aria-label="会場のライブ映像"></video>
-    <div id="break"><strong id="breakTitle">映像は停止中です</strong></div>
+    <div id="break"><img src="emblem-120.webp" width="72" height="72" alt=""><strong id="breakTitle">映像は停止中です</strong></div>
     <button class="btn" id="sound" type="button" aria-pressed="false" hidden>音声を出す</button>
   </div>
 
@@ -89,13 +89,15 @@
         <div class="pricewrap">
           <div class="plabel" id="priceLabel">現在価格</div>
           <div class="price" id="price"></div>
+          <div class="ptotal num" id="priceTotal"></div>
         </div>
         <div class="board-meta">
           <span class="state" id="status">待機中</span>
-          <span>あなた <b class="digits" id="me"></b></span>
+          <span>あなた<span class="wide">の番号</span> <b class="digits" id="me"></b></span>
         </div>
       </div>
       <p class="board-result" id="result" role="status"></p>
+      <a class="btn paylink" id="toPay" href="/mypage.html" hidden>お支払いの確認へ</a>
       <div class="lamps">
         <div class="lamp" id="urikiri" role="img"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub"></small></div>
         <div class="lamp" id="right" role="img"><span class="bulb"></span><b id="rightLabel">権利</b><small class="num" id="rightSub"></small></div>
@@ -114,7 +116,12 @@
       <p class="note" id="premiumNote"></p>
       <p class="note" id="contact"></p>
       <p class="note" id="modeLine" hidden><span id="modeNow"></span>　<button class="textbtn" type="button" id="toVenue"></button></p>
-      <details>
+      <details class="help">
+        <summary>「うりきり」「権利」とは</summary>
+        <p class="note">「うりきり」が点いているときは、いまの価格で締めれば売れます（出品者が決めた最低の金額に届いています）。「権利」は、いまの最高入札者に点きます。締めのときに「うりきり」が点いていて、「権利」を持っている人が落札します。「うりきり」が点かないまま締めると、流札（売れない）になります。</p>
+      </details>
+      <p class="note links" id="siteLinks" hidden><a href="/mypage.html">マイページ</a><a href="/">トップページ</a></p>
+      <details id="devInfo" hidden>
         <summary>検証用の情報</summary>
         <label class="check"><input type="checkbox" id="showVideo"> 映像を表示する</label>
         <dl class="num">

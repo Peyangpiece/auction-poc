@@ -43,7 +43,7 @@ try {
   await b1.waitForFunction(() => document.getElementById('me').textContent.includes('番'));
   check(true, '再読み込みしても、同じタブなら入り直せる');
   check((await ratio(b1)) === 1.333, 'ライブ画面は、停止中も 4:3');
-  check((await text(b1, 'bid')).includes('次の品'), '品がない間は、入札ボタンが案内になる');
+  check((await text(b1, 'bid')).includes('品が出てから'), '品がない間は、入札ボタンが案内になる');
   await shot(b1, 'bidder-watch');
 
   console.log('品の追加と開始（配信の自動開始）');

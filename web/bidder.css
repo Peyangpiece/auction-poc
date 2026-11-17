@@ -1,6 +1,6 @@
 /* 入札画面のスタイル。共通の部品は app.css */
 /* スマホ: 上から 品名 → 映像(4:3) → 履歴 → コメント。表示板は画面の下に固定する（価格・ランプ・入札が常に見える） */
-body { padding-bottom: calc(256px + env(safe-area-inset-bottom)); transition: background-color .2s var(--ease); }
+body { padding-bottom: calc(var(--board-h, 256px) + 24px + env(safe-area-inset-bottom)); transition: background-color .2s var(--ease); }
 .brandbar { padding-top: env(safe-area-inset-top); }
 .brandbar > div, .top, main { max-width: 560px; margin: 0 auto; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
 .top { padding-top: 12px; padding-bottom: 10px; }
@@ -14,7 +14,10 @@ main { display: grid; gap: 24px; }
 /* 上回られたら、画面全体の色を変える（FR-UI-004） */
 body.outbid { background: var(--alarm); }
 body.outbid .top h1, body.outbid #lotNo, body.outbid h2, body.outbid main h2, body.outbid .fine, body.outbid .fine summary, body.outbid .hist .count,
-body.outbid #history .who, body.outbid #history .amt, body.outbid #history .at, body.outbid #comments, body.outbid #comments .who, body.outbid .switch { color: #fff; }
+body.outbid #history .who, body.outbid #history .amt, body.outbid #history .at, body.outbid #comments, body.outbid #comments .who, body.outbid .switch,
+body.outbid .note, body.outbid .fine a, body.outbid .fine .textbtn, body.outbid details summary, body.outbid details dt, body.outbid details dd, body.outbid #cmtCount, body.outbid #cmtMsg, body.outbid .check { color: #fff; }
+body.outbid #history li { border-color: rgba(255, 255, 255, .45); }
+body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #fff; }
 
 /* 応札／観戦 */
 .seg { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; flex: none; border: 1px solid var(--action); border-radius: var(--r); background: var(--field); overflow: hidden; }
@@ -27,7 +30,9 @@ body.outbid #history .who, body.outbid #history .amt, body.outbid #history .at, 
 /* ライブ画面は常に 4:3（停止中も同じ大きさ）。映像は元の比率のまま収め、切り取らない */
 #videoBox { display: none; position: relative; aspect-ratio: 4 / 3; width: 100%; background: #000; border-radius: var(--r); overflow: hidden; }
 #videoBox video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
-#break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: #000; color: #fff; }
+/* 映像のない間は、真っ黒ではなく、表示板と同じ紺にして、紋章を置く（黒と紺の2つの暗い面が並ぶのを避ける） */
+#break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 14px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: var(--board); color: #fff; }
+#break img { width: 72px; height: 72px; opacity: .9; }
 #break strong { font-size: 18px; font-weight: 600; }
 /* 音声の切り替え。映像の右下に置く。音は、押してから出す（ブラウザは、操作なしに音を出させない） */
 #sound { position: absolute; right: 8px; bottom: 8px; z-index: 2; min-height: 44px; padding: 6px 14px; font-size: 14px; background: rgba(0, 0, 0, .72); border-color: rgba(255, 255, 255, .6); color: #fff; }
@@ -46,9 +51,21 @@ body.outbid #history .who, body.outbid #history .amt, body.outbid #history .at, 
 .board-main { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 4px 12px; }
 .plabel { font-size: 12px; color: var(--board-ink-2); line-height: 1.3; }
 .price { font-size: 44px; }
+/* 買歩銭込みの金額は、価格のすぐ下に置く */
+.ptotal { font-size: 13px; color: var(--board-ink-2); margin-top: 2px; line-height: 1.3; }
+.ptotal:empty { display: none; }
+/* 最高入札者のあいだは、金の枠。落札したら、金の帯と、お支払いへの入口 */
+.board { transition: box-shadow .2s var(--ease); }
+.board.lead { box-shadow: inset 0 0 0 3px var(--gold); }
+.board.lead #bid:disabled { border-color: var(--gold); color: #fff; }
+.board.won { box-shadow: inset 0 0 0 3px var(--gold); }
+.board.won .board-result { font-size: 22px; padding: 10px 12px; background: var(--gold); color: var(--navy); border-radius: var(--r); text-align: center; }
+.board.won:has(#msg:not(:empty)) #result { display: block; }
+.paylink { background: #fff; border-color: #fff; color: var(--navy); width: 100%; justify-content: center; text-align: center; font-size: 16px; font-weight: 700; min-height: 48px; display: flex; align-items: center; text-decoration: none; }
+.paylink[hidden] { display: none; }
 .board-meta { display: grid; justify-items: end; gap: 2px; font-size: 13px; color: var(--board-ink-2); text-align: right; white-space: nowrap; }
 .board-meta .state { color: var(--board-ink); font-size: 14px; }
-.board-meta b { color: var(--board-ink); font-size: 18px; }
+.board-meta b { color: var(--board-ink); font-size: 22px; line-height: 1; }
 .board-result { font-size: 14px; line-height: 1.4; }
 #msg { font-size: 14px; font-weight: 600; color: var(--board-ink); min-height: 0; }
 #msg:empty { display: none; }
@@ -61,12 +78,12 @@ body.outbid #history .who, body.outbid #history .amt, body.outbid #history .at, 
 
 /* 入札の履歴・コメント: 面で囲まず、細い線の行だけ */
 .sechead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
-.count { font-size: 13px; color: var(--ink-3); }
+.count { font-size: 14px; color: var(--ink-2); }
 #history { max-height: 248px; overflow: auto; overscroll-behavior: contain; }
 #history li { display: grid; grid-template-columns: minmax(6em, auto) 1fr auto; align-items: baseline; gap: 12px; padding: 10px 0; }
-#history .who { color: var(--ink-2); white-space: nowrap; }
+#history .who { color: var(--ink-2); white-space: nowrap; font-size: 15px; }
 #history .amt { font-size: 20px; line-height: 1; }
-#history .at { font-size: 13px; color: var(--ink-3); }
+#history .at { font-size: 13px; color: var(--ink-2); }
 #history li.mine .who { color: var(--ink); font-weight: 700; }
 #history li.void .amt, #history li.void .who { text-decoration: line-through; color: var(--ink-3); }
 #history li.new { animation: rowin .3s var(--ease); }
@@ -87,6 +104,12 @@ body.outbid #history .who, body.outbid #history .amt, body.outbid #history .at, 
 #cmtMsg:empty { display: none; }
 
 .fine { display: grid; gap: 8px; }
+/* 注意書きは、小さく薄くしすぎない */
+.fine .note, .help .note { font-size: 14px; color: var(--ink-2); line-height: 1.7; }
+.links { display: flex; gap: 4px 24px; flex-wrap: wrap; }
+.links a { color: var(--action); font-weight: 700; text-underline-offset: 4px; padding: 10px 0; }
+.links[hidden] { display: none; }
+.help summary { color: var(--ink-2); }
 #contact:empty { display: none; }
 details summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-3); min-height: 44px; display: flex; align-items: center; }
 details dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 13px; }
@@ -140,6 +163,8 @@ details dd { overflow-wrap: anywhere; }
   .price { font-size: 72px; }
   .board-main { flex-wrap: nowrap; }
   .board-result { font-size: 18px; }
+  .ptotal { font-size: 15px; }
+  #history { max-height: 420px; }
 }
 /* 幅の狭い端末: 社名と「応札／観戦」がぶつからないように詰める */
 .brand__text { overflow: hidden; }
@@ -182,3 +207,9 @@ details dd { overflow-wrap: anywhere; }
 #eventNote:empty { display: none; }
 @media (max-width: 560px) { .brand__logo { height: 38px; } }
 #pickNow:empty { display: none; }
+/* ロゴは、トップページへのリンク。押せる範囲を 44px 以上にする */
+.brandbar a.brand { min-height: 44px; }
+/* 幅の狭い端末では、「の番号」を省く（板の行が増えて、映像を隠さないように） */
+@media (max-width: 420px) { .board-meta .wide { display: none; } }
+/* 幅の狭い端末（320px 級）: 価格と番号を少し小さくして、価格の横に番号を収める（行が増えると、板が映像を隠す） */
+@media (max-width: 359px) { .price { font-size: 38px; } .board-meta b { font-size: 18px; } .board-meta { font-size: 12px; } }

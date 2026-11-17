@@ -142,7 +142,8 @@ main:focus { outline: none; }
 .lamp { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; align-items: center; min-width: 0; }
 .lamp + .lamp { border-left: 1px solid var(--board-line); padding-left: 12px; }
 /* ランプは、点灯＝塗りつぶし、消灯＝輪郭。色に頼らず形でも分かる */
-.bulb { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--lamp-off); grid-row: span 2; transition: background-color .2s var(--ease), border-color .2s var(--ease); }
+/* ランプは、押せる丸（選択ボタン）に見えないよう、縦長の灯りの形にする */
+.bulb { width: 10px; height: 24px; border-radius: 3px; border: 2px solid var(--lamp-off); grid-row: span 2; transition: background-color .2s var(--ease), border-color .2s var(--ease); }
 .lamp b { font-size: 16px; font-weight: 700; color: var(--board-ink-2); line-height: 1.3; }
 /* 補足がないランプは、印と名前を1行でそろえる */
 .lamp small:empty { display: none; }
