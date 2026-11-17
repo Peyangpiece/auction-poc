@@ -1,11 +1,22 @@
-// ログイン: 携帯電話の番号か、確認済みのメールアドレスに届く認証番号（パスワードは使わない）。
+// ログイン: ログイン ID とパスワード（主催者の承認のメールで届いたもの）。
+// パスワードを忘れた人は、携帯電話の番号か、確認済みのメールアドレスに届く認証番号で入り、マイページで決め直す。
 'use strict';
 
 const phoneForm = $('#stepPhone');
 const codeForm = $('#stepCode');
 let phone = '';
 // 入札画面から来た人は、ログインのあと入札画面へ戻す（行き先は決まった2つだけ。外のサイトへは飛ばさない）
-const after = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/mypage.html';
+const after = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/';
+const pwForm = $('#pwForm');
+onSubmit(pwForm, async (data) => {
+  const res = await api('POST', '/api/login/password', { loginId: data.loginId, password: data.password });
+  if (res.ok) location.href = after;
+  else pwForm.elements.password.value = '';
+  return res;
+});
+// パスワードを忘れた方: 認証番号でのログインに切り替える
+$('#forgot').addEventListener('click', () => { pwForm.hidden = true; phoneForm.hidden = false; phoneForm.elements.id.focus(); });
+$('#backToPw').addEventListener('click', () => { phoneForm.hidden = true; codeForm.hidden = true; pwForm.hidden = false; pwForm.elements.loginId.focus(); });
 
 onSubmit(phoneForm, async (data) => {
   phone = data.id.trim();
@@ -23,7 +34,8 @@ onSubmit(phoneForm, async (data) => {
 });
 onSubmit(codeForm, async (data) => {
   const res = await api('POST', '/api/login/verify', { id: phone, code: data.code });
-  if (res.ok) location.href = after;
+  // 認証番号で入った人は、マイページで、新しいパスワードを決める
+  if (res.ok) location.href = after === '/' ? '/mypage.html?reset=1#profile' : after;
   else codeForm.elements.code.value = '';
   return res;
 });
@@ -41,5 +53,5 @@ $('#resend').addEventListener('click', async (ev) => {
   if (after === '/bidder.html') for (const link of document.querySelectorAll('a[href="/register.html"]')) link.href = '/register.html?next=bidder';
   const me = await setupNav();
   if (me.member) location.replace(after);
-  else phoneForm.elements.id.focus();
+  else pwForm.elements.loginId.focus();
 })();

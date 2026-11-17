@@ -21,6 +21,10 @@ const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.s
   history.replaceState(null, '', location.pathname + location.hash);
   // 会員登録の直後と、メールの確認のあとは、登録の内容が見えるように「個人情報の設定」を開く
   if (q.get('registered') || q.get('email')) showTab('profile');
+  profile = m;
+  // 認証番号で入った人（パスワードを忘れた人）には、新しいパスワードを決める画面を、すぐに出す
+  $('#pwBtn').textContent = m.hasPassword ? 'パスワードを変更する' : 'ログイン ID とパスワードを決める';
+  if (q.get('reset')) { showTab('profile'); $('#notice').textContent = '新しいパスワードを決めてください。'; openPassword(true); }
 
   $('#suspended').hidden = !m.suspended;
   // 停止の理由は、手動と未払いで言葉を分ける（FR-BID-012）
@@ -30,7 +34,7 @@ const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.s
   const dev = sessionStorage.getItem('devVerifyUrl'); sessionStorage.removeItem('devVerifyUrl');
   if (dev && !m.emailVerified) showDevVerify(dev);
   const rows = [
-    ['区分', m.kind === 'b2b' ? '法人' : '個人'],
+    ['ログイン ID', m.loginId], ['区分', m.kind === 'b2b' ? '法人' : '個人'],
     ['会社名', m.company], ['担当者名', m.contactName], ['氏名', m.name], ['フリガナ', m.nameKana], ['電話番号', telFmt(m.phone) + (m.phoneVerified ? '' : '（未確認。ログインには、メールアドレスをお使いください）')],
     ['メールアドレス', m.email + (m.emailVerified ? '（確認済み）' : '（未確認）')],
     ['住所', m.address], ['配送先', m.shipTo], ['請求先', m.billing],
@@ -103,6 +107,26 @@ $('#editBtn').addEventListener('click', () => {
   dlg.replaceChildren(el('h2', { text: '登録内容の変更' }), form);
   dlg.showModal();
 });
+// ---- パスワードの変更（ログイン ID は、発行されたものを使い続ける。まだ無い人は、ここで決める）
+function openPassword(reset = false) {
+  const m = profile;
+  const form = el('form', { class: 'form', novalidate: true },
+    m.loginId ? el('p', { class: 'verified', text: `ログイン ID: ${m.loginId}` }) : field('ログイン ID', 'loginId', { required: true, autocomplete: 'username', autocapitalize: 'none', spellcheck: false }, '半角の英数字と . _ - で、4〜32文字'),
+    m.hasPassword && !reset && field('いまのパスワード', 'currentPassword', { type: 'password', required: true, autocomplete: 'current-password' }),
+    field('新しいパスワード', 'password', { type: 'password', required: true, autocomplete: 'new-password' }, '8文字以上'),
+    field('新しいパスワード（もう一度）', 'password2', { type: 'password', required: true, autocomplete: 'new-password' }),
+    el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
+    el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '保存する' }), el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() })));
+  onSubmit(form, async (data) => {
+    if (data.password !== data.password2) return { ok: false, message: '入力を確かめてください', errors: { password2: '新しいパスワードが、2つの欄で違っています' } };
+    const res = await api('POST', '/api/my/credentials', { loginId: m.loginId ?? data.loginId, password: data.password, currentPassword: data.currentPassword });
+    if (res.ok) { dlg.close(); profile = res.member; $('#notice').textContent = 'パスワードを保存しました。次からは、ログイン ID とこのパスワードで、ログインできます。'; $('#pwBtn').textContent = 'パスワードを変更する'; }
+    return res;
+  });
+  dlg.replaceChildren(el('h2', { text: m.hasPassword ? 'パスワードの変更' : 'ログイン ID とパスワードを決める' }), form);
+  dlg.showModal();
+}
+$('#pwBtn').addEventListener('click', () => openPassword(false));
 $('#withdrawBtn').addEventListener('click', () => {
   const msg = el('p', { class: 'msg', role: 'alert' });
   dlg.replaceChildren(el('h2', { text: '退会しますか？' }),

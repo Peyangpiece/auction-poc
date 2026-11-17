@@ -91,6 +91,8 @@ export function loadConfig(env = process.env) {
     cookieSecure: env.POC_COOKIE_SECURE === '1',
     // 認証の試行（認証番号の送信・照合、スタッフのログイン）の上限。同じ接続元から1分あたり。0 で外す
     authRatePerMin: num(env.POC_AUTH_RATE, 20),
+    // 会員登録を、主催者管理者の承認なしで通す（自動テストと、手元での確認用）。本番では付けない。付けなければ、登録は「承認待ち」になる
+    autoApprove: env.POC_AUTO_APPROVE === '1',
 
     sysSampleMs: num(env.POC_SYS_SAMPLE_MS, 10000),
   };

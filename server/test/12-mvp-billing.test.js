@@ -15,7 +15,7 @@ import { addDays } from '../src/mvp/billing.js';
 const DAY = 86400000;
 async function setup() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auction-bill-'));
-  const config = loadConfig({ POC_DATA_DIR: dataDir, POC_AUTH_RATE: '0' });
+  const config = loadConfig({ POC_DATA_DIR: dataDir, POC_AUTH_RATE: '0', POC_AUTO_APPROVE: '1' });
   const store = openDb(config.dbPath);
   // 2026-12-07（月）の 10:00（日本時間）から始める。曜日が決まっていないと、休業日の確かめができない
   let now = Date.parse('2026-12-07T01:00:00Z');

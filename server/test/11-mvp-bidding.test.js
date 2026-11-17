@@ -36,7 +36,7 @@ function browser(base) {
 }
 
 async function setup() {
-  const ctx = makeEnv({ POC_AUTH_RATE: '0' });
+  const ctx = makeEnv({ POC_AUTH_RATE: '0', POC_AUTO_APPROVE: '1' });
   // 最初の主催者管理者を作る（tools/create-admin.js と同じ処理）
   const store = openDb(path.join(ctx.dataDir, 'auction.db'));
   const admin = createApi({ store, config: loadConfig(ctx.env), nowMs: () => Date.now() }).createStaff({ loginId: 'kanri', name: '管理 花子', role: 'admin' });

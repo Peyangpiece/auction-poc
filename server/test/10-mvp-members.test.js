@@ -13,7 +13,7 @@ import { totp, base32Encode, normalizePhone } from '../src/mvp/security.js';
 
 async function setup(env = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auction-mvp-'));
-  const config = loadConfig({ POC_DATA_DIR: dataDir, POC_AUTH_RATE: '0', ...env });
+  const config = loadConfig({ POC_DATA_DIR: dataDir, POC_AUTH_RATE: '0', POC_AUTO_APPROVE: '1', ...env });
   const store = openDb(config.dbPath);
   let shift = 0;
   const api = createApi({ store, config, nowMs: () => Date.now() + shift });
@@ -156,11 +156,11 @@ test('ログイン: 電話番号と SMS の認証番号。最後の操作から3
     assert.equal((await b.post('/api/login/start', { phone })).status, 200);
     assert.equal((await b.post('/api/login/verify', { phone, code: t.lastCode(phone) })).status, 200);
     assert.equal((await b.get('/api/me')).json.member.name, '検証 太郎');
-    t.advance(29 * 24 * 60 * MIN);
-    assert.ok((await b.get('/api/me')).json.member, '29日目は使える（ここで、最後の操作の時刻が更新される）');
-    t.advance(29 * 24 * 60 * MIN);
-    assert.ok((await b.get('/api/me')).json.member, '操作していれば、さらに29日たっても使える');
-    t.advance(31 * 24 * 60 * MIN);
+    t.advance(399 * 24 * 60 * MIN);
+    assert.ok((await b.get('/api/me')).json.member, '399日目は使える（ここで、最後の操作の時刻が更新される）');
+    t.advance(399 * 24 * 60 * MIN);
+    assert.ok((await b.get('/api/me')).json.member, '操作していれば、さらに399日たっても使える');
+    t.advance(401 * 24 * 60 * MIN);
     assert.equal((await b.get('/api/me')).json.member, null);
     // ログアウト
     await b.post('/api/login/start', { phone });
@@ -390,5 +390,75 @@ test('メールアドレスでも会員登録を始められる（電話番号�
     // 登録済み（確認済み）のアドレスでは、登録を始められない
     const again = await t.browser().post('/api/register/start', { id: 'hana@example.com' });
     assert.deepEqual([again.status, again.json.login], [409, true]);
+  } finally { await t.close(); }
+});
+
+test('会員登録は承認待ちになり、主催者管理者が承認すると、ログイン ID とパスワードがメールで届く。それでログインできる', async () => {
+  const t = await setup({ POC_AUTO_APPROVE: '0' });
+  try {
+    const admin = await t.staffLogin('admin', 'kanri', null);
+    const b = t.browser();
+    const phone = '09033330001';
+    const done = await register(t, b, phone);
+    assert.deepEqual([done.status, done.json.pending], [200, true]);
+    assert.equal((await b.get('/api/me')).json.member, null, '承認待ちのあいだは、ログインしていない');
+    // 承認の前は、認証番号でのログインも、できない（返事は同じ。SMS は送らない）
+    const sms = () => t.outbox().filter((m) => m.channel === 'sms').length;
+    const before = sms();
+    assert.equal((await t.browser().post('/api/login/start', { id: phone })).status, 200);
+    assert.equal(sms(), before);
+    // 一覧に「承認待ち」で出る。主催者管理者だけが承認できる
+    const list = (await admin.get('/api/members')).json.members;
+    assert.deepEqual([list[0].approved, list[0].loginId], [false, null]);
+    const id = list[0].id;
+    assert.equal((await b.post(`/api/members/${id}/approve`)).status, 401);
+    const ok = await admin.post(`/api/members/${id}/approve`);
+    assert.equal(ok.status, 200);
+    assert.match(ok.json.loginId, /^rw\d{5}$/);
+    assert.equal(ok.json.devPassword, undefined, 'お試し用の設定でなければ、パスワードは画面に返さない');
+    assert.equal((await admin.post(`/api/members/${id}/approve`)).status, 409);
+    // 承認のメールに、ログイン ID とパスワードが書いてある
+    const mail = t.outbox().filter((m) => m.channel === 'email' && m.to === 'taro@example.com' && /承認しました/.test(m.subject)).at(-1);
+    const loginId = /ログイン ID: (\S+)/.exec(mail.body)[1], password = /パスワード: (\S+)/.exec(mail.body)[1];
+    assert.equal(loginId, ok.json.loginId);
+    // ログイン: 誤りは、どちらが違うかを言わない
+    const c = t.browser();
+    const ng = await c.post('/api/login/password', { loginId, password: 'chigau-password' });
+    assert.deepEqual([ng.status, ng.json.message], [401, 'ログイン ID かパスワードが違います']);
+    assert.equal((await c.post('/api/login/password', { loginId: 'inai', password })).json.message, 'ログイン ID かパスワードが違います');
+    const inn = await c.post('/api/login/password', { loginId: loginId.toUpperCase(), password });
+    assert.equal(inn.status, 200);
+    assert.match(inn.setCookie, /Max-Age=34560000/, '一度ログインしたら、400日は求めない');
+    assert.equal((await c.get('/api/me')).json.member.loginId, loginId);
+    // パスワードの変更: いまのパスワードが要る。変えると、新しいほうでだけ入れる
+    assert.ok((await c.post('/api/my/credentials', { loginId, password: 'atarashii-pass-1', currentPassword: 'x' })).json.errors.currentPassword);
+    assert.ok((await c.post('/api/my/credentials', { loginId, password: 'short', currentPassword: password })).json.errors.password);
+    assert.equal((await c.post('/api/my/credentials', { loginId, password: 'atarashii-pass-1', currentPassword: password })).status, 200);
+    assert.equal((await t.browser().post('/api/login/password', { loginId, password })).status, 401);
+    assert.equal((await t.browser().post('/api/login/password', { loginId, password: 'atarashii-pass-1' })).status, 200);
+    // 誤りが 10 回続くと、しばらく止まる
+    const d = t.browser();
+    for (let i = 0; i < 10; i++) await d.post('/api/login/password', { loginId, password: 'ng' });
+    assert.equal((await d.post('/api/login/password', { loginId, password: 'atarashii-pass-1' })).status, 423);
+    // 主催者管理者の再発行で、また入れる
+    const again = await admin.post(`/api/members/${id}/credentials`);
+    assert.equal(again.status, 200);
+    const mail2 = t.outbox().filter((m) => m.channel === 'email' && /お知らせ/.test(m.subject)).at(-1);
+    assert.equal((await t.browser().post('/api/login/password', { loginId, password: /パスワード: (\S+)/.exec(mail2.body)[1] })).status, 200);
+  } finally { await t.close(); }
+});
+
+test('会員登録を承認しないと、電話番号が空き、もう一度申し込める', async () => {
+  const t = await setup({ POC_AUTO_APPROVE: '0' });
+  try {
+    const admin = await t.staffLogin('admin', 'kanri', null);
+    const phone = '09033330002';
+    await register(t, t.browser(), phone);
+    const id = (await admin.get('/api/members')).json.members[0].id;
+    assert.equal((await admin.post(`/api/members/${id}/reject`, {})).status, 400, '理由が要る');
+    assert.equal((await admin.post(`/api/members/${id}/reject`, { reason: '重複の申し込み' })).status, 200);
+    assert.equal((await admin.get('/api/members')).json.members[0].rejected, true);
+    assert.ok(t.outbox().some((m) => m.channel === 'email' && /お受けできませんでした/.test(m.body)));
+    assert.equal((await register(t, t.browser(), phone)).json.pending, true, '同じ番号で、もう一度申し込める');
   } finally { await t.close(); }
 });

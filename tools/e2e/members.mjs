@@ -62,7 +62,9 @@ try {
   check(true, '送料の表示を保存できる');
 
   // 開催のない日のトップページ
-  const quiet = await open('/', { viewport: { width: 1280, height: 860 } });
+  // トップページは、ログインした人にだけ出る（ログインしていない人は、ログインの画面へ送られる）。ここでは、主催者管理者として開く
+  const quiet = await admin.context().newPage();
+  await quiet.goto(sys.base + '/');
   await quiet.waitForSelector('#calBody td');
   check((await quiet.isHidden('#today')) && (await quiet.locator('#calBody td.is-event').count()) === 0, '開催のない日は、カレンダーだけを出す');
   check((await quiet.locator('#calBody td.is-today').count()) === 1, 'カレンダーに、今日の印が出る');
@@ -122,7 +124,8 @@ try {
     return post(`/api/events/${id}/publish`, {});
   }, later);
   check(made.ok, '2つめの開催を公開できる');
-  const top = await open('/', { viewport: { width: 1280, height: 860 } });
+  const top = await admin.context().newPage();
+  await top.goto(sys.base + '/');
   await top.waitForSelector('#today:not([hidden])');
   const hero = await top.textContent('#today');
   check(hero.includes('本日開催') && hero.includes('12月の競り（検証）') && hero.includes('9:00 〜 18:00'), '開催の当日は、開催の名前と時間を大きく出す');
@@ -136,15 +139,20 @@ try {
   await top.waitForFunction(() => document.querySelector('#calList').textContent.includes('次回の競り（検証）'));
   check(true, '2週間後の開催も、カレンダーに出る');
   await shot(top, 'mvp-06-top-event-day', { fullPage: true });
-  const phone = await open('/', devices['iPhone 13']);
-  await phone.waitForSelector('#terms:not([hidden])');
-  check((await phone.textContent('main')).includes('送料は含まれません'), '送料が含まれないことと、返品特約を表示する');
-  check((await phone.textContent('main')).includes('買歩銭（落札額の10%）がかかります'), 'トップページに、買歩銭がかかることを表示する');
-  check(await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'スマホの幅で、横にはみ出さない');
-  await shot(phone, 'mvp-04-top-phone', { fullPage: true });
+  await top.setViewportSize({ width: 390, height: 844 });
+  await top.waitForSelector('#terms:not([hidden])');
+  check((await top.textContent('main')).includes('送料は含まれません'), '送料が含まれないことと、返品特約を表示する');
+  check((await top.textContent('main')).includes('買歩銭（落札額の10%）がかかります'), 'トップページに、買歩銭がかかることを表示する');
+  check(await top.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'スマホの幅で、横にはみ出さない');
+  await shot(top, 'mvp-04-top-phone', { fullPage: true });
 
-  console.log('会員登録');
-  await phone.click('#lead a[href="/register.html"]');
+  console.log('最初のページ（ログイン）と、会員登録');
+  const phone = await open('/', devices['iPhone 13']);
+  await phone.waitForURL(/login\.html/);
+  check(await phone.isVisible('#pwForm [name=loginId]') && await phone.isVisible('#pwForm [name=password]'), 'ログインしていない人が最初に開くのは、ログイン ID とパスワードのログインの画面');
+  check((await phone.textContent('main')).includes('会員登録がお済みでない方'), 'ログインの画面の下に、会員登録への案内が出る');
+  await shot(phone, 'mvp-04b-login', { fullPage: true });
+  await phone.click('main a[href="/register.html"]');
   await phone.waitForSelector('#stepPhone');
   await phone.fill('[name=id]', '123');
   await phone.click('#stepPhone button[type=submit]');
@@ -183,14 +191,33 @@ try {
 
   console.log('ログイン');
   await phone.click('#nav >> text=ログアウト');
-  await phone.waitForURL(sys.base + '/');
-  await phone.click('#nav >> text=ログイン');
+  await phone.waitForURL(/login\.html/);
+  check(true, 'ログアウトすると、ログインの画面に戻る');
+  // パスワードを忘れた人: 認証番号で入って、新しいパスワードを決める
+  await phone.click('#forgot');
   await phone.fill('[name=id]', '09000001111');
   await phone.click('#stepPhone button[type=submit]');
   await phone.waitForSelector('#stepCode:not([hidden])');
   await phone.fill('[name=code]', lastCode());
   await phone.waitForURL(/mypage\.html/);
-  check(true, '電話番号と認証番号で、ログインできる');
+  check(true, '電話番号と認証番号で、ログインできる（パスワードを忘れた人）');
+  await phone.waitForSelector('#dlg[open]');
+  await phone.fill('#dlg [name=loginId]', 'kensho01');
+  await phone.fill('#dlg [name=password]', 'kensho-pass-01');
+  await phone.fill('#dlg [name=password2]', 'kensho-pass-01');
+  await phone.click('#dlg button[type=submit]');
+  await phone.waitForFunction(() => document.getElementById('notice').textContent.includes('パスワードを保存しました'));
+  await phone.click('#nav >> text=ログアウト');
+  await phone.waitForURL(/login\.html/);
+  await phone.fill('#pwForm [name=loginId]', 'kensho01');
+  await phone.fill('#pwForm [name=password]', 'chigau');
+  await phone.click('#pwForm button[type=submit]');
+  await phone.waitForFunction(() => document.querySelector('#pwForm .msg').textContent.includes('違います'));
+  await phone.fill('#pwForm [name=password]', 'kensho-pass-01');
+  await phone.click('#pwForm button[type=submit]');
+  await phone.waitForURL(sys.base + '/');
+  check(await phone.isVisible('#calBody'), 'ログイン ID とパスワードでログインでき、トップページが開く');
+  await phone.goto(sys.base + '/mypage.html');
 
   console.log('参加手続きと入札');
   await phone.click('text=競りに参加する');
@@ -386,10 +413,11 @@ try {
   await guest.waitForFunction(() => document.getElementById('eventNote').textContent.includes('終了しました'));
   await con.waitForSelector('#eventBar', { state: 'hidden' });
   check(true, '開催を終了すると、参加者の画面に終了の知らせが出る');
-  const after = await open('/');
+  const after = await admin.context().newPage();
+  await after.goto(sys.base + '/');
   await after.waitForSelector('#calBody td');
   check(await after.isHidden('#today'), '終了した開催は、トップページの「本日開催」に出ない');
-  check(await after.isHidden('#wins'), 'ログインしていない人には、落札の結果を出さない');
+  check(await after.isHidden('#wins'), '落札していない人（スタッフ）には、落札の結果を出さない');
   await guest.goto(sys.base + '/');
   await guest.waitForSelector('#wins:not([hidden])');
   const wins = await guest.textContent('#wins');

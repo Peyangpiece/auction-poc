@@ -166,3 +166,16 @@ test('画面の部品は、中身が同じなら送り直さない（ETag と 30
     assert.equal((await fetch(`${srv.httpUrl}/app.css`, { headers: { 'if-none-match': '"old"' } })).status, 200);
   } finally { await srv.stop(); cleanup(ctx); }
 });
+
+test('ログインしていない人がトップページを開くと、ログインの画面へ送る', async () => {
+  const ctx = makeEnv();
+  const srv = await startServer(ctx);
+  try {
+    for (const p of ['/', '/index.html']) {
+      const res = await fetch(`${srv.httpUrl}${p}`, { redirect: 'manual' });
+      assert.deepEqual([res.status, res.headers.get('location')], [302, '/login.html']);
+    }
+    assert.equal((await fetch(`${srv.httpUrl}/login.html`)).status, 200);
+    assert.equal((await fetch(`${srv.httpUrl}/legal.html`)).status, 200, '規約は、ログインなしで読める');
+  } finally { await srv.stop(); cleanup(ctx); }
+});

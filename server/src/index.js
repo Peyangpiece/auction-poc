@@ -167,6 +167,10 @@ const server = http.createServer((req, res) => {
   if (url.pathname.startsWith('/api/')) return api.handle(req, res, url);
   if (req.method !== 'GET') return res.writeHead(405).end();
 
+  // 最初に開くページは、ログインの画面（発注者の指示）。ログインしていない人がトップページを開いたら、ログインへ送る
+  if ((url.pathname === '/' || url.pathname === '/index.html') && !api.signedIn(req)) {
+    return res.writeHead(302, { location: '/login.html', 'cache-control': 'no-store' }).end();
+  }
   const name = url.pathname === '/' ? 'index.html' : path.basename(url.pathname);
   const file = path.join(config.webDir, name);
   fs.readFile(file, (err, body) => {

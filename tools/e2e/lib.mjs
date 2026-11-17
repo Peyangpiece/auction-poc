@@ -13,7 +13,7 @@ export const { chromium, devices } = require('playwright');
 
 export async function boot({ port, env = {}, members = 3, withAgent = false }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auction-e2e-'));
-  const full = { ...process.env, POC_DATA_DIR: path.join(dir, 'data'), PORT: String(port), HOST: '127.0.0.1', POC_ALLOW_CRASH: '1', ...env };
+  const full = { ...process.env, POC_DATA_DIR: path.join(dir, 'data'), PORT: String(port), HOST: '127.0.0.1', POC_ALLOW_CRASH: '1', POC_AUTO_APPROVE: '1', ...env };
   execFileSync('node', ['tools/seed.js', '--members', String(members)], { cwd: ROOT, env: full, stdio: 'ignore' });
   const tokens = JSON.parse(fs.readFileSync(path.join(dir, 'data', 'tokens.json'), 'utf8'));
   const procs = [];

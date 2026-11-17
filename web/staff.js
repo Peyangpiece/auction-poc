@@ -79,22 +79,46 @@ function eventDialog(e) {
 }
 
 // ------------------------------------------------------------ 会員
+// ログイン ID とパスワードを発行したあとの知らせ。メールで送った旨を出す。お試し用の設定のときだけ、内容も出す
+function issuedDialog(title, res) {
+  openDialog(title,
+    el('p', { text: `ログイン ID とパスワードを、${res.email} へメールで送りました。` }),
+    res.devPassword && el('dl', { class: 'facts' },
+      el('dt', { text: 'ログイン ID' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.loginId }))),
+      el('dt', { text: 'パスワード' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.devPassword })))),
+    res.devPassword && el('p', { class: 'note', text: '【お試し用】メールの送信サービスをつなぐ前なので、ここに表示しています。本番では、表示されません。' }),
+    el('div', { class: 'actions' }, closeBtn('閉じる')));
+}
+async function issue(url, title) {
+  const r = await api('POST', url);
+  if (!r.ok) { alertLine(r.message); return; }
+  await show('members');
+  issuedDialog(title, r);
+}
 async function membersPanel() {
   const res = await api('GET', '/api/members');
+  const waiting = res.members.filter((m) => !m.approved && !m.withdrawn).length;
   const rows = res.members.map((m) => el('tr', {},
     el('td', { class: 'n', text: String(m.id) }),
     el('td', { class: 'dyn' }, m.kind === 'b2b' ? `${m.company}　${m.contactName}` : m.name),
     el('td', { text: m.kind === 'b2b' ? '法人' : '個人' }),
+    el('td', { text: m.loginId ?? '' }),
     el('td', { class: 'n', text: m.phone }),
     el('td', { class: 'dyn', text: m.email + (m.emailVerified ? '' : '（未確認）') }),
-    el('td', { class: 'dyn' }, m.withdrawn ? '退会' : m.suspendedBy === 'manual' ? el('span', { class: 'warn', text: `停止中: ${m.suspendReason}` })
+    el('td', { class: 'dyn' }, m.rejected ? '承認しなかった' : m.withdrawn ? '退会' : !m.approved ? el('span', { class: 'warn', text: '承認待ち' }) : m.suspendedBy === 'manual' ? el('span', { class: 'warn', text: `停止中: ${m.suspendReason}` })
       : m.suspendedBy === 'unpaid' ? el('span', { class: 'warn', text: '未払いによる停止（消し込むと、自動で解ける）' }) : '利用中'),
-    act(!m.withdrawn && smallBtn('電話番号を変更', () => askForm(`会員 ${m.id} の電話番号を変更`, '本人を確かめたうえで、変更してください。変更すると、古い番号でのログインは切れます。',
+    act(
+      !m.approved && !m.withdrawn && smallBtn('承認する', () => issue(`/api/members/${m.id}/approve`, `会員 ${m.id} を承認しました`), 'btn-primary'),
+      !m.approved && !m.withdrawn && smallBtn('承認しない', () => askReason(`会員 ${m.id} の登録を承認しない`, '理由（記録に残ります。本人には送りません）', true, (reason) => api('POST', `/api/members/${m.id}/reject`, { reason })), 'btn-danger'),
+      m.approved && !m.withdrawn && smallBtn(m.loginId ? 'パスワードを再発行' : 'ログイン情報を発行', () => issue(`/api/members/${m.id}/credentials`, `会員 ${m.id} のログイン情報を発行しました`)),
+      !m.withdrawn && smallBtn('電話番号を変更', () => askForm(`会員 ${m.id} の電話番号を変更`, '本人を確かめたうえで、変更してください。変更すると、古い番号でのログインは切れます。',
         [field('新しい電話番号', 'phone', { type: 'tel', inputMode: 'tel', required: true }), field('本人を確かめた方法', 'reason', { required: true, placeholder: '会場で、運転免許証で確かめた' })], (d) => api('POST', `/api/members/${m.id}/phone`, d), '変更する')),
       m.suspendedBy === 'manual'
       ? smallBtn('停止を解く', async () => { await api('POST', `/api/members/${m.id}/unsuspend`); show('members'); })
       : !m.withdrawn && m.suspendedBy !== 'unpaid' && smallBtn('停止', () => askReason(`会員 ${m.id} を停止`, '停止の理由', true, (reason) => api('POST', `/api/members/${m.id}/suspend`, { reason })), 'btn-danger'))));
-  return [el('p', { class: 'msg', id: 'line', role: 'alert' }), table(['会員番号', '名前', '区分', '電話番号', 'メール', '状態', ''], rows, '会員はまだいません。')];
+  return [el('p', { class: 'msg', id: 'line', role: 'alert' }),
+    waiting ? el('div', { class: 'banner', role: 'status' }, el('span', { text: `承認待ちの会員登録が ${waiting} 件あります。承認すると、ログイン ID とパスワードが、本人へメールで送られます。` })) : null,
+    table(['会員番号', '名前', '区分', 'ログイン ID', '電話番号', 'メール', '状態', ''], rows, '会員はまだいません。')];
 }
 
 // ------------------------------------------------------------ 受付: 来場確認（FR-MODE-002・004）と、会場の QR コード
@@ -419,7 +443,7 @@ async function settingsPanel() {
 // 記録の「操作」を、読める言葉にする（無いものは、そのまま出す）
 const AUDIT_TEXT = {
   'staff.login': 'スタッフがログイン', 'staff.create': 'スタッフを登録', 'staff.reset': 'スタッフのパスワードを再発行', 'staff.stop': 'スタッフを停止', 'staff.password_change': 'スタッフがパスワードを変更',
-  'member.register': '会員登録', 'member.update': '会員が登録内容を変更', 'member.withdraw': '会員が退会', 'member.suspend': '会員を停止', 'member.unsuspend': '会員の停止を解除', 'member.phone_change': '会員の電話番号を変更',
+  'member.register': '会員登録', 'member.approve': '会員登録を承認', 'member.reject': '会員登録を承認しない', 'member.credentials_issue': 'ログイン情報を発行', 'member.credentials': '会員がパスワードを変更', 'member.update': '会員が登録内容を変更', 'member.withdraw': '会員が退会', 'member.suspend': '会員を停止', 'member.unsuspend': '会員の停止を解除', 'member.phone_change': '会員の電話番号を変更',
   'event.create': '開催を登録', 'event.update': '開催を変更', 'event.publish': '開催を公開', 'event.join': '参加手続き', 'participation.change': '参加の内容を変更',
   'lot.create': '品を登録', 'proxy.bid': '代理で入札', 'proxy.cancel': '代理の入札を取り消し',
   'reception.checkin': '来場を確認', 'reception.join': '参加手続きを代行',

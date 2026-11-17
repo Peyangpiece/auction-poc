@@ -13,7 +13,7 @@ const { chromium } = require('playwright');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PORT = 18097, B = `http://127.0.0.1:${PORT}`;
 const D = fs.mkdtempSync(path.join(os.tmpdir(), 'auction-a11y-'));
-const env = { ...process.env, PORT: String(PORT), POC_DATA_DIR: D, POC_DEV_SHOW_CODES: '1', POC_IVS_MODE: 'always-live', POC_AUTH_RATE: '0' };
+const env = { ...process.env, PORT: String(PORT), POC_DATA_DIR: D, POC_DEV_SHOW_CODES: '1', POC_IVS_MODE: 'always-live', POC_AUTH_RATE: '0', POC_AUTO_APPROVE: '1' };
 execFileSync('node', ['tools/setup-first.js', '--with-event'], { cwd: ROOT, env, stdio: 'ignore' });
 const server = spawn('node', ['server/src/index.js'], { cwd: ROOT, env, stdio: 'ignore' });
 // 途中で失敗しても、立てたサーバーを残さない（残ると、次の実行が古いサーバーにつながって、失敗する）
@@ -39,6 +39,7 @@ for (const scheme of ['light', 'dark']) {
   await post(c, '/api/register/verify', { id: phone, code: s.devCode });
   let p = await c.newPage(); await p.goto(B + '/register.html'); await p.waitForSelector('#stepProfile:not([hidden])'); await p.click('#stepProfile button[type=submit]'); await p.waitForTimeout(500); await scan(p, 'register-profile(errors)', scheme); await p.close();
   await post(c, '/api/register/complete', { kind: 'b2c', name: '確認 太郎', email: `${phone}@example.com`, address: '（例）住所1-1', adult: true });
+  p = await c.newPage(); await p.goto(B + '/'); await p.waitForTimeout(700); await scan(p, 'home-member', scheme); await p.close();
   p = await c.newPage(); await p.goto(B + '/mypage.html'); await p.waitForTimeout(800); await scan(p, 'mypage-bills', scheme); await p.click('[data-tab=profile]'); await p.waitForTimeout(300); await scan(p, 'mypage-profile', scheme); await p.click('#editBtn'); await p.waitForTimeout(400); await scan(p, 'mypage-edit-dialog', scheme); await p.close();
   p = await c.newPage(); await p.goto(B + '/bidder.html'); await p.waitForTimeout(900); await scan(p, 'bidder-gate-pick', scheme);
   await p.click('[data-pick=online]'); await p.waitForTimeout(400);

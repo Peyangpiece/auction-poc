@@ -31,7 +31,11 @@ const DAY = 24 * HOUR;
 const OTP_TTL = 5 * MIN;            // 認証番号の有効期限（FR-AUTH-004）
 const OTP_MAX_ATTEMPTS = 5;         // 入力の誤り5回で無効
 const OTP_SENDS_PER_HOUR = 5;       // 同じ番号へ1時間に5回まで
-const MEMBER_IDLE = 30 * DAY;       // 会員: 最後に操作してから30日（FR-AUTH-005）
+// 会員: 一度ログインしたら、その端末では、ログインを求めない（発注者の指示）。最後に操作してから 400 日で切れる
+// （ブラウザがクッキーを覚えておける上限に合わせた。使っているかぎり、延び続ける）
+const MEMBER_IDLE = 400 * DAY;
+const LOGIN_FAIL_MAX = 10;          // ログイン ID とパスワードの誤りが続いたら、しばらく止める
+const LOGIN_LOCK = 15 * MIN;
 const STAFF_LIFETIME = 12 * HOUR;   // スタッフ: 12時間（FR-AUTH-012）
 const REGISTER_LIFETIME = 15 * MIN; // SMS 認証から登録の完了まで
 const LOCK_AFTER = 5;               // パスワードの誤り5回で
@@ -56,9 +60,15 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     })();
   }
   db.exec(MVP_SCHEMA);
+  // 承認（発注者の指示）: 会員登録は、主催者管理者が承認するまで「承認待ち」。前からの会員は、承認済みとして扱う
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = 'approved_at'").get()) {
+    db.exec('ALTER TABLE member_accounts ADD COLUMN approved_at REAL');
+    db.exec('ALTER TABLE member_accounts ADD COLUMN rejected_at REAL');
+    db.exec('UPDATE member_accounts SET approved_at = created_at');
+  }
   // 電話番号が本人のものと確かめてあるか（メールで登録した人は、まだ確かめていない）。前からの会員は、SMS で確かめてある
   if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = 'phone_verified'").get()) db.exec('ALTER TABLE member_accounts ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 1');
-  for (const [col, type] of [['withdrawn_at', 'REAL'], ['withdrawn_phone', 'TEXT'], ['agreed_at', 'REAL'], ['name_kana', 'TEXT'], ['postal_code', 'TEXT'], ['prefecture', 'TEXT'], ['address1', 'TEXT'], ['address2', 'TEXT']]) {
+  for (const [col, type] of [['login_id', 'TEXT'], ['password_hash', 'TEXT'], ['login_failed', 'INTEGER NOT NULL DEFAULT 0'], ['login_locked_until', 'REAL NOT NULL DEFAULT 0'], ['withdrawn_at', 'REAL'], ['withdrawn_phone', 'TEXT'], ['agreed_at', 'REAL'], ['name_kana', 'TEXT'], ['postal_code', 'TEXT'], ['prefecture', 'TEXT'], ['address1', 'TEXT'], ['address2', 'TEXT']]) {
     if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = ?").get(col)) db.exec(`ALTER TABLE member_accounts ADD COLUMN ${col} ${type}`);
   }
   // 以前の版のデータベースに、後から足した列を加える
@@ -110,6 +120,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     ctx.sessionHash = hash;
     if (s.kind === 'member') {
       ctx.member = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(s.subject_id) ?? null;
+      // 認証番号でログインした直後（30分以内）は、いまのパスワードなしで、新しいパスワードを決められる（パスワードを忘れた人のため）
+      ctx.viaOtp = s.phone === 'otp' && now - s.created_at < 30 * MIN;
       // 最後の操作から30日。毎回は書かず、1時間に1回だけ更新する
       if (now - s.last_seen_at > HOUR) db.prepare('UPDATE sessions SET last_seen_at = ? WHERE id_hash = ?').run(now, hash);
     } else if (s.kind === 'staff') {
@@ -169,6 +181,18 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return phone;
   };
 
+  // ログイン ID とパスワード（発注者の指示。会員が自分で決める）
+  const normLoginId = (v) => String(v ?? '').trim().toLowerCase();
+  function credentialErrors(body, errors, { memberId = null, need = false } = {}) {
+    const loginId = normLoginId(body.loginId), password = String(body.password ?? '');
+    if (!need && !loginId && !password) return null;
+    if (!/^[a-z0-9._-]{4,32}$/.test(loginId)) errors.loginId = 'ログイン ID は、半角の英数字と . _ - で、4〜32文字にしてください';
+    else if (db.prepare('SELECT 1 FROM member_accounts WHERE login_id = ? AND id IS NOT ?').get(loginId, memberId)) errors.loginId = 'このログイン ID は、使われています。別の ID にしてください';
+    if (password.length < 8) errors.password = 'パスワードは、8文字以上にしてください';
+    else if (password.length > 200) errors.password = 'パスワードが長すぎます';
+    else if (password.toLowerCase() === loginId) errors.password = 'ログイン ID と同じパスワードは、使えません';
+    return { loginId, password };
+  }
   // 登録の宛先: 携帯電話の番号か、メールアドレス
   const registerKey = (body) => {
     const raw = String(body.id ?? body.phone ?? '').trim();
@@ -187,13 +211,13 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       const email = raw.toLowerCase();
       if (!isEmail(email)) throw bad('メールアドレスを正しく入力してください');
       // 同じアドレスの会員が2人以上いる場合は、だれのことか決められないので、メールではログインさせない
-      const rows = db.prepare('SELECT * FROM member_accounts WHERE lower(email) = ? AND email_verified = 1 AND withdrawn_at IS NULL').all(email);
+      const rows = db.prepare('SELECT * FROM member_accounts WHERE lower(email) = ? AND email_verified = 1 AND withdrawn_at IS NULL AND approved_at IS NOT NULL').all(email);
       return { key: 'email:' + email, member: rows.length === 1 ? rows[0] : null };
     }
     const phone = normalizePhone(raw);
     if (!phone) throw bad('携帯電話の番号（例: 090-1234-5678）か、メールアドレスを入力してください');
     // メールで登録した人の電話番号は、本人のものと確かめていないので、SMS でのログインには使わせない
-    return { key: phone, member: db.prepare('SELECT * FROM member_accounts WHERE phone = ? AND phone_verified = 1').get(phone) ?? null };
+    return { key: phone, member: db.prepare('SELECT * FROM member_accounts WHERE phone = ? AND phone_verified = 1 AND approved_at IS NOT NULL').get(phone) ?? null };
   };
   // 氏名・フリガナ・住所を、入力から組み立てて確かめる（会員登録と、登録内容の変更で使う）。
   // 姓名・郵便番号を分けた形（画面の入力）と、1つにまとめた形（name・address）の両方を受ける。
@@ -224,7 +248,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
 
   // ------------------------------------------------------------ 会員
   const memberView = (m) => ({
-    kind: m.kind, name: m.name, nameKana: m.name_kana, phone: m.phone, phoneVerified: !!m.phone_verified, email: m.email, emailVerified: !!m.email_verified, address: m.address,
+    kind: m.kind, name: m.name, nameKana: m.name_kana, loginId: m.login_id ?? null, hasPassword: !!m.password_hash, phone: m.phone, phoneVerified: !!m.phone_verified, email: m.email, emailVerified: !!m.email_verified, address: m.address,
     postalCode: m.postal_code, prefecture: m.prefecture, address1: m.address1, address2: m.address2,
     shipTo: m.ship_to, company: m.company, contactName: m.contact_name, billing: m.billing, suspended: !!billing.suspension(m.id), suspendedBy: billing.suspension(m.id),
   });
@@ -313,10 +337,17 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     db.prepare('UPDATE member_accounts SET name_kana = ?, postal_code = ?, prefecture = ?, address1 = ?, address2 = ? WHERE id = ?')
       .run(person.nameKana, person.postalCode, person.prefecture, person.address1, person.address2, info.lastInsertRowid);
     if (byEmail) db.prepare('UPDATE member_accounts SET email_verified = 1, phone_verified = 0 WHERE id = ?').run(info.lastInsertRowid);
+
+    if (config.autoApprove) db.prepare('UPDATE member_accounts SET approved_at = ? WHERE id = ?').run(now, info.lastInsertRowid);
     const member = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(info.lastInsertRowid);
     endSession(ctx);
-    startSession(ctx, 'member', member.id, MEMBER_IDLE);
     audit({ ...ctx, member }, 'member.register', { target: `member:${member.id}`, after: { kind } });
+    if (!member.approved_at) {
+      // 承認待ち: ログインはさせない。主催者管理者が承認すると、ログイン ID とパスワードを、承認のメールで送る
+      if (!byEmail) await sendEmailVerification(ctx, member);
+      return { ok: true, pending: true };
+    }
+    startSession(ctx, 'member', member.id, MEMBER_IDLE);
     // メールで登録した人は、アドレスの確認が済んでいるので、確認のメールは送らない
     const verifyUrl = byEmail ? null : await sendEmailVerification(ctx, member); // 確認が済んでいなくても入札はできる（FR-AUTH-011）
     return { ok: true, member: memberView(member), ...(config.devShowCodes ? { devVerifyUrl: verifyUrl } : {}) };
@@ -380,13 +411,44 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const code = target.member ? await sendOtp(target.key) : null;
     return { ok: true, via: target.key.startsWith('email:') ? 'email' : 'sms', ...(config.devShowCodes && code ? { devCode: code } : {}) };
   });
+  // ログイン ID とパスワードでのログイン（発注者の指示）。どちらが違ったかは、伝えない
+  route('POST', '/api/login/password', (ctx, body) => {
+    throttle(ctx);
+    const fail = new HttpError(401, 'ログイン ID かパスワードが違います');
+    const m = db.prepare('SELECT * FROM member_accounts WHERE login_id = ? AND withdrawn_at IS NULL AND approved_at IS NOT NULL').get(normLoginId(body.loginId));
+    if (!m || !m.password_hash) throw fail;
+    const now = nowMs();
+    if (m.login_locked_until > now) throw new HttpError(423, `誤りが続いたため、しばらくログインできません。${Math.ceil((m.login_locked_until - now) / MIN)} 分後にやり直すか、「パスワードを忘れた方」からお入りください`);
+    if (!verifyPassword(String(body.password ?? ''), m.password_hash)) {
+      const failed = m.login_failed + 1;
+      db.prepare('UPDATE member_accounts SET login_failed = ?, login_locked_until = ? WHERE id = ?').run(failed >= LOGIN_FAIL_MAX ? 0 : failed, failed >= LOGIN_FAIL_MAX ? now + LOGIN_LOCK : 0, m.id);
+      throw fail;
+    }
+    db.prepare('UPDATE member_accounts SET login_failed = 0, login_locked_until = 0 WHERE id = ?').run(m.id);
+    startSession(ctx, 'member', m.id, MEMBER_IDLE);
+    return { ok: true, member: memberView(m) };
+  });
+  // ログイン ID とパスワードを決める・変える。いまのパスワードが要る（まだ無い人と、認証番号でログインした直後の人は、要らない）
+  route('POST', '/api/my/credentials', (ctx, body) => {
+    const m = needMember(ctx);
+    throttle(ctx);
+    const errors = {};
+    if (m.password_hash && !ctx.viaOtp && !verifyPassword(String(body.currentPassword ?? ''), m.password_hash)) errors.currentPassword = 'いまのパスワードが違います';
+    const cred = credentialErrors(body, errors, { memberId: m.id, need: true });
+    if (Object.keys(errors).length) throw bad('入力を確かめてください', { errors });
+    db.prepare('UPDATE member_accounts SET login_id = ?, password_hash = ?, login_failed = 0, login_locked_until = 0, updated_at = ? WHERE id = ?').run(cred.loginId, hashPassword(cred.password), nowMs(), m.id);
+    // ほかの端末のログインは切る（パスワードを変えたのに、古い端末が入ったままにならないように）
+    db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ? AND id_hash <> ?").run(m.id, ctx.sessionHash);
+    audit(ctx, 'member.credentials', { target: `member:${m.id}` });
+    return { ok: true, member: memberView(db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(m.id)) };
+  });
   route('POST', '/api/login/verify', (ctx, body) => {
     throttle(ctx);
     const target = loginTarget(body);
     checkOtp(target.key, body.code);
     const member = target.member;
     if (!member) throw new HttpError(400, '認証番号が正しくないか、期限が切れています。番号を送り直してください', { resend: true });
-    startSession(ctx, 'member', member.id, MEMBER_IDLE);
+    startSession(ctx, 'member', member.id, MEMBER_IDLE, 'otp');
     return { ok: true, member: memberView(member) };
   });
   route('POST', '/api/logout', (ctx) => { endSession(ctx); return { ok: true }; });
@@ -514,7 +576,52 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   // 会員の一覧・停止（主催者管理者だけ。FR-AUTH-009）
   route('GET', '/api/members', (ctx) => {
     needStaff(ctx, 'admin');
-    return { members: db.prepare('SELECT * FROM member_accounts ORDER BY id DESC LIMIT 500').all().map((m) => ({ id: m.id, ...memberView(m), suspendReason: m.suspend_reason, withdrawn: !!m.withdrawn_at, phone: m.withdrawn_at ? m.withdrawn_phone : m.phone })) };
+    return { members: db.prepare('SELECT * FROM member_accounts ORDER BY id DESC LIMIT 500').all().map((m) => ({ id: m.id, ...memberView(m), approved: !!m.approved_at, rejected: !!m.rejected_at, suspendReason: m.suspend_reason, withdrawn: !!m.withdrawn_at, phone: m.withdrawn_at ? m.withdrawn_phone : m.phone })) };
+  });
+  // ログイン ID とパスワードを発行して、メールで知らせる。ID は「rw＋会員番号」。パスワードは、そのつど作り直す
+  async function issueCredentials(ctx, m, subject, lead) {
+    const loginId = m.login_id ?? `rw${String(m.id).padStart(5, '0')}`;
+    const password = randomToken(9); // 12文字（英数字と - _）
+    db.prepare('UPDATE member_accounts SET login_id = ?, password_hash = ?, login_failed = 0, login_locked_until = 0, updated_at = ? WHERE id = ?').run(loginId, hashPassword(password), nowMs(), m.id);
+    db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ?").run(m.id); // 前のパスワードでのログインは切る
+    const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
+    await notifier.email(m.email, 'credentials', subject, `${lead}\n\nログイン ID: ${loginId}\nパスワード: ${password}\n\nログインはこちら: ${origin}/login.html\n\nパスワードは、ログインのあと、マイページの「個人情報の設定」で変えられます。\nこのメールにお心当たりがない場合は、破棄してください。`);
+    // お試し用の設定のときだけ、発行した内容を画面に返す（メールの送信サービスをつなぐ前に、動きを確かめるため）
+    return { loginId, ...(config.devShowCodes ? { devPassword: password } : {}) };
+  }
+  // 会員登録の承認（主催者管理者だけ）。承認すると、ログイン ID とパスワードを、承認のメールで送る
+  route('POST', '/api/members/:id/approve', async (ctx, body, id) => {
+    needStaff(ctx, 'admin');
+    const m = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(id);
+    if (!m || m.withdrawn_at) throw new HttpError(404, '会員が見つかりません');
+    if (m.approved_at) throw new HttpError(409, 'この会員は、すでに承認済みです');
+    db.prepare('UPDATE member_accounts SET approved_at = ?, updated_at = ? WHERE id = ?').run(nowMs(), nowMs(), id);
+    const issued = await issueCredentials(ctx, m, '【令和の競り】会員登録を承認しました', `${m.kind === 'b2b' ? m.company : m.name} 様\n\n会員登録を承認しました。次のログイン ID とパスワードで、ログインしてください。`);
+    audit(ctx, 'member.approve', { target: `member:${id}`, after: { loginId: issued.loginId } });
+    return { ok: true, ...issued, email: m.email };
+  });
+  // 承認しない（登録を断る）。電話番号を空けて、同じ番号でもう一度申し込めるようにする
+  route('POST', '/api/members/:id/reject', async (ctx, body, id) => {
+    needStaff(ctx, 'admin');
+    const m = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(id);
+    if (!m || m.withdrawn_at) throw new HttpError(404, '会員が見つかりません');
+    if (m.approved_at) throw new HttpError(409, '承認済みの会員は、ここでは断れません（停止を使ってください）');
+    const reason = String(body.reason ?? '').trim();
+    if (!reason) throw bad('断る理由を入力してください（記録に残ります。本人には送りません）');
+    db.prepare('UPDATE member_accounts SET rejected_at = ?, withdrawn_at = ?, withdrawn_phone = phone, phone = ?, updated_at = ? WHERE id = ?').run(nowMs(), nowMs(), `却下:${m.id}`, nowMs(), id);
+    await notifier.email(m.email, 'rejected', '【令和の競り】会員登録について', `${m.kind === 'b2b' ? m.company : m.name} 様\n\nこのたびは、会員登録をお申し込みいただき、ありがとうございます。\n誠に恐れ入りますが、今回のお申し込みは、お受けできませんでした。`);
+    audit(ctx, 'member.reject', { target: `member:${id}`, reason });
+    return { ok: true };
+  });
+  // ログイン ID とパスワードの発行・再発行（承認済みの会員。前からの会員や、パスワードを忘れた会員に使う）
+  route('POST', '/api/members/:id/credentials', async (ctx, body, id) => {
+    needStaff(ctx, 'admin');
+    const m = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(id);
+    if (!m || m.withdrawn_at) throw new HttpError(404, '会員が見つかりません');
+    if (!m.approved_at) throw new HttpError(409, '先に、会員登録を承認してください');
+    const issued = await issueCredentials(ctx, m, '【令和の競り】ログイン ID とパスワードのお知らせ', `${m.kind === 'b2b' ? m.company : m.name} 様\n\nログイン ID とパスワードを、発行しました。`);
+    audit(ctx, 'member.credentials_issue', { target: `member:${id}`, after: { loginId: issued.loginId } });
+    return { ok: true, ...issued, email: m.email };
   });
   route('POST', '/api/members/:id/suspend', (ctx, body, id) => {
     needStaff(ctx, 'admin');
@@ -913,6 +1020,12 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (ctx.staff.role !== 'admin' && ctx.staff.role !== 'auctioneer') return { code: 'FORBIDDEN', message: '競りの進行は、主催者管理者と進行役だけができます' };
     return { staff: { id: ctx.staff.id, name: ctx.staff.name, role: ctx.staff.role, account: true } };
   }
+  /** ログインしているか（会員かスタッフ）。トップページを開いた人を、ログインの画面へ送るかどうかに使う */
+  function signedIn(req) {
+    const ctx = { req };
+    loadSession(ctx);
+    return !!(ctx.member && !ctx.member.withdrawn_at) || !!ctx.staff;
+  }
   /** 会場の大型モニター（FR-CON-007）の接続。スタッフのログインがあれば、どの役割でも見られる（見るだけ） */
   function viewerFromCookie(req) {
     const ctx = { req };
@@ -943,6 +1056,6 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   }
   return {
     handle, createStaff, audit, participantFromCookie, bidGate, eventId: () => activeEvent()?.id ?? null,
-    staffFromCookie, viewerFromCookie, eventState, setPhase, proxyTarget, billing,
+    staffFromCookie, viewerFromCookie, signedIn, eventState, setPhase, proxyTarget, billing,
   };
 }

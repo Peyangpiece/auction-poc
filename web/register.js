@@ -66,6 +66,14 @@ onSubmit(forms.profile, async (data) => {
   const res = await api('POST', '/api/register/complete', { ...data, adult: data.adult === '1', agreed: data.agreed === '1' });
   // 入札画面（会場の QR コードなど）から来た人は、登録のあと入札画面の参加手続きへ進める（FR-AUTH-007）
   if (res.ok) dirty = false;
+  // 承認待ち: ログインはまだできない。受け付けたことと、このあとの流れを伝える
+  if (res.ok && res.pending) {
+    for (const f of Object.values(forms)) f.hidden = true;
+    $('#steps').hidden = true;
+    $('#doneMail').textContent = `送り先: ${forms.profile.elements.email.disabled ? phone : data.email}`;
+    $('#stepDone').hidden = false; $('#stepDone').focus();
+    return res;
+  }
   if (res.ok && res.devVerifyUrl) sessionStorage.setItem('devVerifyUrl', res.devVerifyUrl); // お試し用: 確認のリンクを、マイページで出す
   if (res.ok) location.href = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/mypage.html?registered=1';
   else if (res.status === 401) { res.message = '時間が空いたため、連絡先の確認からやり直してください'; show('phone'); }

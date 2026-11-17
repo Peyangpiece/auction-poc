@@ -196,3 +196,7 @@ td .note { font-size: 12px; }
 .invlist__state { color: var(--ink-2); font-size: 14px; }
 .invlist .warn { font-size: 14px; }
 .invlist .btn { justify-self: end; min-height: 44px; padding: 6px 16px; font-size: 14px; text-decoration: none; display: inline-flex; align-items: center; }
+
+/* ログインの画面の、控えめな案内（会員登録がお済みでない方） */
+.aside.small { font-size: 13px; }
+.aside .textbtn { padding: 8px 0; }
