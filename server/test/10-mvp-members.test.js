@@ -430,6 +430,11 @@ test('会員登録は承認待ちになり、主催者管理者が承認する�
     const inn = await c.post('/api/login/password', { loginId: loginId.toUpperCase(), password });
     assert.equal(inn.status, 200);
     assert.match(inn.setCookie, /Max-Age=34560000/, '一度ログインしたら、400日は求めない');
+    // 発行するパスワードは、見まちがえやすい字と記号を使わない。写し取ったときの前後の空白と、全角で打った ID は、受ける
+    assert.match(password, /^[a-hjkmnp-z2-9]{12}$/);
+    const fw = loginId.replace(/[a-z0-9]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 0xfee0));
+    assert.equal((await t.browser().post('/api/login/password', { loginId: ` ${fw}　`, password: `  ${password}\n` })).status, 200);
+    assert.equal((await t.browser().post('/api/login/password', { loginId, password: password.slice(0, -1) })).status, 401);
     assert.equal((await c.get('/api/me')).json.member.loginId, loginId);
     // パスワードの変更: いまのパスワードが要る。変えると、新しいほうでだけ入れる
     assert.ok((await c.post('/api/my/credentials', { loginId, password: 'atarashii-pass-1', currentPassword: 'x' })).json.errors.currentPassword);

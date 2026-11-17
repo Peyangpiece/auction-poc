@@ -310,3 +310,8 @@ th { font-size: 12px; font-weight: 500; color: var(--ink-2); letter-spacing: .02
   .tabbar a[aria-current="page"] { font-weight: 700; }
   .pagehead h1 { font-size: 24px; }
 }
+
+/* 発行した ID・パスワードの行: 値と、写し取るボタン */
+.copyrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.copyrow .secret { flex: 1 1 160px; font-size: 18px; letter-spacing: .06em; }
+.copybtn { min-height: 40px; padding: 4px 12px; font-size: 13px; }

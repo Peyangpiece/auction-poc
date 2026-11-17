@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 // MVP の 1（会員登録・認証・スタッフ）の API と、開催・主催者設定・監査ログ。
 // 商品は、競りの最中に進行コンソールからその場で登録する（発注者の決定）ので、事前の登録・審査・カタログは持たない。
 // 権限は、必ずここ（サーバーの側）で確かめる。画面でボタンを隠すだけにはしない（本仕様 8.14）。
@@ -195,7 +196,18 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   };
 
   // ログイン ID とパスワード（発注者の指示。会員が自分で決める）
-  const normLoginId = (v) => String(v ?? '').trim().toLowerCase();
+  // 全角で打った英数字（スマートフォンの日本語入力のまま）も、半角として受ける
+  const normLoginId = (v) => String(v ?? '').normalize('NFKC').trim().toLowerCase();
+  // 発行するパスワード: 見まちがえやすい字（0 と O、1 と l と I）と記号を使わない、12文字（約59ビット）
+  const PASSWORD_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
+  const newPassword = () => Array.from({ length: 12 }, () => PASSWORD_CHARS[crypto.randomInt(PASSWORD_CHARS.length)]).join('');
+  // 写し取るときに前後に入った空白（改行・全角の空白を含む）は、無いものとして確かめ直す
+  const passwordMatches = (input, hash) => {
+    const raw = String(input ?? '');
+    if (verifyPassword(raw, hash)) return true;
+    const trimmed = raw.trim();
+    return trimmed !== raw && verifyPassword(trimmed, hash);
+  };
   function credentialErrors(body, errors, { memberId = null, need = false } = {}) {
     const loginId = normLoginId(body.loginId), password = String(body.password ?? '');
     if (!need && !loginId && !password) return null;
@@ -436,7 +448,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (!m || !m.password_hash) throw fail;
     const now = nowMs();
     if (m.login_locked_until > now) throw new HttpError(423, `誤りが続いたため、しばらくログインできません。${Math.ceil((m.login_locked_until - now) / MIN)} 分後にやり直すか、「パスワードを忘れた方」からお入りください`);
-    if (!verifyPassword(String(body.password ?? ''), m.password_hash)) {
+    if (!passwordMatches(body.password, m.password_hash)) {
       const failed = m.login_failed + 1;
       db.prepare('UPDATE member_accounts SET login_failed = ?, login_locked_until = ? WHERE id = ?').run(failed >= LOGIN_FAIL_MAX ? 0 : failed, failed >= LOGIN_FAIL_MAX ? now + LOGIN_LOCK : 0, m.id);
       throw fail;
@@ -665,7 +677,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   // ログイン ID とパスワードを発行して、メールで知らせる。ID は「rw＋会員番号」。パスワードは、そのつど作り直す
   async function issueCredentials(ctx, m, subject, lead) {
     const loginId = m.login_id ?? `rw${String(m.id).padStart(5, '0')}`;
-    const password = randomToken(9); // 12文字（英数字と - _）
+    const password = newPassword();
     db.prepare('UPDATE member_accounts SET login_id = ?, password_hash = ?, login_failed = 0, login_locked_until = 0, updated_at = ? WHERE id = ?').run(loginId, hashPassword(password), nowMs(), m.id);
     db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ?").run(m.id); // 前のパスワードでのログインは切る
     const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;

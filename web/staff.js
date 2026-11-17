@@ -79,15 +79,26 @@ function eventDialog(e) {
 }
 
 // ------------------------------------------------------------ 会員
+// 写し取るボタン（手で打ち直すと、まちがえやすい）
+function copyBtn(text) {
+  const b = el('button', { class: 'btn copybtn', type: 'button', text: 'コピー' });
+  b.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(text); b.textContent = 'コピーしました'; } catch { b.textContent = 'コピーできません'; }
+    setTimeout(() => { b.textContent = 'コピー'; }, 2000);
+  });
+  return b;
+}
 // ログイン ID とパスワードを発行したあとの知らせ。メールで送った旨を出す。お試し用の設定のときだけ、内容も出す
 function issuedDialog(title, res) {
   openDialog(title,
-    res.sent === false
+    res.devPassword
+      ? el('p', { text: `ログイン ID とパスワードを発行しました。下の内容を、${res.name ?? '本人'}にお伝えください（お試し用の設定では、メールは送られません）。` })
+      : res.sent === false
       ? el('p', { class: 'warn', role: 'alert', text: `${res.email} へのメールを、送れませんでした。少し待ってから、会員の一覧の「ログイン情報を発行」で、送り直してください。` })
       : el('p', { text: `ログイン ID とパスワードを、${res.email} へメールで送りました。` }),
     res.devPassword && el('dl', { class: 'facts' },
-      el('dt', { text: 'ログイン ID' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.loginId }))),
-      el('dt', { text: 'パスワード' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.devPassword })))),
+      el('dt', { text: 'ログイン ID' }), el('dd', { class: 'copyrow' }, noTranslate(el('div', { class: 'secret', text: res.loginId })), copyBtn(res.loginId)),
+      el('dt', { text: 'パスワード' }), el('dd', { class: 'copyrow' }, noTranslate(el('div', { class: 'secret', text: res.devPassword })), copyBtn(res.devPassword))),
     res.devPassword && el('p', { class: 'note', text: '【お試し用】メールの送信サービスをつなぐ前なので、ここに表示しています。本番では、表示されません。' }),
     el('div', { class: 'actions' }, closeBtn('閉じる')));
 }
