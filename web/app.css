@@ -47,7 +47,11 @@
   --lamp-green: #ffffff;
   --lamp-amber: #ffffff;
 
-  --r: 6px;
+  /* 角の丸み（Apple のデザインにそろえる）: 小さな印は 6px、ボタン・入力欄は 12px、面（表示板・映像の枠・ダイアログ・カード）は 20px。
+     入れ子の角は、外側の丸み ＝ 内側の丸み ＋ 余白 を目安にする */
+  --r-sm: 6px;
+  --r: 12px;
+  --r-lg: 20px;
   --font: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
   --digits: "Inter", "Helvetica Neue", Arial, var(--font);
   --ease: cubic-bezier(.16, 1, .3, 1);
@@ -128,7 +132,8 @@ main:focus { outline: none; }
 .input:focus-visible { outline-offset: 0; border-color: var(--action); }
 
 /* ---- 表示板（この画面のしるし） */
-.board { background: var(--board); color: var(--board-ink); border-top: 3px solid var(--gold); padding: 16px; display: grid; gap: 12px; min-width: 0; }
+/* 角を丸めた面には、太い上線を付けない（線が、角の曲がりとぶつかる） */
+.board { background: var(--board); color: var(--board-ink); border-radius: var(--r-lg); padding: 16px; display: grid; gap: 12px; min-width: 0; }
 .board-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--board-ink-2); }
 .board-top b { color: var(--board-ink); font-weight: 600; }
 .price { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -.02em; font-size: 72px; transition: transform .2s var(--ease); transform-origin: left bottom; }
@@ -143,7 +148,7 @@ main:focus { outline: none; }
 .lamp + .lamp { border-left: 1px solid var(--board-line); padding-left: 12px; }
 /* ランプは、点灯＝塗りつぶし、消灯＝輪郭。色に頼らず形でも分かる */
 /* ランプは、押せる丸（選択ボタン）に見えないよう、縦長の灯りの形にする */
-.bulb { width: 10px; height: 24px; border-radius: 3px; border: 2px solid var(--lamp-off); grid-row: span 2; transition: background-color .2s var(--ease), border-color .2s var(--ease); }
+.bulb { width: 10px; height: 24px; border-radius: 4px; border: 2px solid var(--lamp-off); grid-row: span 2; transition: background-color .2s var(--ease), border-color .2s var(--ease); }
 .lamp b { font-size: 16px; font-weight: 700; color: var(--board-ink-2); line-height: 1.3; }
 /* 補足がないランプは、印と名前を1行でそろえる */
 .lamp small:empty { display: none; }
@@ -173,7 +178,7 @@ main:focus { outline: none; }
 
 /* ---- ダイアログ（取り消せない操作の確認だけに使う） */
 dialog {
-  border: 1px solid var(--line); padding: 24px; width: min(440px, calc(100vw - 32px)); border-radius: var(--r);
+  border: 1px solid var(--line); padding: 24px; width: min(440px, calc(100vw - 32px)); border-radius: var(--r-lg);
   background: var(--ground); color: var(--ink); box-shadow: 0 8px 24px rgba(0, 0, 0, .2); overscroll-behavior: contain;
 }
 dialog::backdrop { background: rgba(0, 1, 58, .5); }
@@ -204,3 +209,8 @@ details[open] > summary::before { transform: rotate(45deg); }
 .brand__service { font-size: 12px; font-weight: 700; letter-spacing: .12em; color: var(--action); white-space: nowrap; }
 /* 後から入る文字（商品名・コメント）は、切り出した書体に無い字が混ざらないよう、端末の書体で通して表示する */
 .dyn { font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", "Noto Sans JP", sans-serif; letter-spacing: .02em; }
+
+/* なめらかに続く角（Apple の角と同じ、連続した曲線）。対応しているブラウザでだけ効く。丸（50%）の部品には付けない */
+@supports (corner-shape: squircle) {
+  .btn, .input, .board, dialog, .seg, #videoBox, .mode, .amount, .pick label, .choice label, .banner, .today, .verified, .secret, .board-result, #eventNote { corner-shape: squircle; }
+}

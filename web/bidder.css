@@ -28,7 +28,7 @@ body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #
 .seg button:focus-visible { outline-offset: -3px; }
 
 /* ライブ画面は常に 4:3（停止中も同じ大きさ）。映像は元の比率のまま収め、切り取らない */
-#videoBox { display: none; position: relative; aspect-ratio: 4 / 3; width: 100%; background: #000; border-radius: var(--r); overflow: hidden; }
+#videoBox { display: none; position: relative; aspect-ratio: 4 / 3; width: 100%; background: #000; border-radius: var(--r-lg); overflow: hidden; }
 #videoBox video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
 /* 映像のない間は、真っ黒ではなく、表示板と同じ紺にする（黒と紺の2つの暗い面が並ぶのを避ける）。飾りは置かない */
 #break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 22px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: var(--board); color: #fff; }
@@ -39,7 +39,8 @@ body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #
 #sound[hidden] { display: none; }
 
 /* 表示板（スマホでは下に固定） */
-.board { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; gap: 8px;
+/* 下に固定した板は、上の2つの角だけを丸める（画面の下から出てくる面の形） */
+.board { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; gap: 8px; border-radius: var(--r-lg) var(--r-lg) 0 0;
   padding: 10px max(20px, env(safe-area-inset-left)) calc(12px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-right)); }
 /* スマホの板は高さを抑える: 入札の結果が出ている間は、案内の行をそれに譲る */
 .board:has(#msg:not(:empty)) #result { display: none; }
@@ -132,7 +133,7 @@ details dd { overflow-wrap: anywhere; }
 /* PC と、横向きのスマホ: 左に映像とコメント、右に表示板と履歴。表示板は固定しない（横向きでは画面が低く、固定すると映像が隠れる） */
 /* 低くて幅も狭い画面（PC の拡大表示など）: 板を固定せず、映像のすぐ下に置く（固定すると映像が隠れる） */
 @media (max-height: 520px) and (max-width: 699px) {
-  .board { position: static; }
+  .board { position: static; border-radius: var(--r-lg); }
   .board > * { max-width: none; }
 }
 @media (min-width: 960px), (min-width: 700px) and (orientation: landscape) {
@@ -142,7 +143,7 @@ details dd { overflow-wrap: anywhere; }
   #videoBox { grid-column: 1; grid-row: 1; }
   .side { display: grid; gap: 24px; min-width: 0; align-content: start; grid-column: 2; grid-row: 1 / span 2; }
   .cmt { grid-column: 1; grid-row: 2; }
-  .board { position: static; padding: 16px; gap: 12px; }
+  .board { position: static; padding: 16px; gap: 12px; border-radius: var(--r-lg); }
   .board > * { max-width: none; }
   .board:has(#msg:not(:empty)) #result { display: block; }
 }
@@ -154,7 +155,7 @@ details dd { overflow-wrap: anywhere; }
   .top { padding-top: 24px; padding-bottom: 16px; }
   .top h1 { font-size: 22px; }
   #lotNo { font-size: 22px; }
-  .board { padding: 24px; gap: 16px; }
+  .board { padding: 24px; gap: 16px; border-radius: 24px; }
   .board .lamps { padding-top: 16px; }
   #bid { min-height: 60px; }
   .plabel { font-size: 13px; }
@@ -185,7 +186,7 @@ details dd { overflow-wrap: anywhere; }
 /* 参加のしかた（オンライン・会場）を選ぶ、大きな2つのボタン */
 .pickhead { font-size: 16px; letter-spacing: .06em; color: var(--ink); margin: 0 0 12px; }
 .modes { display: grid; gap: 12px; }
-.mode { display: grid; gap: 6px; text-align: left; padding: 18px 20px; min-height: 96px; border: 1px solid var(--edge); border-radius: var(--r); background: var(--ground); color: var(--ink); font: inherit; cursor: pointer; }
+.mode { display: grid; gap: 6px; text-align: left; padding: 18px 20px; min-height: 96px; border: 1px solid var(--edge); border-radius: var(--r-lg); background: var(--ground); color: var(--ink); font: inherit; cursor: pointer; }
 .mode b { font-size: 20px; color: var(--action); letter-spacing: .04em; }
 .mode span { font-size: 14px; color: var(--ink-2); line-height: 1.6; }
 .mode:hover { border-color: var(--action); background: var(--ground-alt); }
@@ -201,7 +202,7 @@ details dd { overflow-wrap: anywhere; }
 #gateWait { font-weight: 700; color: var(--action); }
 #gateWait:empty { display: none; }
 .pick small[hidden] { display: none; }
-#eventNote { border-top: 3px solid var(--gold); background: var(--ground-alt); padding: 12px 16px; font-weight: 700; }
+#eventNote { background: var(--ground-alt); padding: 12px 16px; font-weight: 700; border-radius: var(--r); }
 #eventNote:empty { display: none; }
 @media (max-width: 560px) { .brand__logo { height: 38px; } }
 #pickNow:empty { display: none; }
