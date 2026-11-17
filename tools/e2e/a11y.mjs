@@ -53,7 +53,7 @@ for (const scheme of ['light', 'dark']) {
   for (let i = 0; i < n; i++) { await sp.click(`#tabs button:nth-child(${i + 1})`); await sp.waitForTimeout(600); await scan(sp, 'staff-tab-' + (await sp.textContent(`#tabs button:nth-child(${i + 1})`)), scheme); }
   await sp.close();
   const con = await sc.newPage(); await con.goto(B + '/console.html'); await con.waitForTimeout(1200);
-  await con.fill('#newTitle', '（例）防水シート'); await con.click('#addLot button[type=submit]'); await con.waitForTimeout(500);
+  await con.fill('#newTitle', '（例）防水シート'); await con.fill('#newPrice', '9500'); await con.click('#addLot button[type=submit]'); await con.waitForTimeout(500);
   for (const id of ['#b_next', '#b_nv']) if (await con.isVisible(id) && await con.isEnabled(id)) { await con.click(id); await con.waitForTimeout(700); }
   await scan(con, 'console-open', scheme);
   await p.click('[data-mode=bid]'); await p.waitForTimeout(500); await scan(p, 'bidder-open-bidmode', scheme);

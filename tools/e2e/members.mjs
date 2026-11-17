@@ -107,7 +107,7 @@ try {
   await con.goto(sys.base + '/console.html');
   await con.waitForSelector('#eventBar:not([hidden])');
   check((await con.textContent('#evTitle')).includes('12月の競り') && (await con.textContent('#evPhase')) === '開始前', '進行役がログインで入れる。開催の名前と「開始前」が出る');
-  await con.fill('#newTitle', '防水シート（検証）');
+  await con.fill('#newTitle', '防水シート（検証）'); await con.fill('#newPrice', '9500');
   await con.click('#addLot button[type=submit]');
   await con.waitForFunction(() => document.body.textContent.includes('防水シート（検証）'));
   check(true, '進行コンソールから、その場で登録できる');

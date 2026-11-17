@@ -69,6 +69,7 @@ function render() {
   $('board').classList.toggle('idle', !lot);
   if (!lot) {
     $('lotNo').textContent = ''; $('title').textContent = '次の品をお待ちください';
+    $('boardNo').textContent = ''; $('boardTitle').textContent = '次の品をお待ちください'; $('board').classList.remove('haslot');
     $('status').textContent = '待機中'; $('status').dataset.on = '';
     $('priceLabel').textContent = '現在価格'; $('price').textContent = ''; $('result').textContent = '';
     setLamp('urikiri', '', 'うりきり', ''); setLamp('right', '', '権利', '');
@@ -80,6 +81,8 @@ function render() {
   const ended = st === 'sold' || st === 'unsold';
   $('lotNo').textContent = `No.${lot.lotNo}`;
   $('title').textContent = lot.title;
+  // パソコンの画面では、品番と品名を、表示板の中（価格の上）にも大きく出す
+  $('boardNo').textContent = `No.${lot.lotNo}`; $('boardTitle').textContent = lot.title; $('board').classList.add('haslot');
   $('status').textContent = STATE_LABEL[st] + (lot.noVideo && st === 'open' ? '（映像なし）' : '');
   $('status').dataset.on = st === 'open' ? '1' : '';
   $('priceLabel').textContent = st === 'sold' ? '落札価格' : lot.currentPrice === null ? '開始価格' : '現在価格';

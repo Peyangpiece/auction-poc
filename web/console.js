@@ -174,7 +174,7 @@ document.querySelectorAll('[data-crash]').forEach((b) => b.addEventListener('cli
 }));
 document.querySelectorAll('[data-mark]').forEach((b) => b.addEventListener('click', () => cmd('mark', { label: $('markLabel').value || 'unnamed', phase: b.dataset.mark })));
 $('markForm').addEventListener('submit', (ev) => ev.preventDefault());
-$('addLot').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('create_lot', { title: $('newTitle').value, startPrice: Number($('newPrice').value), reservePrice: $('newReserve').value === '' ? null : Number($('newReserve').value) }); });
+$('addLot').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('create_lot', { title: $('newTitle').value, startPrice: Number($('newPrice').value), reservePrice: $('newReserve').value === '' ? null : Number($('newReserve').value) }); for (const id of ['newTitle', 'newPrice', 'newReserve']) $(id).value = ''; $('newTitle').focus(); }); // 追加したら、欄を空にして、次の品を書けるようにする
 
 function onMessage(msg, at) {
   switch (msg.type) {

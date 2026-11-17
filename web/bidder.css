@@ -291,3 +291,21 @@ details dd { overflow-wrap: anywhere; }
 .cmttoast:empty { display: none; }
 /* 映像のない間の案内（コインと文字）は、少し上に寄せる（左下に重なるコメントと、ぶつかりにくくする） */
 #break { padding-bottom: 16%; }
+
+/* ---- 品番と品名
+   スマホ: 画面の上の行（No. と品名）を、スクロールしても上に残す。
+   パソコン・横向き: 表示板の中、価格の上に、品番と品名を大きく出す（上の行は、読み上げ用にだけ残す） */
+.top { position: sticky; top: 0; z-index: 5; background: var(--ground); }
+body.outbid .top { background: var(--alarm); }
+.lotline { display: none; }
+@media (min-width: 960px), (min-width: 700px) and (orientation: landscape) {
+  .top { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .lotline { display: grid; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--board-line); min-width: 0; }
+  .lotline #boardNo { font-size: 20px; font-weight: 600; color: var(--board-ink-2); }
+  .lotline #boardNo:empty { display: none; }
+  .lotname { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 22px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+  .lotlabel { font-size: 13px; font-weight: 600; color: var(--board-ink-2); letter-spacing: .3em; }
+  .board:not(.haslot) .lotlabel { display: none; }
+  .board.idle .lotline { border-bottom: 0; padding-bottom: 0; }
+}
+@media (min-width: 960px) { .lotline #boardNo { font-size: 24px; } .lotname { font-size: 26px; } }

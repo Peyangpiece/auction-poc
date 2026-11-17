@@ -108,8 +108,8 @@
         <table><thead><tr><th scope="col">No.</th><th scope="col">品名</th><th scope="col">開始価格</th><th scope="col">最低落札額</th><th scope="col">状態</th><th scope="col">結果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="lots"></tbody></table>
       </div>
       <form class="addlot" id="addLot">
-        <label class="field">品名<input class="input" id="newTitle" name="title" value="テスト品" autocomplete="off" required></label>
-        <label class="field">開始価格（税込）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" value="9500" autocomplete="off" required></label>
+        <label class="field">品名<input class="input" id="newTitle" name="title" autocomplete="off" maxlength="60" placeholder="例: 未使用品／ブーツ 10.5R 1足" required></label>
+        <label class="field">開始価格（税込）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="例: 9500" required></label>
         <label class="field">最低落札額（任意・非公開）<input class="input num" id="newReserve" name="reserve" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="なし"></label>
         <button class="btn" id="create" type="submit">品を追加</button>
       </form>

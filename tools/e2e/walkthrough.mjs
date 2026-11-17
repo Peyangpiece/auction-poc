@@ -47,6 +47,7 @@ try {
   await shot(b1, 'bidder-watch');
 
   console.log('品の追加と開始（配信の自動開始）');
+  await con.fill('#newTitle', 'テスト品'); await con.fill('#newPrice', '9500');
   await con.fill('#newReserve', '11000');
   await con.click('#create');
   await con.waitForSelector('#b_next:not([hidden])');

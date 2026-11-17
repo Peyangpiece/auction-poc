@@ -37,6 +37,7 @@ const judge = (label, r, { touch }) => {
 try {
   const con = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
   await con.goto(`${sys.base}/console.html?t=${sys.tokens.auctioneer}`);
+  await con.fill('#newTitle', 'テスト品'); await con.fill('#newPrice', '9500');
   await con.click('#create'); await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'));
   for (const [w, h] of [[320, 568], [360, 740], [390, 664], [640, 450], [740, 360], [1280, 800]]) {
