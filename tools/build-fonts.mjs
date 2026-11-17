@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 画面で使う書体を、元のファイル（BIZ UDPゴシック・Inter。どちらも SIL OFL）から切り出す。
+// 画面で使う書体を、元のファイル（Noto Sans JP・Inter。どちらも SIL OFL）から切り出す。
 //   node tools/build-fonts.mjs <書体の元ファイルのフォルダ>
 // 日本語は、画面の固定の文言に出てくる文字とかな・記号だけを収める（軽くするため）。
 // 商品名やコメントなど、後から入る文字に無い字があれば、端末の書体で表示される。
@@ -23,10 +23,11 @@ const served = ['api.js', 'schema.js'].map((f) => readFileSync(join(web, '..', '
 const extra = '待機配信準備中警告受付断落札流未実施番円件秒人税込最低高入額現在開始価格権利者締再取除外';
 const jp = [...new Set([...(latin + kana + used + served + extra)])].filter((c) => c >= ' ').join('');
 
-for (const w of ['Regular', 'Bold']) {
-  const buf = await subsetFont(readFileSync(join(src, `BIZUDPGothic-${w}.ttf`)), jp, { targetFormat: 'woff2' });
-  writeFileSync(join(web, `bizudp-${w}.woff2`), buf);
-  console.log(`bizudp-${w}.woff2 ${buf.length} bytes`);
+// 日本語は Noto Sans JP（SIL OFL）。太さは 3 つ（400 本文・500 ラベルやボタン・700 見出し）
+for (const [w, file] of [[400, 'NotoSansJP_400Regular.ttf'], [500, 'NotoSansJP_500Medium.ttf'], [700, 'NotoSansJP_700Bold.ttf']]) {
+  const buf = await subsetFont(readFileSync(join(src, file)), jp, { targetFormat: 'woff2' });
+  writeFileSync(join(web, `notosansjp-${w}.woff2`), buf);
+  console.log(`notosansjp-${w}.woff2 ${buf.length} bytes`);
 }
 const inter = await subsetFont(readFileSync(join(src, 'Inter.ttf')), latin, { targetFormat: 'woff2', variationAxes: { wght: { min: 400, max: 700 }, opsz: 14 } });
 writeFileSync(join(web, 'inter.woff2'), inter);

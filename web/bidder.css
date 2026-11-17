@@ -1,10 +1,10 @@
 /* 入札画面のスタイル。共通の部品は app.css */
 /* スマホ: 上から 品名 → 映像(4:3) → 履歴 → コメント。表示板は画面の下に固定する（価格・ランプ・入札が常に見える） */
 body { padding-bottom: calc(var(--board-h, 256px) + 24px + env(safe-area-inset-bottom)); transition: background-color .2s var(--ease); }
-.brandbar { padding-top: env(safe-area-inset-top); }
+.brandbar { padding-top: env(safe-area-inset-top); position: static; }
 .brandbar > div, .top, main { max-width: 560px; margin: 0 auto; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
 .top { padding-top: 12px; padding-bottom: 10px; }
-.top h1 { font-size: 18px; min-width: 0; overflow-wrap: anywhere; letter-spacing: .06em; }
+.top h1 { font-size: 18px; min-width: 0; overflow-wrap: anywhere; letter-spacing: .02em; }
 #lotNo { font-size: 18px; margin-right: 8px; color: var(--action); }
 #lotNo:empty { display: none; }
 main { display: grid; gap: 24px; }
@@ -117,7 +117,7 @@ details dd { overflow-wrap: anywhere; }
 #gate > div { width: min(400px, 100%); display: grid; gap: 20px; margin: auto; }
 @media (max-height: 520px) { #gate .mark { width: 56px; height: 56px; } #gate > div { gap: 12px; } }
 #gate .mark { width: 96px; height: 96px; }
-#gate .co { font-weight: 700; letter-spacing: .1em; }
+#gate .co { font-weight: 700; letter-spacing: .04em; }
 #gate h1 { margin: 0; }
 #gate .gatelogo { display: block; width: 100%; height: auto; }
 @media (max-height: 520px) { #gate .gatelogo { width: 240px; } }
@@ -164,7 +164,7 @@ details dd { overflow-wrap: anywhere; }
 @media (max-width: 359px) {
   .brandbar > div, .top, main { padding-left: 16px; padding-right: 16px; }
   .brand { gap: 8px; }
-  .brand__name { font-size: 15px; letter-spacing: .06em; }
+  .brand__name { font-size: 15px; letter-spacing: .02em; }
   .brand__service { letter-spacing: .04em; }
 }
 #cmtCount { font-size: 12px; color: var(--ink-3); justify-self: end; }
@@ -177,7 +177,7 @@ details dd { overflow-wrap: anywhere; }
 #join { display: grid; gap: 16px; text-align: left; }
 #join[hidden], #enter[hidden] { display: none; }
 /* 参加のしかた（オンライン・会場）を選ぶ、大きな2つのボタン */
-.pickhead { font-size: 16px; letter-spacing: .06em; color: var(--ink); margin: 0 0 12px; }
+.pickhead { font-size: 16px; letter-spacing: .02em; color: var(--ink); margin: 0 0 12px; }
 .modes { display: grid; gap: 12px; }
 .mode { display: grid; gap: 6px; text-align: left; padding: 18px 20px; min-height: 96px; border: 1px solid var(--edge); border-radius: var(--r-lg); background: var(--ground); color: var(--ink); font: inherit; cursor: pointer; }
 .mode b { font-size: 20px; color: var(--action); letter-spacing: .04em; }
@@ -303,3 +303,5 @@ body.outbid .top { background: var(--alarm); }
   .board.idle .lotline { border-bottom: 0; padding-bottom: 0; }
 }
 @media (min-width: 960px) { .lotline #boardNo { font-size: 24px; } .lotname { font-size: 26px; } }
+
+.paylink:hover:not(:disabled) { background: #e9edf3; border-color: #e9edf3; color: var(--navy); }

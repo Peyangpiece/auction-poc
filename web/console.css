@@ -61,7 +61,7 @@ td .btn { min-height: 40px; padding: 4px 14px; font-size: 14px; }
 #comments .btn { min-height: 32px; padding: 2px 10px; font-size: 13px; }
 #log { font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; overscroll-behavior: contain; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 
-details summary { cursor: pointer; font-size: 15px; font-weight: 700; letter-spacing: .12em; color: var(--action); min-height: 44px; display: flex; align-items: center; }
+details summary { cursor: pointer; font-size: 15px; font-weight: 700; letter-spacing: .04em; color: var(--action); min-height: 44px; display: flex; align-items: center; }
 details .stack { display: grid; gap: 8px; justify-items: start; margin-top: 8px; }
 
 #dlgReasonWrap { margin-top: 16px; }
