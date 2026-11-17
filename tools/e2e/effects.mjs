@@ -22,7 +22,11 @@ try {
   await b1.waitForTimeout(180); await snap(b1, 'bid-phone');
   await b1.waitForFunction(() => !document.getElementById('board').classList.contains('bidpop'), null, { timeout: 2000 });
   check(true, '入札の演出は 1 秒以内に消える');
-  await b2.waitForTimeout(800); await b2.click('#bid');
+  await b2.waitForTimeout(800);
+  check((await b2.inputValue('#bidAmount')) === '10,000', '入札の欄には、次の入札額の目安（価格の段）が入っている');
+  await b2.fill('#bidAmount', '9501'); await b2.click('#bid');
+  await b2.waitForFunction(() => document.getElementById('price').textContent.includes('9,501'));
+  check(true, '開始価格以上なら、1円単位の金額（現在価格の1円上）で入札できる');
   await b2.waitForFunction(() => document.getElementById('board').classList.contains('bidpop'));
   await b2.waitForTimeout(200); await snap(b2, 'bid-pc');
   check(!(await b1.evaluate(() => document.getElementById('board').classList.contains('bidpop'))), 'ほかの人の入札では、自分の入札の演出は出ない');

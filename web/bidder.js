@@ -16,7 +16,7 @@ let link, audioCtx = null, wakeLock = null, player = null, playerLoading = false
 const REJECT = {
   LOT_NOT_OPEN: () => 'この品は入札を受け付けていません',
   AFTER_CLOSE: () => '締めに間に合いませんでした',
-  BELOW_MINIMUM: (r) => `価格が更新されました：最低入札額 ${yen(r.minBid)}`,
+  BELOW_MINIMUM: (r) => `価格が更新されました：${yen(r.minAllowed ?? r.minBid)} 以上で入札できます`,
   OFF_LADDER: () => '入札できる金額ではありません',
   ALREADY_HIGHEST: () => 'あなたが最高入札者です',
   RATE_LIMITED: () => '入札が速すぎます。少し待ってから押してください',
@@ -128,7 +128,7 @@ function render() {
   $('amountBox').hidden = !canBid;
   if (canBid) {
     const typed = parseAmount($('bidAmount').value);
-    if (S.amountLot !== lot.id || !S.amountTouched || typed === null || typed < lot.minBid) { setAmount(lot.minBid); S.amountTouched = false; }
+    if (S.amountLot !== lot.id || !S.amountTouched || typed === null || typed < (lot.minAllowed ?? lot.minBid)) { setAmount(lot.minBid); S.amountTouched = false; }
     S.amountLot = lot.id;
   }
   document.title = `${yen(price)} No.${lot.lotNo}｜令和の競り`;
@@ -322,7 +322,7 @@ function onMessage(msg, at) {
         if (!outbid) say(''); // 前の入札の結果は、もう今の状況ではない
         if (S.mode === 'bid' && lot.minBid !== msg.minBid) { S.lockUntil = performance.now() + 600; setTimeout(render, 620); }
       }
-      Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle, urikiri: msg.urikiri });
+      Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, minAllowed: msg.minAllowed, highestPaddle: msg.paddle, urikiri: msg.urikiri });
       if (msg.lotId === S.focus) S.history.push({ seq: msg.seq, amount: msg.amount, received_at: msg.receivedAt, valid: 1, paddle: msg.paddle, proxy: msg.proxy });
       render(); renderHistory();
       if (outbid) notifyOutbid(msg);
@@ -554,18 +554,13 @@ const setAmount = (n) => { $('bidAmount').value = n === null ? '' : n.toLocaleSt
 // 入力のたびに、数字だけにして、3桁ごとに区切る（全角の数字も直す）
 $('bidAmount').addEventListener('input', () => { S.amountTouched = true; setAmount(parseAmount($('bidAmount').value)); if ($('msg').dataset.kind === 'ng') say(''); });
 $('bidAmount').addEventListener('focus', () => $('bidAmount').select());
-// 入札できる金額（価格の段）: 最低入札額から、入札単位ずつ上がる。単位は、金額の帯で決まる
-const unitFor = (amount, lot) => { if (lot.unit) return lot.unit; for (const band of S.ladder ?? []) if (band.lt == null || amount < band.lt) return band.unit; return 1; };
-// 入力された金額を、段に合わせて確かめる。合わないときは、すぐ下とすぐ上の、入札できる金額を返す
+// 入札できる金額: 開始価格以上なら、1円単位（発注者の決定）。入札があれば、現在価格より高い額。
+// 欄に最初に入れておく額（次の入札額）は、これまでどおり価格の段の次の段。そこから自由に書きかえられる
 function checkAmount(amount, lot) {
   if (amount === null) return { error: '入札金額を入力してください' };
-  if (amount < lot.minBid) return { error: `${yen(lot.minBid)} 以上で入力してください` };
-  if (!S.ladder) return { ok: true }; // 段の表が届いていないときは、サーバーの判定に任せる
-  let step = lot.minBid;
-  for (let i = 0; step < amount && i < 1000000; i++) step += unitFor(step, lot);
-  if (step === amount) return { ok: true };
-  const below = step - unitFor(step - 1, lot);
-  return { error: `入札できる金額は、${yen(Math.max(below, lot.minBid))} か ${yen(step)} です` };
+  const min = lot.minAllowed ?? (lot.currentPrice === null ? lot.startPrice : lot.currentPrice + 1);
+  if (amount < min) return { error: lot.currentPrice === null ? `開始価格 ${yen(min)} 以上で入力してください` : `現在価格より高い ${yen(min)} 以上で入力してください` };
+  return { ok: true };
 }
 // 現在の価格から大きく離れた金額は、押す前に確かめる（桁の打ちまちがいを防ぐ）
 const confirmBid = (amount, lot) => new Promise((resolve) => {
@@ -604,7 +599,7 @@ $('bidForm').addEventListener('submit', async (ev) => {
   if (res.code === 'SUSPENDED' && !token) { const p = await getJson('/api/participation'); S.unpaid = p.suspendedBy === 'unpaid'; }
   // 受理されたときは、ボタンが「あなたが最高入札者です」に変わるので、同じことを重ねて言わない（読み上げには伝える）
   say(res.accepted ? '' : (REJECT[res.code]?.(res) ?? res.code), res.accepted ? 'ok' : 'ng');
-  Object.assign(lot, { currentPrice: res.currentPrice, minBid: res.minBid });
+  Object.assign(lot, { currentPrice: res.currentPrice, minBid: res.minBid, minAllowed: res.minAllowed });
   if (res.accepted) { lot.highestPaddle = S.paddle; S.amountTouched = false; bidPop(amount); }
   if (typeof res.urikiri === 'boolean') lot.urikiri = res.urikiri;
   render();

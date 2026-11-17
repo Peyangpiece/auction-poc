@@ -23,6 +23,15 @@ export function minimumBid(startPrice, currentPrice, table, unitOverride = null)
 }
 
 /**
+ * 入札できる最も低い額（発注者の決定: 開始価格以上なら、1円単位で入札できる）。
+ * 入札がまだなければ開始価格。入札があれば、現在価格より1円高い額。
+ * 価格の段（minimumBid）は、入札の欄に最初に入れておく「次の入札額」の目安としてだけ使う。
+ */
+export function minimumAllowed(startPrice, currentPrice) {
+  return currentPrice === null || currentPrice === undefined ? startPrice : currentPrice + 1;
+}
+
+/**
  * 金額が「価格の段」に乗っているか。
  * from（段に乗っていると分かっている金額）から段を進めて確かめる。
  * 受理された現在価格は必ず段に乗っているので、通常は from=最低入札額 から数段で終わる。

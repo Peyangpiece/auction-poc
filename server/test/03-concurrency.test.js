@@ -3,7 +3,7 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, startServer, connectAll, createLot, lotLog, cleanup } from './helpers.js';
-import { minimumBid, isOnLadder } from '../src/ladder.js';
+import { minimumAllowed } from '../src/ladder.js';
 
 const ROUNDS = Number(process.env.P2_ROUNDS ?? 1000);
 const TABLE = [{ lt: 10000, unit: 500 }, { unit: 1000 }];
@@ -25,9 +25,8 @@ function replay(log, startPrice, unit) {
     if (close && b.seq > close.seq) expect = 'AFTER_CLOSE';
     else if (highest === b.paddle) expect = 'ALREADY_HIGHEST';
     else {
-      const min = minimumBid(startPrice, price, TABLE, unit);
-      if (!isOnLadder(b.amount, startPrice, TABLE, unit)) expect = 'OFF_LADDER';
-      else if (b.amount < min) expect = 'BELOW_MINIMUM';
+      // 開始価格以上なら1円単位（入札があれば、現在価格より高い額だけ）
+      if (b.amount < minimumAllowed(startPrice, price)) expect = 'BELOW_MINIMUM';
       else { expect = 'ACCEPTED'; price = b.amount; highest = b.paddle; winner = b.seq; }
     }
     if (expect !== b.result) problems.push({ seq: b.seq, expect, got: b.result });

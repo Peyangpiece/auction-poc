@@ -72,7 +72,9 @@ test('最低落札額のないロットは、いつでも「うりきり」。�
   assert.deepEqual([lot.reservePrice, lot.urikiri], [null, true]);
   const same = await createLot(A, 9500, null, 'テスト品', 9500); // 開始価格と同じなら、設定なしと同じ
   assert.deepEqual([same.reservePrice, same.urikiri], [null, true]);
-  for (const bad of [9000, 10500, 1.5]) {
+  const odd = await createLot(A, 9500, null, 'テスト品', 10501); // 1円単位で入札できるので、最低落札額も段に合わせなくてよい
+  assert.equal(odd.reservePrice, 10501);
+  for (const bad of [9000, 1.5]) {
     const r = await A.cmd('create_lot', { title: 'x', startPrice: 9500, reservePrice: bad });
     assert.equal(r.ok, false, String(bad));
     assert.ok(r.message);

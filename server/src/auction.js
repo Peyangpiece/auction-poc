@@ -5,7 +5,7 @@
 //   2. ロットごとに1本の処理の列に入れ、受付連番の順に1件ずつ処理する。
 //   3. 処理は同期（データベースへの書き込みを含む）なので、1件の途中に別の1件が割り込まない。
 import { nowMs } from './clock.js';
-import { minimumBid, isOnLadder, validateTable } from './ladder.js';
+import { minimumBid, minimumAllowed, validateTable } from './ladder.js';
 
 export const TERMINAL = new Set(['sold', 'unsold', 'not_held']);
 
@@ -133,12 +133,8 @@ export class Auction {
     const blocked = this.bidGate(item.member, item);
     if (blocked) return blocked;
     if (lot.highest_member_id === item.member.id) return 'ALREADY_HIGHEST';
-    const table = this.config.incrementTable;
-    const min = minimumBid(lot.start_price, lot.current_price, table, lot.unit_override);
-    if (!isOnLadder(item.amount, lot.start_price, table, lot.unit_override, min)) {
-      return 'OFF_LADDER';
-    }
-    if (item.amount < min) return 'BELOW_MINIMUM';
+    // 開始価格以上なら、1円単位で入札できる（発注者の決定）。入札があれば、現在価格より高い額だけ。価格の段には合わせなくてよい
+    if (item.amount < minimumAllowed(lot.start_price, lot.current_price)) return 'BELOW_MINIMUM';
     return 'ACCEPTED';
   }
 
@@ -159,12 +155,14 @@ export class Auction {
     const processedAt = nowMs();
 
     const currentPrice = accepted ? item.amount : lot?.current_price ?? null;
+    // minBid: 次の入札額の目安（価格の段）。minAllowed: 入札できる最も低い額（1円単位）
     const minBid = lot
       ? minimumBid(lot.start_price, currentPrice, this.config.incrementTable, lot.unit_override)
       : null;
+    const minAllowed = lot ? minimumAllowed(lot.start_price, currentPrice) : null;
     item.reply({
       type: 'bid_result', reqId: item.reqId, lotId: item.lotId, seq: item.seq, accepted,
-      code: accepted ? null : result, amount: item.amount, currentPrice, minBid,
+      code: accepted ? null : result, amount: item.amount, currentPrice, minBid, minAllowed,
       urikiri: lot ? reserveMet(lot.reserve_price, currentPrice) : null,
       receivedAt: item.receivedAt, sentAt: processedAt,
     });
@@ -174,7 +172,7 @@ export class Auction {
     if (accepted) {
       broadcastAt = this.broadcast({
         type: 'price', lotId: item.lotId, seq: item.seq, amount: item.amount, paddle: item.member.paddle_no, proxy: item.proxyBy ? 1 : 0,
-        receivedAt: item.receivedAt, currentPrice, minBid, urikiri: reserveMet(lot.reserve_price, currentPrice),
+        receivedAt: item.receivedAt, currentPrice, minBid, minAllowed, urikiri: reserveMet(lot.reserve_price, currentPrice),
       });
     }
     this.metrics.write('bid', {
@@ -380,7 +378,8 @@ export class Auction {
       startPrice: lot.start_price,
       unit: lot.unit_override ?? null, // この品だけの入札単位（なければ、共通の表を使う）。端末が、入力された金額を確かめるのに使う
       currentPrice: lot.current_price ?? null, // 入札がなければ null（画面には開始価格を出す）
-      minBid: minimumBid(lot.start_price, lot.current_price, this.config.incrementTable, lot.unit_override),
+      minBid: minimumBid(lot.start_price, lot.current_price, this.config.incrementTable, lot.unit_override), // 次の入札額の目安（価格の段）
+      minAllowed: minimumAllowed(lot.start_price, lot.current_price),                                       // 入札できる最も低い額（1円単位）
       highestPaddle: lot.highest_paddle ?? null,
       // 最低落札額。進行役だけに送る。会員の端末には金額を送らない（index.js の forMember で必ず落とす）
       reservePrice: lot.reserve_price ?? null,
@@ -422,7 +421,6 @@ export class Auction {
     let reserve = reservePrice === null || reservePrice === undefined || reservePrice === '' ? null : Number(reservePrice);
     if (reserve !== null) {
       if (!Number.isSafeInteger(reserve) || reserve < start) throw new Error('最低落札額は、開始価格以上の整数にしてください');
-      if (!isOnLadder(reserve, start, this.config.incrementTable, unitOverride)) throw new Error('最低落札額は、入札できる金額（価格の段）に合わせてください');
       if (reserve === start) reserve = null; // 開始価格と同じなら、最初の入札で必ず届くので、設定なしと同じ
     }
     const info = this.store.q.insertLot.run({ event: this.eventId(), title: String(title), start, unit: unitOverride, reserve, at: nowMs() });
