@@ -64,6 +64,7 @@ body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #
 #msg { font-size: 14px; font-weight: 600; color: var(--board-ink); min-height: 0; }
 #msg:empty { display: none; }
 #msg[data-kind="ng"] { color: var(--board-ng); }
+#msg[data-kind="hint"] { color: var(--board-ink-2); font-weight: 500; }
 /* 板の上の入札ボタンは、板の文字色で塗る（暗い板の上でいちばん明るい面＝押すところ） */
 #bid { width: 100%; background: #fff; border-color: #fff; color: var(--navy); white-space: normal; min-width: 0; }
 #bid:hover:not(:disabled) { background: #e9edf3; border-color: #e9edf3; color: var(--navy); }
@@ -71,6 +72,7 @@ body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #
 #bid:focus-visible { outline-color: var(--board-ng); }
 
 /* 入札の履歴・コメント: 面で囲まず、細い線の行だけ */
+.sechead h2 { font-size: 17px; } /* 本文（13〜14px）との差を 1.25 倍以上に（見出しの段の差。AI チェッカーの指摘） */
 .sechead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
 .count { font-size: 14px; color: var(--ink-2); }
 #history { max-height: 248px; overflow: auto; overscroll-behavior: contain; }
@@ -187,6 +189,8 @@ details dd { overflow-wrap: anywhere; }
 #join .textbtn, #gate .textbtn, .fine .textbtn { background: none; border: 0; padding: 12px 4px; font: inherit; font-size: 14px; color: var(--ink-2); text-decoration: underline; text-underline-offset: 4px; cursor: pointer; justify-self: center; }
 .pick { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .pick legend { font-size: 13px; font-weight: 700; padding: 0; margin-bottom: 4px; }
+.pickerr { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: 14px; font-weight: 600; }
+.pick:has(.pickerr) label:not(.off) { border-color: var(--danger); }
 .pick label { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; min-height: 48px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: var(--r); font-weight: 700; cursor: pointer; }
 .pick label:has(input:checked) { border-color: var(--action); border-width: 2px; padding: 7px 11px; color: var(--action); }
 .pick label.off { color: var(--ink-2); cursor: not-allowed; border-style: dashed; }

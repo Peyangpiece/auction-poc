@@ -236,8 +236,8 @@ try {
   check(true, '参加手続きの画面に、買歩銭がかかることを表示する');
   await phone.check('#join [name=receive][value=ship]');
   await phone.click('#join button[type=submit]');
-  await phone.waitForFunction(() => document.getElementById('gateMsg').textContent.includes('両方'));
-  check(true, '片方だけでは進めない（理由を出す）');
+  await phone.waitForFunction(() => document.querySelector('#join .pickerr')?.textContent.includes('支払方法を選んでください'));
+  check((await phone.$$('#join .pickerr')).length === 1, '片方だけでは進めない（選んでいない欄のすぐ下に、理由を出す）');
   await shot(phone, 'mvp-13-join');
   await phone.check('#join [name=payment][value=transfer]');
   await phone.click('#join button[type=submit]');

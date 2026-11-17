@@ -379,7 +379,7 @@ function notifyOutbid(msg) {
 // 参考: motion-design-skills（iart-ai）の after-effects・animation-principles。読み上げは、これまでどおり #alert と #msg が受け持つ。
 // 「動きを減らす」設定では、動かさずに、印と札を少しのあいだ出すだけにする。
 const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-const EASE = { out: 'cubic-bezier(0.16, 1, 0.3, 1)', in: 'cubic-bezier(0.7, 0, 0.84, 0)', inOut: 'cubic-bezier(0.65, 0, 0.35, 1)', pop: 'cubic-bezier(0.34, 1.56, 0.64, 1)' };
+const EASE = { out: 'cubic-bezier(0.16, 1, 0.3, 1)', in: 'cubic-bezier(0.7, 0, 0.84, 0)', inOut: 'cubic-bezier(0.65, 0, 0.35, 1)' };
 const restart = (node, cls) => { node.classList.remove(cls); void node.offsetWidth; node.classList.add(cls); };
 /**
  * AE の慣性の揺り戻し（value + v·amp·sin(2π·freq·t) / e^(decay·t)）を、キーフレームの列にする。
@@ -553,7 +553,16 @@ const parseAmount = (text) => { const d = String(text ?? '').replace(/[０-９]/
 const setAmount = (n) => { $('bidAmount').value = n === null ? '' : n.toLocaleString('ja-JP'); };
 // 入力のたびに、数字だけにして、3桁ごとに区切る（全角の数字も直す）
 $('bidAmount').addEventListener('input', () => { S.amountTouched = true; setAmount(parseAmount($('bidAmount').value)); if ($('msg').dataset.kind === 'ng') say(''); });
-$('bidAmount').addEventListener('focus', () => $('bidAmount').select());
+$('bidAmount').addEventListener('focus', () => {
+  $('bidAmount').select();
+  // 金額を書きかえようとしたときに、いくらから・どの単位で入れられるかを出す（1円単位で入札できることに気づけるように）
+  const lot = focusLot();
+  if (lot && !$('msg').textContent) {
+    const min = lot.minAllowed ?? (lot.currentPrice === null ? lot.startPrice : lot.currentPrice + 1);
+    say(`${yen(min)} 以上、1円単位で入力できます`, 'hint');
+  }
+});
+// 欄から離れても、案内は消さない（消すと板の高さが変わり、押そうとした「入札」ボタンがずれて、押しそこなう）。次の入札・価格の更新で入れ替わる
 // 入札できる金額: 開始価格以上なら、1円単位（発注者の決定）。入札があれば、現在価格より高い額。
 // 欄に最初に入れておく額（次の入札額）は、これまでどおり価格の段の次の段。そこから自由に書きかえられる
 function checkAmount(amount, lot) {
@@ -735,11 +744,26 @@ if (!token) (async () => {
   };
   for (const b of document.querySelectorAll('[data-pick]')) b.addEventListener('click', () => { asVenue = b.dataset.pick === 'venue'; showJoin(); $('join').querySelector('input').focus(); });
   $('backToMode').addEventListener('click', showPick);
+  $('join').addEventListener('change', (ev) => ev.target.closest('fieldset')?.querySelector('.pickerr')?.remove());
   if (p.venue) showJoin(); else showPick();
   $('join').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const data = new FormData($('join'));
     $('gateMsg').textContent = '';
+    // 選び忘れは、送る前に、その欄のすぐ下で知らせる（ボタンの下の知らせは、スマホでは画面の外になり、気づけない）
+    for (const set of $('join').querySelectorAll('fieldset.pick')) set.querySelector('.pickerr')?.remove();
+    const missing = [['receive', '受け取り方法を選んでください'], ['payment', '支払方法を選んでください']].filter(([k]) => !data.get(k));
+    if (missing.length) {
+      for (const [k, text] of missing) {
+        const set = $('join').elements[k][0].closest('fieldset');
+        const err = document.createElement('p'); err.className = 'pickerr'; err.setAttribute('role', 'alert'); err.textContent = text;
+        set.append(err);
+      }
+      const first = $('join').elements[missing[0][0]][0];
+      first.closest('fieldset').scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      first.focus({ preventScroll: true });
+      return;
+    }
     const res = await getJson('/api/join', { receive: data.get('receive'), payment: data.get('payment'), ...(asVenue ? (p.venue ? { venueCode } : { mode: 'venue' }) : {}) });
     // 手続きが済んだら、そのまま入札画面に入る（参加番号は、入札画面にいつも出ている）。会場参加で、来場の確認がまだの人は、待つ画面へ
     if (res.status === 200) { $('join').hidden = true; showPaddle(p.event.title, res); if (res.checkedIn) $('enter').click(); }

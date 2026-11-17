@@ -14,6 +14,17 @@ test('最低入札額: 入札がなければ開始価格（AC-FR-BID-003-5）、
   assert.equal(minimumBid(9500, 9500, table), 10000);
   assert.equal(minimumBid(9500, 11000, table), 12000);
 });
+test('次の入札額の目安は、現在価格より高い、いちばん近い段（1円単位の入札があっても）', () => {
+  const table = [{ lt: 10000, unit: 500 }, { unit: 1000 }];
+  assert.equal(minimumBid(9500, null, table), 9500);
+  assert.equal(minimumBid(9500, 9500, table), 10000);
+  assert.equal(minimumBid(9500, 9600, table), 10000);
+  assert.equal(minimumBid(9500, 9999, table), 10000);
+  assert.equal(minimumBid(9500, 10000, table), 11000);
+  assert.equal(minimumBid(9500, 10001, table), 11000);
+  assert.equal(minimumBid(1000, 1001, table, 300), 1300);
+});
+
 test('段に乗っているか', () => {
   for (const ok of [9500, 10000, 11000, 12000, 50000]) assert.equal(isOnLadder(ok, 9500, table), true, String(ok));
   for (const ng of [9000, 9600, 10500, 11500, 9500.5, NaN]) assert.equal(isOnLadder(ng, 9500, table), false, String(ng));

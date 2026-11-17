@@ -42,7 +42,7 @@ test('開始価格以上なら、1円単位で入札できる（価格の段に�
   let r = await m[0].bid(lot.id, 9499); // 開始価格より低い
   assert.deepEqual([r.code, r.minAllowed], ['BELOW_MINIMUM', 9500]);
   r = await m[0].bid(lot.id, 9501); // 段（500円）に乗っていなくても、開始価格以上なら受理
-  assert.deepEqual([r.accepted, r.currentPrice, r.minAllowed, r.minBid], [true, 9501, 9502, 10001]);
+  assert.deepEqual([r.accepted, r.currentPrice, r.minAllowed, r.minBid], [true, 9501, 9502, 10000]); // 目安は、段の上にそろえる
   r = await m[1].bid(lot.id, 9501); // 同じ額は、上回っていないので断る
   assert.equal(r.code, 'BELOW_MINIMUM');
   r = await m[1].bid(lot.id, 9502); // 1円だけ上
