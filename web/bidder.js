@@ -480,13 +480,23 @@ if (!token) (async () => {
   });
 })();
 
-// オンライン参加の人が、入札の画面から、会場参加に切り替える（確かめのダイアログを通す）
-$('toVenue').addEventListener('click', () => { $('venueDlgMsg').textContent = ''; $('venueDlg').showModal(); });
+// 入札の画面から、参加のしかた（オンライン・会場）を切り替える（確かめのダイアログを通す）
+const SWITCH = {
+  toVenue: { now: '参加のしかた: オンライン参加', button: '会場参加に切り替える', title: '会場参加に切り替えますか？', url: '/api/my/participation/venue',
+    text: '切り替えると、会場の受付で来場の確認を受けるまで、入札できなくなります。会場にいない場合は、切り替えないでください。' },
+  toOnline: { now: '参加のしかた: 会場参加', button: 'オンライン参加に切り替える', title: 'オンライン参加に切り替えますか？', url: '/api/my/participation/online',
+    text: '切り替えると、お支払いは銀行振込になります（すでに当日現金で精算した分は、そのままです）。会場参加に戻すときは、もう一度、受付で来場の確認を受けてください。' },
+};
+const switchPlan = () => (venue ? SWITCH.toOnline : SWITCH.toVenue);
+$('toVenue').addEventListener('click', () => {
+  $('venueDlgTitle').textContent = switchPlan().title; $('venueDlgText').textContent = switchPlan().text;
+  $('venueDlgMsg').textContent = ''; $('venueDlg').showModal();
+});
 $('venueNo').addEventListener('click', () => $('venueDlg').close());
 $('venueYes').addEventListener('click', async () => {
-  const res = await getJson('/api/my/participation/venue', {});
+  const res = await getJson(switchPlan().url, {});
   if (res.status !== 200) { $('venueDlgMsg').textContent = res.message ?? 'うまくいきませんでした。やり直してください'; return; }
-  location.reload(); // 来場の確認を待つ画面に戻る（そこから、オンライン参加に戻すこともできる）
+  location.reload(); // 入り口の画面に戻る（会場参加にした場合は、来場の確認を待つ）
 });
 
 $('enter').addEventListener('click', async () => {
@@ -495,7 +505,9 @@ $('enter').addEventListener('click', async () => {
   $('audio').textContent = audioCtx ? audioCtx.state : '使えない';
   $('vib').textContent = 'vibrate' in navigator ? '対応' : '非対応';
   $('gate').style.display = 'none';
-  $('modeLine').hidden = !!token || venue; // 会員で、オンライン参加の人にだけ、会場参加への切り替えを出す
+  // 会員には、参加のしかたの切り替えを出す（検証用の合言葉で入った人には出さない）
+  $('modeLine').hidden = !!token;
+  $('modeNow').textContent = switchPlan().now; $('toVenue').textContent = switchPlan().button;
   $('bid').textContent = '接続しています…';
   $('showVideo').checked = !venue; $('showVideo').disabled = venue;
   link = new Link({

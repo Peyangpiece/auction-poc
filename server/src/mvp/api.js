@@ -622,17 +622,17 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   });
   // 受け取り方法と支払方法の変更（参加者本人。開催終了まで。FR-PAY-009、FR-SHIP-008）
   // 会場参加を選んだ人が、自分でオンライン参加に直す（発注者の指示。まちがえて選んだ人が、入れないままにならないように）。
-  // 受付係の来場確認が済んだあとは、直せない（会場で札を受け取っているため）。当日現金を選んでいた場合は、銀行振込にする
+  // 来場確認が済んだあとでも、直せる（発注者の決定）。来場確認は取り消すので、会場参加に戻すときは、もう一度受付で確認を受ける。
+  // 当日現金を選んでいた場合は、銀行振込にする（すでに当日現金で精算した分は、そのまま）
   route('POST', '/api/my/participation/online', (ctx) => {
     const member = needMember(ctx);
     const event = activeEvent();
     const p = event ? participant(member.id, event.id) : null;
     if (!p) throw new HttpError(409, '参加手続きが済んでいません');
     if (p.mode !== 'venue') return { ok: true, paddle: p.paddle_no, mode: p.mode, checkedIn: true, payment: p.payment };
-    if (p.checked_in_at) throw new HttpError(409, '来場の確認が済んでいるため、オンライン参加には変えられません。受付にお申し出ください');
     const payment = p.payment === 'cash' ? 'transfer' : p.payment;
-    db.prepare("UPDATE members SET mode = 'online', payment = ? WHERE id = ?").run(payment, p.id);
-    audit(ctx, 'participation.change', { target: `participant:${p.id}`, before: { mode: 'venue', payment: p.payment }, after: { mode: 'online', payment } });
+    db.prepare("UPDATE members SET mode = 'online', payment = ?, checked_in_at = NULL WHERE id = ?").run(payment, p.id);
+    audit(ctx, 'participation.change', { target: `participant:${p.id}`, before: { mode: 'venue', payment: p.payment, checkedIn: !!p.checked_in_at }, after: { mode: 'online', payment } });
     return { ok: true, paddle: p.paddle_no, mode: 'online', checkedIn: true, payment, paymentChanged: payment !== p.payment };
   });
   // オンライン参加の人が、自分で会場参加に切り替える（発注者の指示）。受付係の来場確認が済むまでは、入札できなくなる

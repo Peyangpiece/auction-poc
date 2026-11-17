@@ -415,5 +415,17 @@ test('画面で「会場で参加」を選んだ人は、会場参加になる�
     assert.deepEqual([back.status, back.json.mode, back.json.checkedIn, back.json.paddle], [200, 'venue', false, 1]);
     await assert.rejects(t.ws(a), /来場の確認/);
     wb.close();
+    // 来場確認が済んだあとでも、自分でオンライン参加に戻せる。来場確認は取り消される
+    assert.equal((await a.post('/api/my/participation', { payment: 'cash' })).status, 200);
+    const pid = (await t.staff.get('/api/reception')).json.participants[0].id;
+    assert.equal((await t.staff.post(`/api/reception/${pid}/checkin`)).status, 200);
+    const wc = await t.ws(a); wc.close();
+    const home = await a.post('/api/my/participation/online', {});
+    assert.deepEqual([home.status, home.json.mode, home.json.payment, home.json.paymentChanged], [200, 'online', 'transfer', true]);
+    const wd = await t.ws(a); wd.close();
+    // もう一度会場参加にすると、来場確認からやり直す
+    await a.post('/api/my/participation/venue', {});
+    await assert.rejects(t.ws(a), /来場の確認/);
+
   } finally { await t.end(); }
 });
