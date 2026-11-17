@@ -200,3 +200,75 @@ td .note { font-size: 12px; }
 /* ログインの画面の、控えめな案内（会員登録がお済みでない方） */
 .aside.small { font-size: 13px; }
 .aside .textbtn { padding: 8px 0; }
+
+/* ==== アプリらしい型（国内のアプリの画面例を参考にした: 色のついた地に白いカード、下のタブバー、行の一覧、認証番号の欄） ==== */
+/* 地に薄い色を敷き、まとまりごとに白いカードに載せる（区切り線の代わりに、面で分ける） */
+body.app { background: var(--ground-alt); }
+body.app .brandbar { background: var(--ground); }
+.card { background: var(--ground); border-radius: var(--r-lg); padding: 20px; margin-bottom: 16px; }
+body.app .banner { background: var(--ground); }
+body.app .terms { border-top: 0; padding-top: 20px; }
+body.app .cal { margin-bottom: 16px; }
+body.app .today { margin-bottom: 16px; }
+body.app .sitefoot { border-top: 0; margin-top: 24px; }
+.card > .empty { padding: 24px 0; }
+.card > .rows > li:first-child { border-top: 0; }
+#invoices:has(> .invlist) { padding-top: 4px; padding-bottom: 4px; }
+#billing .subhead { margin-top: 0; }
+
+/* 行の一覧（設定の画面でよく使われる形: 項目名と、右の矢印） */
+.menu { list-style: none; padding: 0 20px; margin: 0 0 16px; }
+.menu > li + li { border-top: 1px solid var(--line); }
+.menu a, .menu button {
+  appearance: none; border: 0; background: none; width: 100%; min-height: 56px; padding: 8px 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left;
+  font: 600 16px/1.4 var(--font); color: var(--ink); text-decoration: none;
+}
+.menu a::after, .menu button::after { content: ''; flex: none; width: 8px; height: 8px; border-right: 2px solid var(--ink-2); border-top: 2px solid var(--ink-2); transform: rotate(45deg); margin-right: 4px; }
+.menu a:hover, .menu button:hover { color: var(--action); }
+.menu .menu__quiet { font-weight: 400; color: var(--ink-2); }
+
+/* 請求書の状態は、札（タグ）で示す */
+.invlist__state, .invlist .warn { justify-self: start; font-size: 13px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--ground-alt); color: var(--ink-2); }
+.invlist .warn { background: color-mix(in srgb, var(--danger) 12%, var(--ground)); color: var(--danger); }
+
+/* 認証番号: 数字を大きく、間をあけて、まん中に（6桁を、ひと目で確かめられる） */
+input[name="code"] { font-size: 28px; font-weight: 600; letter-spacing: .4em; text-align: center; font-variant-numeric: tabular-nums; padding-left: .4em; min-height: 64px; }
+
+/* パスワードの「表示」 */
+.revealwrap { position: relative; display: block; }
+.revealwrap .input { width: 100%; padding-right: 72px; }
+.reveal { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); appearance: none; border: 0; background: none; cursor: pointer; min-width: 56px; min-height: 44px; font: 700 13px/1 var(--font); color: var(--action); border-radius: var(--r-sm); }
+
+/* 下のタブバー（スマートフォンだけ。広い画面では、上のメニューを使う） */
+.tabbar { display: none; }
+@media (max-width: 640px) {
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: grid; grid-template-columns: repeat(4, 1fr);
+    background: var(--ground); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tabbar a { display: grid; justify-items: center; gap: 2px; padding: 8px 4px 6px; min-height: 56px; text-decoration: none; color: var(--ink-2); font: 700 11px/1.2 var(--font); letter-spacing: .04em; }
+  .tabbar svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .tabbar a[aria-current="page"] { color: var(--action); }
+  .tabbar a[aria-current="page"] svg { stroke-width: 2.4; }
+  body.has-tabbar { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  /* タブバーがあるあいだ、上のメニュー（マイページ・ログアウト）は出さない（同じ行き先を、2か所に出さない） */
+  body.has-tabbar .brandbar nav { display: none; }
+  body.has-tabbar .sitefoot { display: none; }
+  body.app main { padding-top: 16px; }
+  .card { padding: 16px; border-radius: var(--r); }
+  .menu { padding: 0 16px; }
+}
+@media (max-width: 640px) {
+  /* 下のタブバーと同じ行き先（請求書／個人情報、競りに参加）は、ページの中には出さない */
+  body.has-tabbar #myTabs, body.has-tabbar #goBid { display: none; }
+  body.has-tabbar .pagehead { margin-bottom: 16px; }
+  /* 請求書の行: 番号と発行日を1行目いっぱいに。状態と金額を2行目に。PDF のボタンは、幅いっぱいに */
+  .invlist__main { grid-column: 1 / -1; }
+  .invlist .btn { grid-column: 1 / -1; justify-self: stretch; justify-content: center; }
+}
+@media (max-width: 640px) {
+  .invlist__state, .invlist > li > .warn { order: 1; }
+  .invlist__total { order: 2; }
+  .invlist .btn { order: 3; }
+}

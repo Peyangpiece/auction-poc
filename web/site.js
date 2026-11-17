@@ -189,5 +189,58 @@ async function setupNav() {
     }
     nav.replaceChildren(...items);
   }
+  if (me.member) tabBar();
   return me;
 }
+
+// ---- 下のタブバー（スマートフォン）。会員の行き先は4つだけなので、いつも画面の下に出しておく
+const ICONS = {
+  home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+  bid: 'M14.5 3.5l6 6-2 2-6-6zM11 7l6 6-7.5 7.5a2 2 0 0 1-3 0l-3-3a2 2 0 0 1 0-3zM3 21h9',
+  bill: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6',
+  me: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
+};
+const TABS = [['/', 'ホーム', 'home'], ['/bidder.html', '競り', 'bid'], ['/mypage.html#bills', '請求書', 'bill'], ['/mypage.html#profile', 'マイページ', 'me']];
+function icon(name) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+  const path = document.createElementNS(NS, 'path');
+  path.setAttribute('d', ICONS[name]);
+  svg.append(path);
+  return svg;
+}
+function markTab() {
+  const here = location.pathname === '/index.html' ? '/' : location.pathname;
+  const hash = location.hash || (here === '/mypage.html' ? '#bills' : '');
+  for (const a of document.querySelectorAll('.tabbar a')) {
+    const [path, h = ''] = a.getAttribute('href').split('#');
+    if (path === here && (!h || '#' + h === hash)) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  }
+}
+function tabBar() {
+  if ($('.tabbar')) return;
+  document.body.append(el('nav', { class: 'tabbar', 'aria-label': 'おもなページ' }, TABS.map(([href, text, name]) => el('a', { href }, icon(name), el('span', { text })))));
+  document.body.classList.add('has-tabbar');
+  markTab();
+}
+
+// ---- パスワードの欄に「表示」の切り替えを付ける（打ちまちがいに、自分で気づけるように）
+function revealable(input) {
+  if (input.dataset.reveal) return;
+  input.dataset.reveal = '1';
+  const btn = el('button', { class: 'reveal', type: 'button', text: '表示', 'aria-pressed': 'false', 'aria-label': 'パスワードを表示する' });
+  btn.addEventListener('click', () => {
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.textContent = show ? '隠す' : '表示';
+    btn.setAttribute('aria-pressed', String(show));
+  });
+  const wrap = el('span', { class: 'revealwrap' });
+  input.replaceWith(wrap);
+  wrap.append(input, btn);
+}
+const revealAll = (root = document) => root.querySelectorAll('input[type=password]').forEach(revealable);
+revealAll();
+// あとから出る入力欄（ダイアログの中）にも付ける
+new MutationObserver((list) => { for (const m of list) for (const n of m.addedNodes) if (n.nodeType === 1) revealAll(n); }).observe(document.body, { childList: true, subtree: true });

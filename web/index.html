@@ -20,7 +20,7 @@
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="site.css">
 </head>
-<body>
+<body class="app">
 <a class="skip" href="#main">本文へ進む</a>
 <header class="brandbar">
   <div>
@@ -44,7 +44,7 @@
   <a class="btn btn-lg today__go" href="/bidder.html">参加する</a>
 </section>
 
-<section class="wins" id="wins" hidden aria-labelledby="winsTitle">
+<section class="wins card" id="wins" hidden aria-labelledby="winsTitle">
   <h2 id="winsTitle"></h2>
   <div class="tablewrap"><table>
     <thead><tr><th scope="col">品</th><th scope="col" class="n">落札額</th><th scope="col" class="n">買歩銭</th><th scope="col" class="n">お支払い額</th></tr></thead>
@@ -54,7 +54,7 @@
   <p class="note">送料は含みません。請求書は、マイページでご覧になれます。</p>
   <div class="actions"><a class="btn" href="/mypage.html#bills">請求書を見る</a></div>
 </section>
-<section class="cal" aria-labelledby="calTitle">
+<section class="cal card" aria-labelledby="calTitle">
   <div class="cal__head">
     <h2 id="calTitle">開催カレンダー</h2>
     <div class="cal__nav">
@@ -78,7 +78,7 @@
     <a class="btn btn-lg" href="/login.html">ログイン</a>
   </div>
 </div>
-<section class="terms" id="terms" hidden>
+<section class="terms card" id="terms" hidden>
   <div id="premiumBox" hidden><h2>買歩銭</h2><p id="premium"></p></div>
   <div><h2>送料</h2><p class="pre dyn" id="shipping"></p></div>
   <div><h2>返品</h2><p class="pre dyn" id="returns"></p></div>

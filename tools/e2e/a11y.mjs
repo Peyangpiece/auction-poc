@@ -40,7 +40,7 @@ for (const scheme of ['light', 'dark']) {
   let p = await c.newPage(); await p.goto(B + '/register.html'); await p.waitForSelector('#stepProfile:not([hidden])'); await p.click('#stepProfile button[type=submit]'); await p.waitForTimeout(500); await scan(p, 'register-profile(errors)', scheme); await p.close();
   await post(c, '/api/register/complete', { kind: 'b2c', name: '確認 太郎', email: `${phone}@example.com`, address: '（例）住所1-1', adult: true });
   p = await c.newPage(); await p.goto(B + '/'); await p.waitForTimeout(700); await scan(p, 'home-member', scheme); await p.close();
-  p = await c.newPage(); await p.goto(B + '/mypage.html'); await p.waitForTimeout(800); await scan(p, 'mypage-bills', scheme); await p.click('[data-tab=profile]'); await p.waitForTimeout(300); await scan(p, 'mypage-profile', scheme); await p.click('#editBtn'); await p.waitForTimeout(400); await scan(p, 'mypage-edit-dialog', scheme); await p.close();
+  p = await c.newPage(); await p.goto(B + '/mypage.html'); await p.waitForTimeout(800); await scan(p, 'mypage-bills', scheme); await p.evaluate(() => { location.hash = '#profile'; }); await p.waitForTimeout(300); await scan(p, 'mypage-profile', scheme); await p.click('#editBtn'); await p.waitForTimeout(400); await scan(p, 'mypage-edit-dialog', scheme); await p.close();
   p = await c.newPage(); await p.goto(B + '/bidder.html'); await p.waitForTimeout(900); await scan(p, 'bidder-gate-pick', scheme);
   await p.click('[data-pick=online]'); await p.waitForTimeout(400);
   if (await p.isVisible('#join')) { await scan(p, 'bidder-gate-join', scheme); await p.check('[name=receive][value=ship]'); await p.check('[name=payment][value=transfer]'); await p.click('#join button[type=submit]'); }

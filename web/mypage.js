@@ -142,6 +142,12 @@ function showTab(key) {
   $('#panel-bills').hidden = key !== 'bills';
   $('#panel-profile').hidden = key !== 'profile';
   if (location.hash.slice(1) !== key) history.replaceState(null, '', `#${key}`);
+  markTab();
+  // スマートフォンでは、下のタブバーが「請求書」と「マイページ」を分けているので、見出しも、それに合わせる
+  if (matchMedia('(max-width: 640px)').matches) $('.pagehead h1').textContent = key === 'bills' ? '請求書' : 'マイページ';
 }
 for (const b of $('#myTabs').children) b.addEventListener('click', () => showTab(b.dataset.tab));
+// 下のタブバー（請求書／マイページ）から来たときも、開くタブを切り替える
+addEventListener('hashchange', () => { if (location.hash === '#profile' || location.hash === '#bills') showTab(location.hash.slice(1)); });
+$('#logoutBtn').addEventListener('click', async () => { await api('POST', '/api/logout'); location.href = '/'; });
 if (location.hash === '#profile') showTab('profile');

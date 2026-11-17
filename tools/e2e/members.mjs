@@ -190,7 +190,7 @@ try {
   check(!(await phone.isVisible('#emailBanner')) && (await phone.textContent('#notice')).includes('確認しました'), 'メールのリンクで、確認済みになる');
 
   console.log('ログイン');
-  await phone.click('#nav >> text=ログアウト');
+  await phone.goto(sys.base + '/mypage.html#profile'); await phone.click('#logoutBtn'); // スマートフォンでは、ログアウトは、マイページの一覧にある
   await phone.waitForURL(/login\.html/);
   check(true, 'ログアウトすると、ログインの画面に戻る');
   // パスワードを忘れた人: 認証番号で入って、新しいパスワードを決める
@@ -207,7 +207,7 @@ try {
   await phone.fill('#dlg [name=password2]', 'kensho-pass-01');
   await phone.click('#dlg button[type=submit]');
   await phone.waitForFunction(() => document.getElementById('notice').textContent.includes('パスワードを保存しました'));
-  await phone.click('#nav >> text=ログアウト');
+  await phone.goto(sys.base + '/mypage.html#profile'); await phone.click('#logoutBtn'); // スマートフォンでは、ログアウトは、マイページの一覧にある
   await phone.waitForURL(/login\.html/);
   await phone.fill('#pwForm [name=loginId]', 'kensho01');
   await phone.fill('#pwForm [name=password]', 'chigau');
@@ -220,7 +220,7 @@ try {
   await phone.goto(sys.base + '/mypage.html');
 
   console.log('参加手続きと入札');
-  await phone.click('text=競りに参加する');
+  await phone.click('.tabbar a[href="/bidder.html"]');
   await phone.waitForSelector('#modePick:not([hidden])');
   check((await phone.locator('[data-pick]').count()) === 2 && await phone.isHidden('#join'), '参加の前に、オンラインか会場かの2択が出る');
   await phone.click('[data-pick=venue]');
@@ -378,9 +378,9 @@ try {
   check(mine.includes('防水シート') && mine.includes('お渡し済み'), '落札者のマイページに、品・状態が出る');
   const invs = await guest.textContent('#invoices');
   check(/\d{8}-0001/.test(invs) && invs.includes('¥11,000') && invs.includes('お支払い済み') && invs.includes('請求書を開く'), 'マイページの「請求書」に、請求番号・金額・状態と、PDF を開くボタンが出る');
-  await guest.click('[data-tab=profile]');
+  await guest.evaluate(() => { location.hash = '#profile'; });
   check(await guest.isVisible('#facts') && await guest.isHidden('#invoices'), '「個人情報の設定」のタブに切り替えられる');
-  await guest.click('[data-tab=bills]');
+  await guest.evaluate(() => { location.hash = '#bills'; });
   await shot(guest, 'mvp-26-mypage-billing', { fullPage: true });
   await guest.goto(sys.base + '/bidder.html');
   await guest.waitForSelector('#modePick:not([hidden])');
@@ -449,7 +449,7 @@ try {
   check(true, '利用規約を入れると、会員登録に同意の欄が出る');
   // 退会していない方の会員（会場 花子）が、登録内容を変える
   await guest.goto(sys.base + '/mypage.html');
-  await guest.click('[data-tab=profile]');
+  await guest.evaluate(() => { location.hash = '#profile'; });
   await guest.waitForSelector('#facts dd');
   await guest.click('#editBtn');
   await guest.fill('#dlg [name=address1]', '川口市本町7-8-9');
