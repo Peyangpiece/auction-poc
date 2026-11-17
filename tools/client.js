@@ -6,7 +6,8 @@ import WebSocket from 'ws';
 export const localNow = () => performance.timeOrigin + performance.now();
 
 export class Client {
-  constructor(url, token, { label = null, ack = true, net = null, autoReconnect = false } = {}) {
+  constructor(url, token, { label = null, ack = true, net = null, autoReconnect = false, headers = undefined } = {}) {
+    this.headers = headers; // ログインのクッキーで名乗るとき（合言葉なし）に使う
     this.autoReconnect = autoReconnect;
     this.reconnects = 0;
     this.url = url;
@@ -30,9 +31,9 @@ export class Client {
 
   connect() {
     return new Promise((resolve, reject) => {
-      const ws = (this.ws = new WebSocket(this.url, { perMessageDeflate: false }));
+      const ws = (this.ws = new WebSocket(this.url, { perMessageDeflate: false, headers: this.headers }));
       ws.on('error', reject);
-      ws.on('open', () => { this.closed = false; ws.send(JSON.stringify({ type: 'hello', token: this.token, label: this.label })); });
+      ws.on('open', () => { this.closed = false; ws.send(JSON.stringify({ type: 'hello', token: this.token, label: this.label, ...(this.hello ?? {}) })); });
       ws.on('close', () => {
         for (const p of this.pending.values()) p.reject(new Error('closed'));
         this.pending.clear();
@@ -62,11 +63,12 @@ export class Client {
         for (const lot of msg.lots) this.lots.set(lot.id, lot);
         break;
       case 'lot':
+      case 'bid_void': // 代理入札の取り消し。品の最新の状態が付いてくる
         this.lots.set(msg.lot.id, msg.lot);
         break;
       case 'price': {
         const lot = this.lots.get(msg.lotId);
-        if (lot) Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle });
+        if (lot) Object.assign(lot, { currentPrice: msg.currentPrice, minBid: msg.minBid, highestPaddle: msg.paddle, urikiri: msg.urikiri });
         if (this.ack) this.send({ type: 'price_ack', seq: msg.seq, at: at + this.offset, net: this.net });
         break;
       }
@@ -75,6 +77,7 @@ export class Client {
         if (this.ack) this.send({ type: 'result_ack', lotId: msg.lotId, at: at + this.offset, net: this.net });
         break;
       case 'bid_result':
+      case 'comment_result':
       case 'cmd_result':
       case 'time': {
         const key = msg.type === 'time' ? `t${msg.t0}` : msg.reqId;
@@ -129,6 +132,12 @@ export class Client {
     };
     this.log.push(rec);
     return { ...res, ...rec };
+  }
+
+  /** コメントを書き込む */
+  comment(text) {
+    const reqId = ++this.reqId;
+    return this.#request(reqId, { type: 'comment', reqId, text });
   }
 
   /** 進行役の操作 */

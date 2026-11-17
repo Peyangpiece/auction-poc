@@ -11,14 +11,41 @@ const jstShort = (ms) => hmFmt.format(ms);
 const localNow = () => performance.timeOrigin + performance.now();
 const params = new URLSearchParams(location.search);
 
+/**
+ * 参加用の合言葉を、URL に残さない。
+ * 開いた直後に URL から取り出して、このタブの中だけに覚えさせ、アドレス欄と履歴からは消す
+ * （画面の共有・スクリーンショット・履歴から漏れにくくする）。再読み込みしても、同じタブなら使える。
+ */
+function takeToken(key) {
+  let token = params.get('t');
+  try {
+    if (token) sessionStorage.setItem(key, token);
+    else token = sessionStorage.getItem(key);
+  } catch { /* 保存できない設定でも、そのまま使えるようにする */ }
+  if (params.has('t')) {
+    params.delete('t');
+    const rest = params.toString();
+    history.replaceState(null, '', location.pathname + (rest ? '?' + rest : ''));
+  }
+  return token;
+}
+// サーバーが接続を切った理由（つなぎ直しても同じ結果になるもの）
+const CLOSE_REASON = {
+  4401: 'URL が正しくありません',
+  4403: '参加手続きが済んでいないか、ログインが切れています。開き直してください',
+  4409: '同時に開ける画面の数を超えました',
+  4429: '送信が多すぎるため、接続を切りました',
+};
+
 const STATE_LABEL = {
   waiting: '待機', preparing: '配信準備中', preparing_warn: '配信準備中（警告）', open: '受付中',
   suspended: '中断', sold: '落札', unsold: '流札', not_held: '未実施',
 };
 
 class Link {
-  constructor({ token, label, onMessage, onStatus }) {
+  constructor({ token, label, onMessage, onStatus, as = undefined }) {
     this.token = token;
+    this.as = as; // 'console' なら、スタッフのログインで名乗る
     this.label = label;
     this.onMessage = onMessage;
     this.onStatus = onStatus;
@@ -31,20 +58,33 @@ class Link {
     this.onlineAt = null;
     this.everConnected = false;
     window.addEventListener('online', () => { this.onlineAt = localNow(); });
+    // 生存確認: 回線が黙って切れると、ブラウザは切断になかなか気づかない。
+    // 3秒ごとにサーバーへ問い合わせ、最後に何かを受け取ってから7秒たっていたら、切れたものとして扱う。
+    this.lastHeardAt = localNow();
+    setInterval(() => {
+      if (this.downAt !== null || this.ws.readyState !== 1) return;
+      // 裏に回ったタブでは、ブラウザがタイマーを間引くので判定しない（表に戻ったときに数え直す）
+      if (document.hidden) { this.lastHeardAt = localNow(); return; }
+      if (localNow() - this.lastHeardAt > 7000) return this.dropped('heartbeat');
+      this.send({ type: 'time', t0: 0 });
+    }, 3000);
     setInterval(() => this.syncClock(), 30000); // 30秒ごとに時刻を合わせ直す【提案値】
     this.connect();
   }
 
   serverNow() { return localNow() + this.offset; }
+  get up() { return this.ws.readyState === 1 && this.downAt === null; }
 
   connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = (this.ws = new WebSocket(`${proto}//${location.host}/ws`));
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', token: this.token, label: this.label }));
+    ws.onopen = () => { this.lastHeardAt = localNow(); ws.send(JSON.stringify({ type: 'hello', token: this.token ?? undefined, label: this.label, as: this.as })); };
     ws.onmessage = (ev) => {
+      if (ws !== this.ws) return; // 見切りをつけた古い接続からの遅れた受信は捨てる
       const at = localNow();
+      this.lastHeardAt = at;
       const msg = JSON.parse(ev.data);
-      if (msg.type === 'time' || msg.type === 'bid_result' || msg.type === 'cmd_result') {
+      if (msg.type === 'time' || msg.type === 'bid_result' || msg.type === 'cmd_result' || msg.type === 'comment_result') {
         const key = msg.type === 'time' ? 't' + msg.t0 : msg.reqId;
         const w = this.waiters.get(key);
         if (w) { this.waiters.delete(key); w({ ...msg, clientRecvAt: at }); }
@@ -54,12 +94,12 @@ class Link {
         const wasDown = this.downAt;
         this.attempt = 0;
         this.downAt = null;
-        this.onStatus(true);
+        this.onStatus(true, null, !!wasDown && this.everConnected);
         this.syncClock().then(() => {
           if (wasDown && this.everConnected) {
             // 再接続にかかった時間（P3-5）: 切れてから／回線が戻ってから
             this.event('reconnect', {
-              downMs: Math.round(at - wasDown),
+              downMs: Math.round(at - wasDown), cause: this.lastDropCause,
               sinceOnlineMs: this.onlineAt && this.onlineAt > wasDown ? Math.round(at - this.onlineAt) : null,
             });
           }
@@ -69,13 +109,25 @@ class Link {
       this.onMessage(msg, at);
     };
     ws.onclose = (ev) => {
-      if (ev.code === 4401) return this.onStatus(false, '合言葉（トークン）が正しくありません');
-      if (this.downAt === null) this.downAt = localNow();
-      this.onStatus(false);
-      // 切れてから1秒後に1回目を試し、その後は2秒ごとに試す（FR-UI-001）
-      setTimeout(() => this.connect(), this.attempt++ === 0 ? 1000 : 2000);
+      if (ws !== this.ws) return; // すでに見切りをつけて、つなぎ直しに入っている
+      if (CLOSE_REASON[ev.code]) { this.ws = { readyState: 3, send() {}, close() {} }; return this.onStatus(false, CLOSE_REASON[ev.code]); } // つなぎ直さない
+      this.dropped('close');
     };
     ws.onerror = () => {};
+  }
+
+  /** 切れたときの処理。ブラウザが切断を知らせてきた場合も、生存確認で見切りをつけた場合も、ここを通る */
+  dropped(cause) {
+    const old = this.ws;
+    this.ws = { readyState: 3, send() {}, close() {} }; // つなぎ直すまでの間の、何もしない代わり
+    try { old.close(); } catch {}
+    if (this.downAt === null) this.downAt = localNow();
+    this.lastDropCause = cause;
+    // 応答を待っている操作（入札など）を、時間切れまで待たせない。届いたかどうかは、再接続後の表示で分かる
+    for (const [key, w] of this.waiters) { this.waiters.delete(key); w(null); }
+    this.onStatus(false);
+    // 切れてから1秒後に1回目を試し、その後は2秒ごとに試す（FR-UI-001）
+    setTimeout(() => this.connect(), this.attempt++ === 0 ? 1000 : 2000);
   }
 
   send(obj) {
@@ -109,3 +161,7 @@ class Link {
     this.send({ type: 'client_event', name, data, at: this.serverNow() });
   }
 }
+
+// 競りの画面を開いているあいだ、10分ごとに、サーバーへ短い問い合わせを送る。
+// 入札の通信（WebSocket）だけが続いていると、置き場所によっては「だれも使っていない」と見なされて、サーバーが休んでしまうため
+setInterval(() => { fetch('/healthz', { cache: 'no-store' }).catch(() => {}); }, 10 * 60 * 1000);

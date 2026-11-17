@@ -12,7 +12,7 @@ export function makeEnv(extra = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auction-poc-'));
   const env = {
     ...process.env, POC_DATA_DIR: dataDir, PORT: '0', HOST: '127.0.0.1',
-    POC_IVS_MODE: 'always-live', POC_ALLOW_CRASH: '1', POC_SYS_SAMPLE_MS: '600000', ...extra,
+    POC_IVS_MODE: 'always-live', POC_ALLOW_CRASH: '1', POC_SYS_SAMPLE_MS: '600000', POC_BID_RATE: '0', POC_MESSAGE_RATE: '0', ...extra,
   };
   execFileSync('node', ['tools/seed.js', '--members', String(extra.MEMBERS ?? 6)], { cwd: ROOT, env, stdio: 'ignore' });
   const tokens = JSON.parse(fs.readFileSync(path.join(dataDir, 'tokens.json'), 'utf8'));
@@ -57,8 +57,8 @@ export async function connectAll(srv, ctx, n) {
   return { auctioneer, members };
 }
 
-export async function createLot(auctioneer, startPrice, unitOverride = null, title = 'テスト品') {
-  const res = await auctioneer.cmd('create_lot', { title, startPrice, unitOverride });
+export async function createLot(auctioneer, startPrice, unitOverride = null, title = 'テスト品', reservePrice = null) {
+  const res = await auctioneer.cmd('create_lot', { title, startPrice, unitOverride, reservePrice });
   if (!res.ok) throw new Error(res.message);
   return res.lot;
 }

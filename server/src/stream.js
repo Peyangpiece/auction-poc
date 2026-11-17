@@ -25,6 +25,7 @@ export class StreamControl extends EventEmitter {
     this.wasLive = false;
     this.waiting = null; // 配信開始を待っている間の情報 { startedAt, timeoutTimer, settleTimer }
     this.active = false; // 「受付中」「配信準備中」のロットがあるか
+    this.idleSince = null; // 競りがなく、配信が動いている状態が始まった時刻
     this.autoStopTimer = null;
     this.autoStopDueAt = null;
     this.pollTimer = null;
@@ -48,6 +49,9 @@ export class StreamControl extends EventEmitter {
       waiting: !!this.waiting,
       autoStopMs: this.autoStopMs,
       autoStopDueAt: this.autoStopDueAt,
+      // 競りがない状態が始まった時刻（競りがある間は null）。進行コンソールが、止め忘れの注意に使う
+      idleSince: this.active ? null : this.idleSince,
+      idleWarnMs: this.config.streamIdleWarnMs,
       playbackUrl: this.config.ivsPlaybackUrl,
     };
   }
@@ -104,13 +108,17 @@ export class StreamControl extends EventEmitter {
 
   /** 「受付中」「配信準備中」のロットがあるかどうか。なくなってから autoStopMs 続いたら配信を止める。 */
   setActive(active) {
+    const changed = this.active !== active;
     this.active = active;
+    if (active) this.idleSince = null;
+    else if (changed || this.idleSince === null) this.idleSince = nowMs();
+    if (changed) this.#publish();
     if (active) this.#clearAutoStop();
     else this.#armAutoStop();
   }
 
   setAutoStopMs(ms) {
-    if (!Number.isFinite(ms) || ms < 1000) throw new Error('自動停止までの待ち時間は1秒以上にしてください');
+    if (!Number.isFinite(ms) || (ms !== 0 && ms < 1000)) throw new Error('自動停止までの待ち時間は、0（止めない）か1秒以上にしてください');
     this.autoStopMs = ms;
     this.metrics.write('auto_stop_setting', { autoStopMs: ms });
     if (this.autoStopTimer) {
@@ -127,6 +135,7 @@ export class StreamControl extends EventEmitter {
   }
 
   #armAutoStop() {
+    if (this.autoStopMs <= 0) return; // 自動停止なし（既定）
     if (this.autoStopTimer || this.config.ivsMode === 'always-live') return;
     // 配信が動いている（または動かそうとしている）ときだけ数える
     if (!(this.isLive() || this.obsActive || this.desired === 'on')) return;
@@ -233,6 +242,7 @@ export class StreamControl extends EventEmitter {
     if (this.obsActive !== value) {
       this.metrics.write('obs_state', { obsActive: value, source, agentAt: extra.at ?? null });
       this.obsActive = value;
+      if (value && !this.active) this.idleSince = nowMs(); // 競りがないときに配信が始まった: そこから数える
       if (this.config.ivsMode === 'mock') this.#mockFollow(value);
       if (value && !this.active) this.#armAutoStop();
       this.#publish();

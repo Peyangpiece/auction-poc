@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#00013a">
+<meta name="color-scheme" content="dark">
+<title>会場モニター｜令和の競り</title>
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-title" content="令和の競り">
+<!-- impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 -->
+<link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="monitor.css">
+</head>
+<body>
+<div class="overlay" id="overlay" role="alert"><div><span id="overlayText">接続しています…</span></div></div>
+<header>
+  <img src="logo-dark.svg" width="297" height="80" alt="令和の競り">
+  <p id="event" class="dyn"></p>
+</header>
+<main>
+  <h1 class="sr-only">会場モニター</h1>
+  <section class="now" aria-live="polite">
+    <p class="lot"><span class="digits" id="lotNo"></span><span class="dyn" id="title">次の品をお待ちください</span></p>
+    <p class="label" id="priceLabel">現在価格</p>
+    <p class="price digits" id="price"></p>
+    <p class="who" id="who"></p>
+  </section>
+  <section class="hist" aria-label="入札の履歴">
+    <h2>入札の履歴</h2>
+    <ol id="history"></ol>
+  </section>
+</main>
+<script src="common.js"></script>
+<script src="monitor.js"></script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#04052a" media="(prefers-color-scheme: dark)">
+<title>令和の競り｜株式会社レイワのライブオークション</title>
+<meta name="description" content="株式会社レイワのライブオークション「令和の競り」。会場でも、オンラインでも参加できます。開催の予定と、参加の方法をご案内します。">
+<meta property="og:title" content="令和の競り｜株式会社レイワのライブオークション">
+<meta property="og:description" content="会場でも、オンラインでも参加できるライブオークション。開催の予定と、参加の方法をご案内します。">
+<meta property="og:type" content="website">
+<meta property="og:image" content="/icon-512.png">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-title" content="令和の競り">
+<!-- impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 -->
+<link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="site.css">
+</head>
+<body class="app">
+<a class="skip" href="#main">本文へ進む</a>
+<header class="brandbar">
+  <div>
+    <a class="brand" href="/" translate="no">
+      <picture><source srcset="logo-dark.svg" media="(prefers-color-scheme: dark)"><img class="brand__logo" src="logo.svg" width="178" height="48" alt="令和の競り（株式会社レイワ）"></picture>
+    </a>
+    <nav id="nav" aria-label="メニュー"></nav>
+  </div>
+</header>
+<main id="main" tabindex="-1">
+<h1 class="sr-only">令和の競り</h1>
+<section class="today" id="today" hidden aria-labelledby="todayTitle">
+  <p class="today__tag">本日開催</p>
+  <h2 class="dyn" id="todayTitle"></h2>
+  <p class="today__time digits" id="todayTime"></p>
+  <p class="dyn" id="todayVenue"></p>
+  <div id="todayItems" hidden>
+    <h3>本日の目玉商品</h3>
+    <ul class="dyn" id="todayList"></ul>
+  </div>
+  <a class="btn btn-lg today__go" href="/bidder.html">参加する</a>
+</section>
+
+<section class="wins card" id="wins" hidden aria-labelledby="winsTitle">
+  <h2 id="winsTitle"></h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th scope="col">品</th><th scope="col" class="n">落札額</th><th scope="col" class="n">買歩銭</th><th scope="col" class="n">お支払い額</th></tr></thead>
+    <tbody class="dyn" id="winsRows"></tbody>
+    <tfoot><tr><th scope="row" id="winsCount"></th><td class="n digits" id="winsAmount"></td><td class="n digits" id="winsPremium"></td><td class="n digits total" id="winsPayable"></td></tr></tfoot>
+  </table></div>
+  <p class="note">送料は含みません。請求書は、マイページでご覧になれます。</p>
+  <div class="actions"><a class="btn" href="/mypage.html#bills">請求書を見る</a></div>
+</section>
+<section class="cal card" aria-labelledby="calTitle">
+  <div class="cal__head">
+    <h2 id="calTitle">開催カレンダー</h2>
+    <div class="cal__nav">
+      <button class="btn" type="button" id="calPrev" aria-label="前の月">前の月</button>
+      <p class="digits" id="calMonth" aria-live="polite"></p>
+      <button class="btn" type="button" id="calNext" aria-label="次の月">次の月</button>
+    </div>
+  </div>
+  <table class="cal__grid">
+    <thead><tr><th scope="col">日</th><th scope="col">月</th><th scope="col">火</th><th scope="col">水</th><th scope="col">木</th><th scope="col">金</th><th scope="col">土</th></tr></thead>
+    <tbody id="calBody"></tbody>
+  </table>
+  <p class="cal__legend"><span class="cal__key"></span>開催日</p>
+  <ul class="rows cal__list dyn" id="calList"></ul>
+</section>
+
+<div class="lead" id="lead" hidden>
+  <p>参加には、会員登録が必要です。</p>
+  <div class="actions">
+    <a class="btn btn-primary btn-lg" href="/register.html">会員登録</a>
+    <a class="btn btn-lg" href="/login.html">ログイン</a>
+  </div>
+</div>
+<section class="terms card" id="terms" hidden>
+  <div id="premiumBox" hidden><h2>買歩銭</h2><p id="premium"></p></div>
+  <div><h2>送料</h2><p class="pre dyn" id="shipping"></p></div>
+  <div><h2>返品</h2><p class="pre dyn" id="returns"></p></div>
+</section>
+</main>
+<footer class="sitefoot">
+  <p translate="no">株式会社レイワ</p>
+  <nav aria-label="規約"><a href="/legal.html#terms">利用規約</a><a href="/legal.html#tokushoho">特定商取引法に基づく表示</a><a href="/legal.html#privacy">プライバシーポリシー</a></nav>
+</footer>
+<script src="site.js"></script>
+<script src="home.js"></script>
+</body>
+</html>

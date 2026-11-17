@@ -1,140 +1,243 @@
-/* 検証用の画面の共通スタイル。色・余白・角丸はすべてここのトークンから取る。 */
+/*
+ * 株式会社レイワ「令和の競り」 画面の共通スタイル。
+ * 配色は、会社のシンボル（金の輪・紺の地球・赤い REIWA）から取る:
+ *   紺 #000156 … 要所（ボタン・表示板・見出し）
+ *   金 #d4aa00 … 細い線と、表示板の上のしるし
+ *   赤 #ff0000 … 警告と、選んでいる場所の輪郭だけ。地は白
+ *   書体 … 日本語は Noto Sans JP（400 本文・500 ラベルとボタン・700 見出し）、数字と英字は Inter
+ *   角丸 … 6px、ボタンは高さ 48px・太字
+ * この画面だけのしるしは1つ: 競り場の「表示板」（紺の板・金の細線・大きな数字・2つのランプ）。それ以外は静かにする。
+ */
+@font-face { font-family: "Noto Sans JP"; src: url("notosansjp-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Noto Sans JP"; src: url("notosansjp-500.woff2") format("woff2"); font-weight: 500 600; font-display: swap; }
+@font-face { font-family: "Noto Sans JP"; src: url("notosansjp-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+/* impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 */
+@font-face { font-family: "Inter"; src: url("inter.woff2") format("woff2"); font-weight: 400 700; font-display: swap; unicode-range: U+0020-007E, U+00A5; }
+
 :root {
   color-scheme: light dark;
-  --bg: #f3f2ee;
-  --surface: #ffffff;
-  --surface-2: #f8f7f4;
-  --ink: #16181d;
-  --ink-2: #4a4f5a;      /* 補助の文字（白の上で 7.9:1） */
-  --ink-3: #5f6573;      /* 注記（背景色の上でも 4.5:1 以上） */
-  --line: rgba(22, 24, 29, .10);
-  --accent: #1d4ed8;
-  --accent-ink: #ffffff;
-  --accent-soft: #e8eefc;
-  --ok: #17703a;
-  --ok-soft: #e3f4e8;
-  --warn: #8a5200;
-  --warn-soft: #fdf0d5;
-  --danger: #b3261e;
-  --danger-soft: #fbe9e7;
-  --right: #c2410c;      /* 権利表示 */
-  --shadow: 0 1px 2px rgba(22, 24, 29, .06), 0 4px 16px rgba(22, 24, 29, .06);
-  --shadow-lg: 0 2px 6px rgba(22, 24, 29, .10), 0 16px 40px rgba(22, 24, 29, .16);
-  --r-sm: 8px;
-  --r-md: 12px;
+  --navy: #000156;         /* シンボルの紺。白地で 19.5:1 */
+  --navy-dk: #00013a;
+  --red: #ff0000;          /* シンボルの赤。輪郭にだけ使う（白地で 4.0:1） */
+  --gold: #d4aa00;         /* シンボルの金。細い線にだけ使う（文字には使わない。紺の上では 8.5:1） */
+  --red-text: #c40000;     /* 文字に使う赤。白地で 6.3:1 */
+
+  --ground: #ffffff;
+  --ground-alt: #f3f4f7;
+  --ink: #15181e;
+  --ink-2: #596170;        /* 補助の文字。白地で 6.0:1 */
+  --ink-3: #596170;
+  --line: #e6e8ee;
+  --edge: #868e9b;         /* 入力欄の縁。白地で 3.3:1 */
+  --field: #ffffff;
+  --action: var(--navy);
+  --action-hover: var(--navy-dk);
+  --action-ink: #ffffff;
+  --danger: var(--red-text);
+  --danger-ink: #ffffff;
+  --alarm: var(--red-text); /* 上回られたときに、画面全体に敷く色 */
+  --ok: #1f6b3a;
+
+  /* 表示板。エンブレムと同じ、紺の地に赤い線 */
+  --board: var(--navy-dk);
+  --board-ink: #ffffff;
+  --board-ink-2: #c9cbe0;  /* 板の上で 10.2:1 */
+  --board-line: rgba(255, 255, 255, .18);
+  --board-ng: #f08a8a;     /* 板の上の赤。5.5:1 */
+  --lamp-off: #5a6096;
+  --lamp-green: #ffffff;
+  --lamp-amber: #ffffff;
+
+  /* 角の丸み（Apple のデザインにそろえる）: 小さな印は 6px、ボタン・入力欄は 12px、面（表示板・映像の枠・ダイアログ・カード）は 20px。
+     入れ子の角は、外側の丸み ＝ 内側の丸み ＋ 余白 を目安にする */
+  --r-sm: 6px;
+  --r: 12px;
   --r-lg: 20px;
-  --font: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, system-ui, sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* 影: 細い縁どり＋近い影＋遠い影を重ねる（線で囲む代わりに、面を少し浮かせる） */
+  --shadow-1: 0 0 0 1px rgba(0, 0, 0, .04), 0 1px 2px rgba(0, 0, 0, .04), 0 6px 16px -6px rgba(0, 0, 0, .08);
+  --shadow-2: 0 0 0 1px rgba(0, 0, 0, .05), 0 4px 12px rgba(0, 0, 0, .08), 0 24px 48px -12px rgba(0, 0, 0, .25);
+  --shadow-btn: inset 0 1px 0 rgba(255, 255, 255, .14), 0 1px 2px rgba(0, 0, 0, .2), 0 4px 10px -4px rgba(0, 0, 0, .3); /* 影は、色を付けない（黒のうすい影） */
+  --tint: color-mix(in srgb, var(--action) 6%, var(--ground));       /* 押せるものの、うすい塗り */
+  --tint-2: color-mix(in srgb, var(--action) 11%, var(--ground));
+  --ring: color-mix(in srgb, var(--action) 18%, transparent);        /* 入力中の欄のまわりの、うすい輪 */
+  --font: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+  --digits: "Inter", "Helvetica Neue", Arial, var(--font);
+  --ease: cubic-bezier(.16, 1, .3, 1);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1115;
-    --surface: #181b21;
-    --surface-2: #1f232b;
-    --ink: #f1f2f4;
-    --ink-2: #b9bec9;
-    --ink-3: #9299a6;
-    --line: rgba(255, 255, 255, .12);
-    --accent: #5b8cff;
-    --accent-ink: #0b1020;
-    --accent-soft: #1b2744;
-    --ok: #5fd08a;
-    --ok-soft: #14301f;
-    --warn: #f2b84b;
-    --warn-soft: #33270f;
-    --danger: #ff8a80;
-    --danger-soft: #3a1917;
-    --right: #ff9a5c;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px rgba(0, 0, 0, .3);
-    --shadow-lg: 0 2px 6px rgba(0, 0, 0, .5), 0 16px 40px rgba(0, 0, 0, .5);
+    --ground: #04052a;
+    --ground-alt: #0c0e3c;
+    --ink: #eef0f6;
+    --ink-2: #bcc0ee;
+    --ink-3: #bcc0ee;
+    --line: rgba(255, 255, 255, .16);
+    --edge: #7d84a6;
+    --field: #0c0e3c;
+    --action: #c3c9ff;
+    --action-hover: #dfe2ff;
+    --action-ink: #00013a;
+    --danger: #f08a8a;
+    --danger-ink: #00013a;   /* 明るい赤の上の文字。6.6:1 */
+    --alarm: #9c0000;
+    --ok: #86d994;
+    --board: #0a0c6e;
+    --shadow-btn: none;
+    --shadow-1: 0 0 0 1px rgba(255, 255, 255, .08);
+    --shadow-2: 0 0 0 1px rgba(255, 255, 255, .12), 0 24px 48px -12px rgba(0, 0, 0, .6);
   }
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scrollbar-color: var(--ink-3) transparent; }
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--ground);
   color: var(--ink);
-  font-family: var(--font);
-  font-size: 16px;
-  line-height: 1.6;
+  font: 400 16px/1.75 var(--font);
+  letter-spacing: .02em;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+  -moz-osx-font-smoothing: grayscale;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+  accent-color: var(--action);
+  caret-color: var(--action);
 }
-h1, h2, h3, p { margin: 0; }
-h1, h2, h3 { text-wrap: balance; line-height: 1.35; }
+::selection { background: var(--action); color: var(--action-ink); }
+h1, h2, h3, p, dl, dd, ul { margin: 0; }
+/* 見出し・ボタン・ラベルは、かなと約物を詰めて組む（palt）。本文は、読みやすさを優先して、詰めない */
+h1, h2, h3, .btn, .field, .tabs, .tabbar, .menu, th, .state, .board-top, .lamp { font-feature-settings: "palt" 1; }
+h1, h2, h3 { font-weight: 700; line-height: 1.35; text-wrap: balance; letter-spacing: .01em; }
+h2 { font-size: 15px; color: var(--action); }
 p { text-wrap: pretty; }
-.num { font-variant-numeric: tabular-nums; font-feature-settings: "palt" 0; }
+.num { font-variant-numeric: tabular-nums; }
+.digits { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+/* キーボードで操作する人が、ヘッダーを飛ばして本文へ進むためのリンク。フォーカスが当たったときだけ見える */
+.skip { position: absolute; left: 8px; top: -64px; z-index: 100; padding: 12px 16px; background: var(--ground); color: var(--action); font-weight: 700; border: 2px solid var(--action); border-radius: var(--r); }
+.skip:focus-visible { top: 8px; }
+main:focus { outline: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.note { font-size: 13px; line-height: 1.7; color: var(--ink-3); }
+:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+/* 紺の面の上では、白い輪にする */
+.board :focus-visible, .today :focus-visible, #videoBox :focus-visible, .overlay :focus-visible { outline-color: #fff; }
 
-/* ---- 面 */
-.card { background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 20px; min-width: 0; }
-.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--ink-3); }
-.note { font-size: 13px; color: var(--ink-3); }
-
-/* ---- ボタン */
+/* ---- ボタン: 形は1種類。主・従・取り消せない操作は、塗りと色だけで分ける */
 .btn {
-  appearance: none; font: inherit; font-weight: 700; color: var(--ink);
-  min-height: 44px; padding: 10px 18px; border: 0; border-radius: var(--r-md);
-  background: var(--surface); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(22, 24, 29, .06);
-  cursor: pointer; touch-action: manipulation;
-  transition: transform .12s ease, background-color .15s ease, box-shadow .15s ease, opacity .15s ease;
+  appearance: none; font: 500 15px/1.4 var(--font); letter-spacing: .02em; color: var(--action); white-space: nowrap; text-decoration: none;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 48px; padding: 8px 20px; border: 1px solid transparent; border-radius: var(--r);
+  background: var(--tint); cursor: pointer; touch-action: manipulation; user-select: none;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease), box-shadow .15s var(--ease), transform .12s var(--ease), opacity .15s var(--ease);
 }
-.btn:hover:not(:disabled) { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--ink-3), 0 1px 2px rgba(22, 24, 29, .06); }
+.btn:hover:not(:disabled) { background: var(--tint-2); }
 .btn:active:not(:disabled) { transform: scale(.97); }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
-.btn-primary { background: var(--accent); color: var(--accent-ink); box-shadow: 0 1px 2px rgba(22, 24, 29, .2), 0 6px 16px color-mix(in srgb, var(--accent) 30%, transparent); }
-.btn-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, #000); box-shadow: 0 1px 2px rgba(22, 24, 29, .2), 0 8px 20px color-mix(in srgb, var(--accent) 36%, transparent); }
-.btn-danger { color: var(--danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent); }
-.btn-danger:hover:not(:disabled) { background: var(--danger-soft); box-shadow: inset 0 0 0 1px var(--danger); }
-.btn-lg { min-height: 60px; padding: 14px 28px; font-size: 20px; border-radius: 16px; }
-
-/* ---- 状態のピル */
-.pill {
-  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
-  padding: 4px 12px 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 700;
-  background: var(--surface-2); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line);
-}
-.pill.plain { padding-left: 12px; }
-.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .7; }
-.pill.plain::before { display: none; }
-.pill[data-state="open"] { background: var(--ok-soft); color: var(--ok); box-shadow: none; }
-.pill[data-state="open"]::before { opacity: 1; animation: pulse 1.6s ease-in-out infinite; }
-.pill[data-state="preparing"], .pill[data-state="suspended"] { background: var(--warn-soft); color: var(--warn); box-shadow: none; }
-.pill[data-state="preparing_warn"] { background: var(--danger-soft); color: var(--danger); box-shadow: none; }
-.pill[data-state="sold"] { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
-@keyframes pulse { 50% { opacity: .35; } }
+/* 主のボタン: 紺の塗り。上の縁に細い光、下に短い影（押せる面に見せる） */
+.btn-primary { background: var(--action); color: var(--action-ink); font-weight: 700; box-shadow: var(--shadow-btn); }
+.btn-primary:hover:not(:disabled) { background: var(--action-hover); }
+.btn-danger { color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, var(--ground)); }
+.btn-danger:hover:not(:disabled) { background: var(--danger); color: var(--danger-ink); }
+.btn-lg { min-height: 56px; font-size: 17px; font-weight: 700; border-radius: 14px; }
 
 /* ---- 入力 */
-.field { display: grid; gap: 4px; font-size: 13px; font-weight: 700; color: var(--ink-2); min-width: 0; }
+.field { display: grid; gap: 6px; font-size: 13px; font-weight: 500; color: var(--ink-2); min-width: 0; }
 .input {
-  font: inherit; font-weight: 400; color: var(--ink); min-height: 44px; padding: 8px 12px; width: 100%;
-  border: 0; border-radius: var(--r-sm); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line);
+  font: 400 16px/1.5 var(--font); color: var(--ink); min-height: 48px; padding: 8px 14px; width: 100%;
+  border: 1px solid var(--edge); border-radius: var(--r); background: var(--field);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
 }
-.input:focus-visible { outline-offset: 0; }
+.input::placeholder { color: color-mix(in srgb, var(--ink-3) 70%, transparent); }
+.input:hover { border-color: var(--ink-2); }
+/* 入力中の欄: 紺の縁と、まわりのうすい輪 */
+.input:focus-visible, .input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 4px var(--ring); }
+
+/* ---- 表示板（この画面のしるし） */
+/* 角を丸めた面には、太い上線を付けない（線が、角の曲がりとぶつかる） */
+.board { background: var(--board); color: var(--board-ink); border-radius: var(--r-lg); padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.board-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--board-ink-2); }
+.board-top b { color: var(--board-ink); font-weight: 600; }
+.price { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -.02em; font-size: 72px; transition: transform .2s var(--ease); transform-origin: left bottom; }
+.price.tick { transform: scale(1.03); }
+/* ロットがない間は、数字の場所を空けずに、案内だけを出す */
+.board.idle .pricewrap { display: none; }
+.board-result { font-size: 18px; font-weight: 700; }
+.board-result:empty { display: none; }
+
+.lamps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--board-line); padding-top: 12px; }
+.lamp { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; align-items: center; min-width: 0; }
+.lamp + .lamp { border-left: 1px solid var(--board-line); padding-left: 12px; }
+/* ランプは、点灯＝塗りつぶし、消灯＝輪郭。色に頼らず形でも分かる */
+/* ランプは、押せる丸（選択ボタン）に見えないよう、縦長の灯りの形にする */
+.bulb { width: 10px; height: 24px; border-radius: 4px; border: 2px solid var(--lamp-off); grid-row: span 2; transition: background-color .2s var(--ease), border-color .2s var(--ease); }
+.lamp b { font-size: 16px; font-weight: 700; color: var(--board-ink-2); line-height: 1.3; }
+/* 補足がないランプは、印と名前を1行でそろえる */
+.lamp small:empty { display: none; }
+.lamp:has(small:empty) .bulb { grid-row: auto; }
+.lamp small { font-size: 13px; color: var(--board-ink-2); line-height: 1.3; overflow-wrap: anywhere; }
+.lamp.on b, .lamp.won b { color: var(--board-ink); }
+#urikiri.on .bulb { background: var(--lamp-green); border-color: var(--lamp-green); }
+#right.on .bulb { background: var(--lamp-amber); border-color: var(--lamp-amber); }
+#right.won .bulb { background: var(--lamp-green); border-color: var(--lamp-green); }
+
+/* ---- 状態の文字（点＋言葉。枠で囲まない） */
+.state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; white-space: nowrap; }
+.state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
+.state[data-on="1"]::before { background: currentColor; }
+
+/* ---- 表（区切りは細い線だけ） */
+.rows { list-style: none; padding: 0; }
+.rows > li { border-top: 1px solid var(--line); }
+.rows > li:first-child { border-top: 0; }
 
 /* ---- 再接続中（大きく表示する。FR-UI-001） */
 .overlay {
   position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; text-align: center;
-  padding: 24px; background: rgba(10, 12, 16, .86); color: #fff; font-size: clamp(28px, 7vw, 40px); font-weight: 800;
-  overscroll-behavior: contain;
+  padding: 24px; background: rgba(0, 1, 58, .94); color: #fff; font-size: 32px; font-weight: 700; overscroll-behavior: contain;
 }
-.overlay small { display: block; font-size: 15px; font-weight: 400; opacity: .8; margin-top: 8px; }
+.overlay small { display: block; font-size: 15px; font-weight: 400; color: rgba(255, 255, 255, .78); margin-top: 8px; }
 
-/* ---- ダイアログ */
+/* ---- ダイアログ（取り消せない操作の確認だけに使う） */
 dialog {
-  border: 0; padding: 24px; width: min(440px, calc(100vw - 32px)); border-radius: var(--r-lg);
-  background: var(--surface); color: var(--ink); box-shadow: var(--shadow-lg); overscroll-behavior: contain;
+  border: 0; padding: 24px; width: min(440px, calc(100vw - 32px)); border-radius: 24px;
+  background: var(--ground); color: var(--ink); box-shadow: var(--shadow-2); overscroll-behavior: contain;
+  /* 開くとき: 少し下から、ふわっと出る（閉じるときは、すぐ消える） */
+  opacity: 1; transform: none; transition: opacity .2s var(--ease), transform .25s var(--ease), overlay .2s allow-discrete, display .2s allow-discrete;
 }
-dialog::backdrop { background: rgba(10, 12, 16, .55); }
-dialog h2 { font-size: 18px; margin-bottom: 8px; }
+@starting-style { dialog[open] { opacity: 0; transform: translateY(12px) scale(.98); } }
+dialog::backdrop { background: rgba(0, 1, 40, .45); backdrop-filter: blur(6px); }
+dialog h2 { font-size: 19px; margin-bottom: 8px; letter-spacing: .02em; color: var(--ink); }
 dialog p { color: var(--ink-2); font-size: 15px; }
 dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 dialog .error { color: var(--danger); font-size: 13px; min-height: 20px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* 折りたたみ: 開閉の印は線で描く */
+details > summary { list-style: none; gap: 10px; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform .15s var(--ease); flex: none; }
+details[open] > summary::before { transform: rotate(45deg); }
+
+/* ---- ヘッダー（左に、会社のシンボルと社名） */
+/* 上の帯: 画面の上に留まり、下の中身がうっすら透ける */
+.brandbar { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--ground) 86%, transparent); backdrop-filter: saturate(180%) blur(16px); -webkit-backdrop-filter: saturate(180%) blur(16px); box-shadow: 0 1px 0 var(--line); }
+.brandbar > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; margin: 0 auto; }
+.brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; color: var(--ink); text-decoration: none; }
+/* ロゴ（会社のシンボル＋毛筆の「令和の競り」）。暗い画面では、白い文字の版に切り替える */
+.brand__logo { display: block; height: 42px; width: auto; }
+.brand picture { display: block; }
+.brand__text { display: grid; line-height: 1.3; min-width: 0; }
+.brand__name { font-weight: 700; font-size: 17px; letter-spacing: .04em; white-space: nowrap; }
+.brand__service { font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--action); white-space: nowrap; }
+/* 後から入る文字（商品名・コメント）は、切り出した書体に無い字が混ざらないよう、端末の書体で通して表示する */
+.dyn { font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", "Noto Sans JP", sans-serif; letter-spacing: .02em; }
+
+/* なめらかに続く角（Apple の角と同じ、連続した曲線）。対応しているブラウザでだけ効く。丸（50%）の部品には付けない */
+@supports (corner-shape: squircle) {
+  .btn, .input, .board, dialog, .seg, #videoBox, .mode, .amount, .pick label, .choice label, .banner, .today, .verified, .secret, .board-result, #eventNote { corner-shape: squircle; }
 }
