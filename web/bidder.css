@@ -31,7 +31,7 @@ body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #
 #videoBox { display: none; position: relative; aspect-ratio: 4 / 3; width: 100%; background: #000; border-radius: var(--r); overflow: hidden; }
 #videoBox video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
 /* 映像のない間は、真っ黒ではなく、表示板と同じ紺にする（黒と紺の2つの暗い面が並ぶのを避ける）。飾りは置かない */
-#break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 14px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: var(--board); color: #fff; }
+#break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 22px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: var(--board); color: #fff; }
 #break strong { font-size: 18px; font-weight: 600; }
 /* 音声の切り替え。映像の右下に置く。音は、押してから出す（ブラウザは、操作なしに音を出させない） */
 #sound { position: absolute; right: 8px; bottom: 8px; z-index: 2; min-height: 44px; padding: 6px 14px; font-size: 14px; background: rgba(0, 0, 0, .72); border-color: rgba(255, 255, 255, .6); color: #fff; }
@@ -226,3 +226,49 @@ details dd { overflow-wrap: anywhere; }
 .amount .yen { font-family: var(--digits); font-size: 20px; font-weight: 600; }
 .amount input { flex: 1; min-width: 0; width: 100%; border: 0; outline: 0; background: none; padding: 0; color: var(--navy); font-size: 24px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; min-height: 48px; }
 @media (min-width: 960px) { .amount input { font-size: 28px; min-height: 56px; } }
+
+/* ---- 映像のない間（準備中・停止中・休憩中）の、待機のアニメーション（発注者の指示）
+   シンボルのバッジが、跳ね上がりながら、地球の自転と同じ向き（縦の軸のまわり。手前の面が左から右へ）に1回転して、着地する。
+   1回の動きは約1秒。そのあと1秒ほど休む（隣の入札の邪魔にならないように、動き続けにしない）。
+   動かすのは transform と opacity だけ（描き直しが起きず、端末に負担をかけない）。 */
+/* コインのように厚みを持たせる: 表の面・裏の面・側面（細い板を円く並べたもの）を、立体として組む。大きさ（--s）と厚み（--t）は、ここで決める */
+.waitbadge { --s: 92px; --t: calc(var(--s) * .1); position: relative; width: var(--s); height: var(--s); perspective: 700px; flex: none; }
+@media (min-width: 960px) { .waitbadge { --s: 148px; } }
+@media (max-width: 359px) { .waitbadge { --s: 76px; } }
+.waitbadge .hop { width: 100%; height: 100%; transform-origin: 50% 100%; animation: badge-hop 2.2s infinite both; will-change: transform; }
+.waitbadge .spin { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; animation: badge-spin 2.2s infinite both; will-change: transform; }
+.waitbadge .face { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border-radius: 50%; backface-visibility: hidden; }
+.waitbadge .front { transform: translateZ(calc(var(--t) / 2)); }
+.waitbadge .back { transform: rotateY(180deg) translateZ(calc(var(--t) / 2)); }
+/* 側面の板（bidder.js が円く並べる）。金の濃淡を交互にして、コインのふちの刻みに見せる */
+.waitbadge .rim { position: absolute; left: 50%; top: 50%; width: calc(var(--s) * .0825); height: var(--t); margin: calc(var(--t) / -2) 0 0 calc(var(--s) * -.04125); background: #c99a06; backface-visibility: hidden; }
+.waitbadge .rim:nth-child(even) { background: #e9c53a; }
+.waitbadge .ground { position: absolute; left: 18%; right: 18%; bottom: -9%; height: 8%; border-radius: 50%; background: #000; opacity: .34; animation: badge-ground 2.2s infinite both; }
+/* 跳ねる: ためる（沈む）→ 伸びながら飛び上がる（上へ行くほど遅く）→ 落ちる（下へ行くほど速く）→ 着地でつぶれる → 小さく戻る → 休む */
+@keyframes badge-hop {
+  0% { transform: translateY(0) scale(1, 1); animation-timing-function: cubic-bezier(0.455, 0.03, 0.515, 0.955); }
+  7% { transform: translateY(0) scale(1.07, .9); animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); }
+  13% { transform: translateY(-10%) scale(.95, 1.07); animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); }
+  30% { transform: translateY(-58%) scale(1, 1); animation-timing-function: cubic-bezier(0.55, 0.055, 0.675, 0.19); }
+  47% { transform: translateY(0) scale(.96, 1.06); animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); }
+  52% { transform: translateY(0) scale(1.09, .88); animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); }
+  59% { transform: translateY(-5%) scale(.98, 1.03); animation-timing-function: cubic-bezier(0.455, 0.03, 0.515, 0.955); }
+  66%, 100% { transform: translateY(0) scale(1, 1); }
+}
+/* 回る: 空中にいる間に、縦の軸のまわりを1回転（rotateY の正の向き＝手前の面が左から右へ＝地球の自転の向き） */
+@keyframes badge-spin {
+  0%, 9% { transform: rotateY(0deg); animation-timing-function: cubic-bezier(0.455, 0.03, 0.515, 0.955); }
+  50%, 100% { transform: rotateY(360deg); }
+}
+/* 影: 高く上がるほど、小さく薄く */
+@keyframes badge-ground {
+  0%, 9% { transform: scale(1); opacity: .34; animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); }
+  30% { transform: scale(.55); opacity: .14; animation-timing-function: cubic-bezier(0.55, 0.055, 0.675, 0.19); }
+  47% { transform: scale(1); opacity: .34; }
+  52% { transform: scale(1.12); opacity: .4; }
+  66%, 100% { transform: scale(1); opacity: .34; }
+}
+/* 「動きを減らす」設定の端末では、動かさない（止まったバッジだけを出す） */
+@media (prefers-reduced-motion: reduce) {
+  .waitbadge .hop, .waitbadge .spin, .waitbadge .ground { animation: none; }
+}

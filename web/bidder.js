@@ -597,3 +597,15 @@ $('enter').addEventListener('click', async () => {
 new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty('--board-h', `${Math.ceil(entry.target.getBoundingClientRect().height)}px`);
 }).observe($('board'));
+
+// 待機のバッジ（コイン）の側面: 細い板を、円く並べる（40枚）。位置は transform だけで決める
+{
+  const coin = $('coin');
+  const N = 40;
+  for (let i = 0; i < N; i++) {
+    const rim = document.createElement('span');
+    rim.className = 'rim';
+    rim.style.transform = `rotateZ(${(360 / N) * i}deg) translateY(calc(var(--s) * -0.5)) rotateX(90deg)`;
+    coin.append(rim);
+  }
+}
