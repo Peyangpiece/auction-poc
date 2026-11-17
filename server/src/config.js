@@ -91,6 +91,9 @@ export function loadConfig(env = process.env) {
     cookieSecure: env.POC_COOKIE_SECURE === '1',
     // 認証の試行（認証番号の送信・照合、スタッフのログイン）の上限。同じ接続元から1分あたり。0 で外す
     authRatePerMin: num(env.POC_AUTH_RATE, 20),
+    // 最初の主催者管理者のメールアドレスの、SHA-256（16進）。メールアドレスそのものは、ソースに書かない。
+    // このメールアドレスで「はじめての方」から進むと、主催者管理者として登録される（まだ登録が無いときの、1回だけ）
+    adminEmailHash: (env.POC_ADMIN_EMAIL_SHA256 || '').trim().toLowerCase(),
     // 会員登録を、主催者管理者の承認なしで通す（自動テストと、手元での確認用）。本番では付けない。付けなければ、登録は「承認待ち」になる
     autoApprove: env.POC_AUTO_APPROVE === '1',
 

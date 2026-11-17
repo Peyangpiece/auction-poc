@@ -67,6 +67,7 @@ export class AuctionApp extends DurableObject {
         ...(this.env.ADMIN_PASSWORD ? { POC_ADMIN_PASSWORD: this.env.ADMIN_PASSWORD } : {}),
         // 最初の主催者管理者のメールアドレス（秘密の値。ソースには書かない）。あれば、起動のときに登録する
         ...(this.env.ADMIN_EMAIL ? { POC_ADMIN_EMAIL: this.env.ADMIN_EMAIL } : {}),
+        ...(this.env.ADMIN_EMAIL_SHA256 ? { POC_ADMIN_EMAIL_SHA256: this.env.ADMIN_EMAIL_SHA256 } : {}),
       };
       // コンテナごとに、登録し直す決まり
       await container.interceptOutboundHttp(STORE_HOST, this.ctx.exports.DataStore);

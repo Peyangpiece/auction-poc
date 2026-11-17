@@ -37,9 +37,8 @@
     <p class="aside"><button class="textbtn" type="button" id="firstTime">はじめての方（パスワードを決める）</button></p>
   </form>
   <form class="form" id="setupForm" novalidate hidden>
-    <p class="note">登録されたメールアドレスと、確認コードを入れて、パスワードを決めてください。確認コードは、メールで届くか、登録した主催者管理者からお受け取りください。</p>
+    <p class="note">主催者管理者が登録したメールアドレスを入れて、パスワードを決めてください。</p>
     <label class="field">メールアドレス<input class="input" name="email" type="text" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" required><span class="err" role="alert"></span></label>
-    <label class="field">確認コード<input class="input" name="code" autocomplete="off" autocapitalize="none" spellcheck="false" required><span class="err" role="alert"></span></label>
     <label class="field">新しいパスワード<small>12文字以上</small><input class="input" name="password" type="password" autocomplete="new-password" required><span class="err" role="alert"></span></label>
     <label class="field">新しいパスワード（もう一度）<input class="input" name="password2" type="password" autocomplete="new-password" required><span class="err" role="alert"></span></label>
     <p class="msg" role="alert" tabindex="-1"></p>

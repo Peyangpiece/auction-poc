@@ -21,16 +21,13 @@ if (!store.db.prepare('SELECT 1 FROM staff_accounts LIMIT 1').get()) {
   fs.writeFileSync(file, [`ログイン ID: ${s.loginId}`, `仮のパスワード: ${password ? '（環境変数 POC_ADMIN_PASSWORD で指定したもの）' : s.initialPassword}`, `認証アプリの鍵: ${s.totpSecret}`, `認証アプリ用の URL: ${s.otpauthUrl}`, ''].join('\n'), { mode: 0o600 });
   console.log(`最初の主催者管理者（admin）を作りました。ログインに使う情報: ${file}`);
 } else console.log('スタッフは、すでに登録されています。');
-// 最初の主催者管理者を、メールアドレスで登録する（POC_ADMIN_EMAIL）。パスワードは、本人が最初のログインで決める。
-// 確認コードには、POC_ADMIN_PASSWORD を使う（置き場が消える環境では、ファイルを読みに行けないため）。無ければ、ファイルに書き出す。
-// メールアドレスは、ソースには書かない（秘密の値として渡す）
+// 最初の主催者管理者を、メールアドレスで登録する（POC_ADMIN_EMAIL があるとき）。パスワードは、本人が最初のログインで決める。
+// メールアドレスは、ソースには書かない
 const adminEmail = (process.env.POC_ADMIN_EMAIL || '').trim().toLowerCase();
 if (adminEmail && !store.db.prepare('SELECT 1 FROM staff_accounts WHERE lower(email) = ?').get(adminEmail)) {
-  const setupCode = process.env.POC_ADMIN_PASSWORD || undefined;
-  const s = api.inviteStaff({ email: adminEmail, name: '管理者', role: 'admin', ...(setupCode ? { setupCode } : {}) });
+  const s = api.inviteStaff({ email: adminEmail, name: '管理者', role: 'admin' });
   api.audit({ system: true }, 'staff.create', { target: `staff:${s.id}`, after: { role: 'admin', by: 'tools/setup-first.js' } });
-  if (!setupCode) fs.writeFileSync(path.join(config.dataDir, 'staff-initial-email-admin.txt'), `確認コード: ${s.setupCode}\n`, { mode: 0o600 });
-  console.log('主催者管理者を、メールアドレスで登録しました。最初のログインで、確認コードを入れて、パスワードを決めてください。');
+  console.log('主催者管理者を、メールアドレスで登録しました。「はじめての方」から、パスワードを決めてください（7日以内）。');
 }
 if (process.argv.includes('--with-event') && !store.db.prepare('SELECT 1 FROM events LIMIT 1').get()) {
   const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);

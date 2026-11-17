@@ -320,22 +320,19 @@ function smsPanel() {
 }
 
 // ------------------------------------------------------------ スタッフ
-// メールアドレスを登録した（または、確認コードを出し直した）あとの知らせ。確認コードは、この1回だけ出す
+// メールアドレスを登録した（または、パスワードを決め直せるようにした）あとの知らせ
 function inviteDialog(title, res) {
   openDialog(title,
-    el('p', { text: `${res.email} に、確認コードをメールで送りました。メールが届かない場合は、次の確認コードを、本人に安全な方法で渡してください。この画面を閉じると、二度と表示できません。` }),
-    el('dl', { class: 'facts' },
-      el('dt', { text: 'メールアドレス' }), el('dd', { class: 'dyn', text: res.email }),
-      el('dt', { text: '確認コード' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.setupCode })))),
-    el('p', { class: 'note', text: '本人は、スタッフのログインの画面の「はじめての方」から、メールアドレスと確認コードを入れて、パスワードを決めます。確認コードの期限は、7日です。' }),
-    el('div', { class: 'actions' }, closeBtn('渡したので閉じる')));
+    el('p', { class: 'dyn', text: `${res.email} を登録しました。本人に、スタッフのログインの画面の「はじめての方」から、このメールアドレスを入れて、パスワードを決めるよう、お伝えください。` }),
+    el('p', { class: 'note', text: 'パスワードを決められるのは、7日以内です。メールアドレスを知っている人なら、だれでも決められるので、早めに決めてもらってください。' }),
+    el('div', { class: 'actions' }, closeBtn('閉じる')));
 }
 async function staffPanel() {
   const res = await api('GET', '/api/staff/accounts');
   const rows = res.staff.map((s) => el('tr', {},
     el('td', { class: 'dyn', text: s.email ?? `${s.loginId}（ログイン ID）` }), el('td', { class: 'dyn', text: s.name }), el('td', { text: s.roleLabel }),
     el('td', { text: !s.active ? '停止' : s.ready ? '利用中' : 'パスワードの登録待ち' }),
-    act(s.active && smallBtn(s.email ? '確認コードを出し直す' : '再発行', async () => { const r = await api('POST', `/api/staff/accounts/${s.id}/reset`); if (!r.ok) return alertLine(r.message); await show('staff'); if (r.setupCode) inviteDialog('確認コードを出し直しました', r); else secretsDialog('パスワードと認証アプリを再発行しました', r); }),
+    act(s.active && smallBtn(s.email ? 'パスワードを決め直せるようにする' : '再発行', async () => { const r = await api('POST', `/api/staff/accounts/${s.id}/reset`); if (!r.ok) return alertLine(r.message); await show('staff'); if (r.email) inviteDialog('パスワードを消しました', r); else secretsDialog('パスワードと認証アプリを再発行しました', r); }),
       s.active && s.loginId !== me.loginId && smallBtn('停止', async () => { const r = await api('POST', `/api/staff/accounts/${s.id}/stop`); if (!r.ok) alertLine(r.message); else show('staff'); }, 'btn-danger'))));
   return [
     el('div', { class: 'toolbar' }, smallBtn('パスワードを変える', passwordDialog), smallBtn('スタッフのメールアドレスを登録', staffDialog, 'btn-primary')),
@@ -515,10 +512,10 @@ onSubmit($('#loginForm'), async (data) => {
   else $('#loginForm').elements.password.value = '';
   return res;
 });
-// はじめての方: メールアドレスと確認コードを入れて、パスワードを自分で決める
+// はじめての方: 登録されたメールアドレスを入れて、パスワードを自分で決める
 onSubmit($('#setupForm'), async (data) => {
   if (data.password !== data.password2) return { ok: false, message: '入力を確かめてください', errors: { password2: '新しいパスワードが、2つの欄で違っています' } };
-  const res = await api('POST', '/api/staff/setup', { email: data.email, code: data.code, password: data.password });
+  const res = await api('POST', '/api/staff/setup', { email: data.email, password: data.password });
   if (res.ok) afterLogin(res.staff.role);
   return res;
 });
