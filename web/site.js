@@ -46,9 +46,11 @@ function onSubmit(form, handler) {
     if (msg) { msg.textContent = ''; msg.classList.remove('ok'); }
     for (const f of form.querySelectorAll('[aria-invalid]')) f.removeAttribute('aria-invalid');
     for (const e of form.querySelectorAll('.err')) e.textContent = '';
-    if (button) button.disabled = true;
+    // 送っている間は、ボタンを押せなくして、「送信中…」と出す（押せたのか分からない、を無くす。二重の送信も防ぐ）
+    const label = button?.textContent;
+    if (button) { button.disabled = true; button.textContent = '送信中…'; }
     const res = await handler(Object.fromEntries(new FormData(form)), button);
-    if (button) button.disabled = false;
+    if (button) { button.disabled = false; button.textContent = label; }
     if (res && !res.ok) {
       let first = null;
       for (const [name, text] of Object.entries(res.errors ?? {})) {

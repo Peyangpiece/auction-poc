@@ -18,7 +18,8 @@ const msgLine = () => el('p', { class: 'msg', role: 'alert', tabIndex: -1 });
 function table(heads, rows, empty) {
   if (!rows.length) return el('p', { class: 'empty', text: empty });
   return el('div', { class: 'tablewrap' }, el('table', {},
-    el('thead', {}, el('tr', {}, heads.map((h) => el('th', { scope: 'col', text: h })))),
+    // 見出しのない列（選ぶ印・操作のボタン）にも、読み上げ用の名前を付ける
+    el('thead', {}, el('tr', {}, heads.map((h, i) => (h ? el('th', { scope: 'col', text: h }) : el('th', { scope: 'col' }, el('span', { class: 'sr-only', text: i === 0 ? '選択' : '操作' })))))),
     el('tbody', {}, rows)));
 }
 const act = (...buttons) => el('td', { class: 'act' }, buttons);
@@ -428,6 +429,17 @@ const AUDIT_TEXT = {
   'invoice.issue_on_end': '請求書を発行', 'invoice.sent': '請求書を送付済みに', 'invoice.unsent': '送付済みを取り消し', 'offer.accept': '繰り上げを承諾', 'offer.decline': '繰り上げを辞退',
   'fee.confirm': '手数料の明細を確認', 'settings.update': '設定を変更', 'settings.legal': '規約を変更', 'settings.seal': '印鑑の画像を変更', 'sms.limit_reset': 'SMS の制限を解除',
 };
+// 記録の「前」「後」（機械向けの形）を、読める言葉にする
+const AUDIT_KEY = { mode: '参加', payment: '支払', receive: '受け取り', checkedIn: '来場確認', paddle: '参加番号', kind: '区分', fields: '変えた項目', loginId: 'ログイン ID', role: '役割', by: '登録元', amount: '金額', title: '名前', status: '状態', reason: '理由', memo: 'メモ', shipping: '送料', dueDate: '期限', number: '請求番号' };
+const AUDIT_VALUE = { venue: '会場', online: 'オンライン', cash: '当日現金', transfer: '銀行振込', pickup: '現地受け取り', ship: '配送', b2c: '個人', b2b: '法人', true: 'はい', false: 'いいえ', admin: '主催者管理者', auctioneer: '進行役', reception: '受付係', operator: '開発運営者' };
+function auditText(raw) {
+  if (!raw) return '';
+  let v;
+  try { v = JSON.parse(raw); } catch { return raw; }
+  if (v === null || typeof v !== 'object') return String(v);
+  const show = (x) => (Array.isArray(x) ? x.map(show).join('・') : x !== null && typeof x === 'object' ? JSON.stringify(x) : AUDIT_VALUE[String(x)] ?? String(x));
+  return Object.entries(v).map(([k, x]) => `${AUDIT_KEY[k] ?? k}: ${show(x)}`).join('、');
+}
 async function auditPanel() {
   const [audit, notices] = await Promise.all([api('GET', '/api/audit'), api('GET', '/api/notices')]);
   const who = (e) => (e.actor_kind === 'staff' ? `スタッフ ${e.actor_id}` : e.actor_kind === 'member' ? `会員 ${e.actor_id}` : e.actor_kind === 'system' ? 'システム' : '');
@@ -435,7 +447,7 @@ async function auditPanel() {
     (notices.notices ?? []).length ? el('div', { class: 'banner', role: 'alert' }, el('span', { text: `送信に失敗した知らせが ${notices.notices.length} 件あります（SMS・メール）。` })) : null,
     table(['日時', '操作', '誰が', '対象', '前', '後', '理由'], audit.entries.map((e) => el('tr', {},
       el('td', { class: 'n', text: dateFmt.format(e.at) }), el('td', { text: AUDIT_TEXT[e.type] ?? e.type }), el('td', { text: who(e) }), el('td', { text: e.target }),
-      el('td', { class: 'dyn', text: e.before ?? '' }), el('td', { class: 'dyn', text: e.after ?? '' }), el('td', { class: 'dyn', text: e.reason ?? '' }))), '記録はまだありません。'),
+      el('td', { class: 'dyn', text: auditText(e.before) }), el('td', { class: 'dyn', text: auditText(e.after) }), el('td', { class: 'dyn', text: e.reason ?? '' }))), '記録はまだありません。'),
   ];
 }
 
@@ -454,6 +466,8 @@ const PANELS = {
 };
 async function show(key) {
   current = key;
+  // 開いているタブを URL に載せる（読み込み直しても、同じタブに戻る。URL を人に渡せる）
+  if (location.hash.slice(1) !== key) history.replaceState(null, '', `#${key}`);
   for (const b of $('#tabs').children) b.setAttribute('aria-selected', String(b.dataset.key === key));
   const nodes = await PANELS[key][1]();
   if (current === key) panel.replaceChildren(...nodes.filter(Boolean));
@@ -488,5 +502,5 @@ api('GET', '/api/terms').then((t) => {
   $('#toMonitor').hidden = me.role === 'operator'; // 会場の大型モニターは、会場にいるスタッフが開く
   const keys = Object.keys(PANELS).filter((k) => PANELS[k][2].includes(me.role));
   $('#tabs').replaceChildren(...keys.map((k) => el('button', { type: 'button', role: 'tab', 'data-key': k, text: PANELS[k][0], onclick: () => show(k) })));
-  show(keys[0]);
+  show(keys.includes(location.hash.slice(1)) ? location.hash.slice(1) : keys[0]);
 })();

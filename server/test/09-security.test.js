@@ -151,3 +151,18 @@ test('見つからないページは、案内のページを 404 で返す。部
     assert.equal(await part.text(), 'not found');
   } finally { await srv.stop(); cleanup(ctx); }
 });
+
+test('画面の部品は、中身が同じなら送り直さない（ETag と 304）', async () => {
+  const ctx = makeEnv();
+  const srv = await startServer(ctx);
+  try {
+    const first = await fetch(`${srv.httpUrl}/app.css`);
+    const etag = first.headers.get('etag');
+    assert.equal(first.status, 200);
+    assert.ok(etag && first.headers.get('cache-control') === 'no-cache');
+    const again = await fetch(`${srv.httpUrl}/app.css`, { headers: { 'if-none-match': etag } });
+    assert.equal(again.status, 304);
+    assert.equal((await again.text()).length, 0);
+    assert.equal((await fetch(`${srv.httpUrl}/app.css`, { headers: { 'if-none-match': '"old"' } })).status, 200);
+  } finally { await srv.stop(); cleanup(ctx); }
+});

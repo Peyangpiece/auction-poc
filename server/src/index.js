@@ -1,6 +1,7 @@
 // 入札サーバーの入口。HTTP（検証用の画面・EventBridge の受け口）と WebSocket（端末・進行コンソール・配信エージェント）。
 import http from 'node:http';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -181,9 +182,12 @@ const server = http.createServer((req, res) => {
     }
     const ext = path.extname(file);
     if (!MIME[ext]) return res.writeHead(404).end('not found'); // 画面に使う種類のファイルだけを配る
-    // 書体と画像は1日おぼえさせる。画面とスクリプトは毎回取り直す（直した内容がすぐ届く）
-    const cache = ext === '.woff2' || ext === '.webp' || ext === '.png' || ext === '.svg' ? 'public, max-age=86400' : 'no-store';
-    res.writeHead(200, { 'content-type': MIME[ext], 'cache-control': cache });
+    // 書体と画像は1日おぼえさせる。画面とスクリプトは、毎回サーバーに確かめさせる（直した内容がすぐ届く）。
+    // 中身が同じなら、本体を送り直さない（ETag と 304）。開くたびの通信量と待ち時間が減る
+    const cache = ext === '.woff2' || ext === '.webp' || ext === '.png' || ext === '.svg' ? 'public, max-age=86400' : 'no-cache';
+    const etag = `"${createHash('sha1').update(body).digest('base64url').slice(0, 20)}"`;
+    if (req.headers['if-none-match'] === etag) return res.writeHead(304, { etag, 'cache-control': cache }).end();
+    res.writeHead(200, { 'content-type': MIME[ext], 'cache-control': cache, etag });
     res.end(body);
   });
 });

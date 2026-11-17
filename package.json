@@ -17,6 +17,7 @@
     "setup": "node tools/setup-first.js",
     "demo": "node tools/setup-first.js --with-event && POC_DEV_SHOW_CODES=1 POC_TRUST_PROXY=1 POC_IVS_MODE=always-live node server/src/index.js",
     "test:ux": "node tools/e2e/measure.mjs",
+    "test:a11y": "node tools/e2e/a11y.mjs",
     "backup": "node tools/backup.js"
   },
   "dependencies": {
@@ -29,5 +30,8 @@
   },
   "optionalDependencies": {
     "@aws-sdk/client-ivs": "^3.1169.0"
+  },
+  "devDependencies": {
+    "axe-core": "^4.14.1"
   }
 }
