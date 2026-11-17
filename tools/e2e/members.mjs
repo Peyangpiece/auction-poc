@@ -225,7 +225,7 @@ try {
   await phone.waitForFunction(() => document.getElementById('bid').textContent.includes('で入札'));
   await phone.click('#bid');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('9,500'));
-  check((await phone.textContent('#premiumNote')).includes('買歩銭（落札額の10%）'), '入札画面の中にも、買歩銭がかかることを表示する');
+  check((await phone.textContent('#priceTotal')).includes('買歩銭（10%）込み ¥10,450'), '入札画面の価格の下に、買歩銭を足した金額を出す');
   check(true, '登録した会員が、参加番号で入札できる');
   await shot(phone, 'mvp-15-bid');
 

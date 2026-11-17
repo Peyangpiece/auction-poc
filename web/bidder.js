@@ -174,7 +174,7 @@ function renderComments() {
 }
 $('cmtOn').checked = store.get('poc-comments', 'on') === 'on';
 $('cmtOn').addEventListener('change', () => { store.set('poc-comments', $('cmtOn').checked ? 'on' : 'off'); renderComments(); });
-const countComment = () => { $('cmtCount').textContent = `${[...$('cmtText').value].length}／${S.cmtMax}`; };
+const countComment = () => { const n = [...$('cmtText').value].length; $('cmtCount').textContent = `${n}／${S.cmtMax}`; $('cmtCount').toggleAttribute('data-empty', n === 0); };
 $('cmtText').addEventListener('input', countComment);
 $('cmtForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -301,7 +301,7 @@ function onMessage(msg, at) {
       render();
       if (msg.lotId !== S.focus) break;
       const won = msg.status === 'sold' && msg.paddle === S.paddle;
-      say(won ? `落札しました：${yen(msg.amount)}` : '', 'ok');
+      say('', 'ok'); // 落札は、板の帯（「あなたが落札しました」）と「落札価格」で伝える。同じことを、もう1行では書かない
       $('alert').textContent = msg.status === 'sold' ? (won ? `あなたが ${yen(msg.amount)} で落札しました` : `${msg.paddle}番が ${yen(msg.amount)} で落札しました`) : '流札になりました';
       if (won) { beep(); if ('vibrate' in navigator) navigator.vibrate(300); }
       break;
@@ -410,7 +410,8 @@ if (params.has('venue')) history.replaceState(null, '', location.pathname);
 
 // 買歩銭（落札額のほかにかかる手数料）は、入札の前と、入札画面の中の両方に出す
 const premiumText = (t) => (t.premiumRate > 0 ? `落札額のほかに、買歩銭（落札額の${t.premiumRate}%）がかかります。\n` : '');
-getJson('/api/terms').then((t) => { if (t.status === 200) { $('premiumNote').textContent = premiumText(t).trim(); S.premiumRate = Number(t.premiumRate) || 0; render(); } });
+// 買歩銭は、価格の下に「込み」の金額で出す（文での説明は、参加手続きの画面にある）
+getJson('/api/terms').then((t) => { if (t.status === 200) { S.premiumRate = Number(t.premiumRate) || 0; render(); } });
 const showPaddle = (title, p) => {
   venue = p.mode === 'venue';
   const lines = [title, document.createElement('br'), venue ? '会場参加　参加番号' : '参加番号', Object.assign(document.createElement('b'), { textContent: String(p.paddle) })];

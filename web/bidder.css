@@ -30,9 +30,8 @@ body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #
 /* ライブ画面は常に 4:3（停止中も同じ大きさ）。映像は元の比率のまま収め、切り取らない */
 #videoBox { display: none; position: relative; aspect-ratio: 4 / 3; width: 100%; background: #000; border-radius: var(--r); overflow: hidden; }
 #videoBox video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
-/* 映像のない間は、真っ黒ではなく、表示板と同じ紺にして、紋章を置く（黒と紺の2つの暗い面が並ぶのを避ける） */
+/* 映像のない間は、真っ黒ではなく、表示板と同じ紺にする（黒と紺の2つの暗い面が並ぶのを避ける）。飾りは置かない */
 #break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 14px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: var(--board); color: #fff; }
-#break img { width: 72px; height: 72px; opacity: .9; }
 #break strong { font-size: 18px; font-weight: 600; }
 /* 音声の切り替え。映像の右下に置く。音は、押してから出す（ブラウザは、操作なしに音を出させない） */
 #sound { position: absolute; right: 8px; bottom: 8px; z-index: 2; min-height: 44px; padding: 6px 14px; font-size: 14px; background: rgba(0, 0, 0, .72); border-color: rgba(255, 255, 255, .6); color: #fff; }
@@ -105,11 +104,10 @@ body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #
 
 .fine { display: grid; gap: 8px; }
 /* 注意書きは、小さく薄くしすぎない */
-.fine .note, .help .note { font-size: 14px; color: var(--ink-2); line-height: 1.7; }
+.fine .note { font-size: 14px; color: var(--ink-2); line-height: 1.7; }
 .links { display: flex; gap: 4px 24px; flex-wrap: wrap; }
 .links a { color: var(--action); font-weight: 700; text-underline-offset: 4px; padding: 10px 0; }
 .links[hidden] { display: none; }
-.help summary { color: var(--ink-2); }
 #contact:empty { display: none; }
 details summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-3); min-height: 44px; display: flex; align-items: center; }
 details dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 13px; }
@@ -213,3 +211,8 @@ details dd { overflow-wrap: anywhere; }
 @media (max-width: 420px) { .board-meta .wide { display: none; } }
 /* 幅の狭い端末（320px 級）: 価格と番号を少し小さくして、価格の横に番号を収める（行が増えると、板が映像を隠す） */
 @media (max-width: 359px) { .price { font-size: 38px; } .board-meta b { font-size: 18px; } .board-meta { font-size: 12px; } }
+/* 品が出ていない間は、押すものも見るものもないので、価格・ランプ・入札ボタンを出さない（「待機中」と自分の番号だけ） */
+.board.idle .pricewrap, .board.idle .lamps, .board.idle #bid { display: none; }
+.board.idle .board-main { justify-content: flex-end; }
+/* コメントの文字数は、書き始めてから出す */
+#cmtCount[data-empty] { visibility: hidden; }

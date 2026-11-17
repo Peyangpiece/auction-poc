@@ -27,8 +27,8 @@
       <h2 class="pickhead">参加のしかたを選んでください</h2>
       <p class="note" id="pickNow"></p>
       <div class="modes">
-        <button class="mode" type="button" data-pick="online"><b>オンラインで参加</b><span>映像を見ながら、お手元の端末で入札します。お支払いは銀行振込です。</span></button>
-        <button class="mode" type="button" data-pick="venue"><b>会場で参加</b><span>会場で、お手元の端末から入札します。受付で、来場の確認を受けてください。当日現金でのお支払いも選べます。</span></button>
+        <button class="mode" type="button" data-pick="online"><b>オンラインで参加</b><span>お支払いは銀行振込</span></button>
+        <button class="mode" type="button" data-pick="venue"><b>会場で参加</b><span>受付で来場の確認が必要。当日現金も選べます</span></button>
       </div>
     </div>
     <form id="join" hidden novalidate>
@@ -78,7 +78,7 @@
 <main>
   <div id="videoBox">
     <video id="video" playsinline muted aria-label="会場のライブ映像"></video>
-    <div id="break"><img src="emblem-120.webp" width="72" height="72" alt=""><strong id="breakTitle">映像は停止中です</strong></div>
+    <div id="break"><strong id="breakTitle">映像は停止中です</strong></div>
     <button class="btn" id="sound" type="button" aria-pressed="false" hidden>音声を出す</button>
   </div>
 
@@ -113,14 +113,9 @@
 
     <div class="fine">
       <p class="note">落札価格に送料は含まれません。締めの直前の入札は、通信の遅れで間に合わないことがあります。</p>
-      <p class="note" id="premiumNote"></p>
       <p class="note" id="contact"></p>
       <p class="note" id="modeLine" hidden><span id="modeNow"></span>　<button class="textbtn" type="button" id="toVenue"></button></p>
-      <details class="help">
-        <summary>「うりきり」「権利」とは</summary>
-        <p class="note">「うりきり」が点いているときは、いまの価格で締めれば売れます（出品者が決めた最低の金額に届いています）。「権利」は、いまの最高入札者に点きます。締めのときに「うりきり」が点いていて、「権利」を持っている人が落札します。「うりきり」が点かないまま締めると、流札（売れない）になります。</p>
-      </details>
-      <p class="note links" id="siteLinks" hidden><a href="/mypage.html">マイページ</a><a href="/">トップページ</a></p>
+      <p class="note links" id="siteLinks" hidden><a href="/mypage.html">マイページ</a></p>
       <details id="devInfo" hidden>
         <summary>検証用の情報</summary>
         <label class="check"><input type="checkbox" id="showVideo"> 映像を表示する</label>
