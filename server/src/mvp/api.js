@@ -83,6 +83,10 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   for (const col of ['phase', 'resume_at']) if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = ?").get(col)) db.exec(`ALTER TABLE events ADD COLUMN ${col} TEXT`);
   if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'venue_code'").get()) db.exec('ALTER TABLE events ADD COLUMN venue_code TEXT');
   if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'highlights'").get()) db.exec("ALTER TABLE events ADD COLUMN highlights TEXT NOT NULL DEFAULT ''");
+  // 開催のお知らせメールを受け取るか（会員がマイページで切り替える。最初は受け取る）
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = 'event_mail'").get()) db.exec('ALTER TABLE member_accounts ADD COLUMN event_mail INTEGER NOT NULL DEFAULT 1');
+  // 開催のお知らせメールを送った記録（同じ開催の同じ会員に、2度送らない）
+  db.exec('CREATE TABLE IF NOT EXISTS event_mails (event_id INTEGER NOT NULL, account_id INTEGER NOT NULL, at REAL NOT NULL, PRIMARY KEY (event_id, account_id))');
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
 
   const notifier = new Notifier(
@@ -277,7 +281,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   const memberView = (m) => ({
     kind: m.kind, name: m.name, nameKana: m.name_kana, loginId: m.login_id ?? null, hasPassword: !!m.password_hash, phone: m.phone, phoneVerified: !!m.phone_verified, email: m.email, emailVerified: !!m.email_verified, address: m.address,
     postalCode: m.postal_code, prefecture: m.prefecture, address1: m.address1, address2: m.address2,
-    shipTo: m.ship_to, company: m.company, contactName: m.contact_name, billing: m.billing, suspended: !!billing.suspension(m.id), suspendedBy: billing.suspension(m.id),
+    shipTo: m.ship_to, company: m.company, contactName: m.contact_name, billing: m.billing, suspended: !!billing.suspension(m.id), suspendedBy: billing.suspension(m.id), eventMail: m.event_mail !== 0,
   });
   async function sendEmailVerification(ctx, member) {
     const token = randomToken();
@@ -403,6 +407,14 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const fresh = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(m.id);
     if (emailChanged) await sendEmailVerification(ctx, fresh); // 新しいアドレスを、確認メールで確かめ直す
     return { ok: true, member: memberView(fresh) };
+  });
+  // 開催のお知らせメールを受け取るか（本人が切り替える）
+  route('POST', '/api/my/event-mail', (ctx, body) => {
+    const m = needMember(ctx);
+    const on = body.on === true;
+    db.prepare('UPDATE member_accounts SET event_mail = ?, updated_at = ? WHERE id = ?').run(on ? 1 : 0, nowMs(), m.id);
+    audit(ctx, 'member.event_mail', { target: `member:${m.id}`, after: { on } });
+    return { ok: true, eventMail: on };
   });
   // 退会（FR-AUTH-014）。お支払いが済んでいない明細があるあいだは、退会できない。請求・取引・監査の記録は残す
   route('POST', '/api/my/withdraw', (ctx) => {
@@ -786,12 +798,81 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (!e.notified) throw new HttpError(409, '公安委員会への届出済みの印がない開催は、公開できません');
     db.prepare("UPDATE events SET status = 'published' WHERE id = ?").run(id);
     audit(ctx, 'event.publish', { target: `event:${id}`, before: { status: e.status }, after: { status: 'published' } });
+    rememberSiteUrl(ctx);
+    sendEventMails().catch((err) => console.error('[event-mail]', err)); // 前日を過ぎてから公開した開催にも、すぐ知らせる
     return { ok: true };
   });
 
   // ------------------------------------------------------------ 参加手続き（FR-MODE-005、FR-SHIP-007、FR-PAY-009、FR-NUM-001）
   /** 日本時間の、今日の日付（例: 2026-12-05） */
   const todayJst = () => new Date(nowMs() + 9 * HOUR).toISOString().slice(0, 10);
+
+  // ------------------------------------------------------------ 開催のお知らせメール（発注者の指示）
+  // 開催の前日（日本時間）から当日の開始までに、受け取ると決めている会員へ1通ずつ送る。1時間ごとの見回りと、公開の操作のときに動く。
+  // 前日にサーバーが動いていなかった場合（だれも開かず、休んでいた）は、当日の開始までに送る。開始を過ぎたら送らない。
+  // メールに載せるサイトの URL は、設定（POC_SITE_URL）か、主催者管理者が開催を公開したときのページの URL。
+  // 会員の画面からの要求の Host は使わない（他人が Host を書き換えて送ると、偽のサイトへのリンクを載せられてしまうため）。
+  function rememberSiteUrl(ctx) {
+    if (config.siteUrl || !ctx.req) return;
+    const host = (config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host;
+    if (!host || !/^[a-z0-9.-]+(:\d+)?$/i.test(host)) return;
+    const url = `${ctx.req.headers['x-forwarded-proto'] === 'https' || config.cookieSecure ? 'https' : 'http'}://${host}`;
+    if (setting('site_url') !== url) db.prepare("INSERT INTO settings (key, value) VALUES ('site_url', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(url);
+  }
+  const addDaysJst = (date, n) => new Date(Date.parse(date + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
+  const jpDate = (iso) => { const d = new Date(iso.slice(0, 10) + 'T00:00:00Z'); return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日（${'日月火水木金土'[d.getUTCDay()]}）`; };
+  function eventMailText(e, a, when) {
+    const site = config.siteUrl || setting('site_url');
+    const org = setting('org_name');
+    const highlights = String(e.highlights ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
+    const contact = [setting('org_address') && `住所: ${setting('org_address').replace(/\n/g, ' ')}`, setting('org_tel') && `電話: ${setting('org_tel')}`, setting('org_email') && `メール: ${setting('org_email')}`].filter(Boolean);
+    return [
+      `${a.kind === 'b2b' ? a.company || a.name : a.name} 様`,
+      '',
+      `${when}、「${e.title}」を開催します。`,
+      '',
+      `日時: ${jpDate(e.starts_at)} ${e.starts_at.slice(11, 16)}〜${e.ends_at.slice(11, 16)}`,
+      `会場: ${e.venue_name}（${e.venue_address}）`,
+      ...(highlights.length ? ['', '目玉の品:', ...highlights.map((h) => `・${h}`)] : []),
+      '',
+      'オンラインでも、会場でも参加できます。参加の手続きは、当日、ログインしてから行えます。',
+      ...(site ? [`${site}/`] : []),
+      '',
+      '――',
+      'このお知らせが不要な場合は、マイページの「個人情報の設定」で、受け取らない設定にできます。',
+      org, ...contact,
+    ].join('\n');
+  }
+  // 送っている途中で、もう一度呼ばれたら（見回りと公開の操作が重なったとき）、走っている方の終わりを待つ
+  let eventMailRun = null;
+  function sendEventMails() {
+    eventMailRun ??= runEventMails().finally(() => { eventMailRun = null; });
+    return eventMailRun;
+  }
+  async function runEventMails() {
+    let sent = 0;
+    const today = todayJst();
+    const nowJst = new Date(nowMs() + 9 * HOUR).toISOString().slice(0, 16);
+    const events = db.prepare("SELECT * FROM events WHERE status = 'published' AND substr(starts_at, 1, 10) BETWEEN ? AND ? AND starts_at > ? AND (phase IS NULL OR phase <> 'ended') ORDER BY starts_at").all(today, addDaysJst(today, 1), nowJst);
+    for (const e of events) {
+      const when = e.starts_at.slice(0, 10) === today ? '本日' : '明日';
+      const subject = `【令和の競り】${when} ${jpDate(e.starts_at)} 開催のお知らせ`;
+      const targets = db.prepare(`SELECT * FROM member_accounts a WHERE a.event_mail = 1 AND a.approved_at IS NOT NULL AND a.rejected_at IS NULL AND a.withdrawn_at IS NULL AND a.suspended = 0
+        AND NOT EXISTS (SELECT 1 FROM event_mails x WHERE x.event_id = ? AND x.account_id = a.id) ORDER BY a.id`).all(e.id);
+      let count = 0;
+      for (const a of targets) {
+        // 送る前に記録する（送信が失敗しても、同じ人に何度も送り直さない。失敗は、主催者管理者への知らせに残る）
+        const fresh = db.prepare('INSERT OR IGNORE INTO event_mails (event_id, account_id, at) VALUES (?, ?, ?)').run(e.id, a.id, nowMs());
+        if (!fresh.changes || !isEmail(a.email)) continue;
+        await notifier.email(a.email, 'event', subject, eventMailText(e, a, when));
+        sent++; count++;
+        // 送信サービスの速さの上限（1秒に2通ほど）に当たらないように、少しあける
+        if (config.mailIntervalMs) await new Promise((r) => setTimeout(r, config.mailIntervalMs));
+      }
+      if (count) audit({ system: true }, 'event.mail', { target: `event:${e.id}`, after: { count } });
+    }
+    return { sent };
+  }
   /**
    * いまの開催: 公開中の開催のうち、開催日が今日（日本時間）のもの【前提】。同じ日に2つあれば、開始が早いほう。
    * 開催は月に2〜3回（発注者の決定）。参加手続きと入札は、開催の当日だけ受け付ける。終了した開催（FR-EVT-003）は除く。
@@ -979,13 +1060,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return { member: p };
   }
   /** 入札してよいか。停止中の会員は SUSPENDED（FR-AUTH-009）。停止の前に受理された入札は、有効のまま */
-  // 個人（B2C）の、開催ごとの上限額（FR-AUTH-008）。主催者設定で金額を入れたときだけ判定する（金額は未決。OQ-06）
-  const limitStmts = {
-    kind: db.prepare('SELECT kind FROM member_accounts WHERE id = ?'),
-    won: db.prepare("SELECT COALESCE(SUM(b.amount), 0) AS n FROM lots l JOIN bids b ON b.seq = l.winner_bid_seq WHERE l.status = 'sold' AND l.event_id = ? AND b.member_id = ?"),
-    leading: db.prepare("SELECT COALESCE(SUM(b.amount), 0) AS n FROM lots l JOIN bids b ON b.seq = l.current_bid_seq WHERE l.status IN ('open','suspended') AND l.event_id = ? AND b.member_id = ? AND l.id <> ?"),
-  };
-  const bidGate = (m, bid = null) => {
+  const bidGate = (m) => {
     if (!m.account_id) return null; // 検証用の参加者（合言葉の URL）
     // つないだあとで開催が切り替わったら、前の開催の参加番号では入札できない（新しい開催で、参加手続きをやり直す）
     if (m.event_id !== (activeEvent()?.id ?? null)) return 'NOT_JOINED';
@@ -994,12 +1069,6 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     // つないだあとで会場参加に切り替えた人は、来場確認が済むまで入札できない（別のタブを開いたままでも）
     const now = db.prepare('SELECT mode, checked_in_at FROM members WHERE id = ?').get(m.id);
     if (now?.mode === 'venue' && !now.checked_in_at) return 'NOT_CHECKED_IN';
-    const limit = Number(setting('b2c_limit'));
-    if (bid && limit > 0 && limitStmts.kind.get(m.account_id)?.kind === 'b2c') {
-      // すでに落札した額 ＋ ほかの品で最高入札者になっている額 ＋ これから入れる額（同じ品の自分の入札は、二重に数えない）
-      const total = limitStmts.won.get(m.event_id, m.id).n + limitStmts.leading.get(m.event_id, m.id, bid.lotId).n + bid.amount;
-      if (total > limit) return 'OVER_LIMIT';
-    }
     return null;
   };
 
@@ -1010,7 +1079,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
 
   // ------------------------------------------------------------ 主催者設定（FR-ORG-001 の一部）・監査ログ・知らせ
   // 請求書・手数料に使う設定（FR-ORG-001 の一部）。未入力でも動くが、請求書には「（未設定）」と出る
-  const BILLING_KEYS = { orgAddress: ['org_address', 200], orgTel: ['org_tel', 40], orgEmail: ['org_email', 254], invoiceRegNo: ['invoice_reg_no', 20], bankAccount: ['bank_account', 200], feeMinimum: ['fee_minimum', 12], feeTaxMode: ['fee_tax_mode', 12], buyerPremiumRate: ['buyer_premium_rate', 5], b2cLimit: ['b2c_limit', 12],
+  const BILLING_KEYS = { orgAddress: ['org_address', 200], orgTel: ['org_tel', 40], orgEmail: ['org_email', 254], invoiceRegNo: ['invoice_reg_no', 20], bankAccount: ['bank_account', 200], feeMinimum: ['fee_minimum', 12], feeTaxMode: ['fee_tax_mode', 12], buyerPremiumRate: ['buyer_premium_rate', 5],
     penaltyRateB2b: ['penalty_rate_b2b', 6], penaltyRateB2c: ['penalty_rate_b2c', 6], lateRateB2b: ['late_rate_b2b', 6], lateRateB2c: ['late_rate_b2c', 6] };
   route('GET', '/api/settings', (ctx) => {
     needStaff(ctx, 'admin');
@@ -1163,7 +1232,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return p;
   }
   return {
-    handle, createStaff, inviteStaff, audit, participantFromCookie, bidGate, eventId: () => activeEvent()?.id ?? null,
+    handle, createStaff, inviteStaff, audit, participantFromCookie, bidGate, sendEventMails, eventId: () => activeEvent()?.id ?? null,
     staffFromCookie, viewerFromCookie, signedIn, memberIdFromCookie, eventState, setPhase, proxyTarget, billing,
   };
 }

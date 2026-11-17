@@ -227,6 +227,16 @@ body.app .sitefoot { border-top: 0; margin-top: 24px; }
 .menu a::after, .menu button::after { content: ''; flex: none; width: 8px; height: 8px; border-right: 2px solid var(--ink-2); border-top: 2px solid var(--ink-2); transform: rotate(45deg); margin-right: 4px; }
 .menu a:hover, .menu button:hover { color: var(--action); }
 .menu .menu__quiet { font-weight: 400; color: var(--ink-2); }
+/* 行の一覧の中の、オン・オフの切り替え（右にスイッチ） */
+.menu__switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; padding: 10px 0; cursor: pointer; font: 600 16px/1.4 var(--font); color: var(--ink); }
+.menu__switch small { display: block; margin-top: 2px; font-weight: 400; font-size: 13px; color: var(--ink-2); }
+.menu__switch input { appearance: none; flex: none; position: relative; width: 52px; height: 32px; margin: 0; border-radius: 16px; background: var(--edge); cursor: pointer; transition: background-color .2s var(--ease); }
+.menu__switch input::before { content: ''; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); transition: transform .2s var(--ease); }
+.menu__switch input:checked { background: var(--ok); }
+.menu__switch input:checked::before { transform: translateX(20px); }
+.menu__switch input:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+.menu__switch input:disabled { opacity: .6; }
+@media (prefers-reduced-motion: reduce) { .menu__switch input, .menu__switch input::before { transition: none; } }
 
 /* 請求書の状態は、札（タグ）で示す */
 .invlist__state, .invlist .warn { justify-self: start; font-size: 13px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--ground-alt); color: var(--ink-2); }
@@ -315,3 +325,13 @@ th { font-size: 12px; font-weight: 500; color: var(--ink-2); letter-spacing: .02
 .copyrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .copyrow .secret { flex: 1 1 160px; font-size: 18px; letter-spacing: .06em; }
 .copybtn { min-height: 40px; padding: 4px 12px; font-size: 13px; }
+
+/* ホーム画面に追加の案内: 左にアイコン、右に説明と手順 */
+.install { display: flex; gap: 16px; align-items: flex-start; }
+.install__icon { flex: none; width: 56px; height: 56px; border-radius: 13px; box-shadow: var(--shadow-1); }
+.install__body { min-width: 0; flex: 1; }
+.install h2 { font-size: 18px; margin: 0 0 4px; }
+.install p { margin: 0; color: var(--ink-2); }
+.install__steps { margin: 12px 0 0; padding-left: 1.4em; display: grid; gap: 6px; }
+.install .actions { margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 640px) { .install { gap: 12px; } .install__icon { width: 44px; height: 44px; border-radius: 10px; } }

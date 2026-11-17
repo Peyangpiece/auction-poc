@@ -126,6 +126,9 @@ if (recovered.length) console.log('[recovery]', JSON.stringify(recovered));
 
 // 起動のときと1時間ごとに、請求の見回りをする（落札の明細の作り漏れ、期限を過ぎた知らせ、受け取り期限の前日の知らせ）
 try { api.billing.sweep(); } catch (err) { console.error('[billing]', err); }
+// 開催のお知らせメール（前日から当日の開始まで）。送るのに時間がかかるので、待たずに進める
+const eventMails = () => api.sendEventMails().catch((err) => console.error('[event-mail]', err));
+eventMails();
 // 期限の切れた記録（ログイン・認証番号・確認のリンク）を捨てる。たまり続けて、保存のたびに送る量が増えるのを防ぐ
 function prune() {
   const now = nowMs(), day = 86400000;
@@ -136,7 +139,7 @@ function prune() {
   store.db.prepare('DELETE FROM email_tokens WHERE expires_at < ?').run(now - day);
 }
 try { prune(); } catch (err) { console.error('[prune]', err); }
-setInterval(() => { try { api.billing.sweep(); prune(); } catch (err) { console.error('[billing]', err); } }, 3600000).unref();
+setInterval(() => { try { api.billing.sweep(); prune(); } catch (err) { console.error('[billing]', err); } eventMails(); }, 3600000).unref();
 
 // ---------------------------------------------------------------- HTTP
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };

@@ -129,7 +129,7 @@ export class Auction {
     if (!lot) return 'LOT_NOT_OPEN';
     if (lot.status === 'sold' || lot.status === 'unsold') return 'AFTER_CLOSE'; // 締めの後に処理された（FR-CLS-002）
     if (lot.status !== 'open') return 'LOT_NOT_OPEN';
-    // 参加の停止（FR-AUTH-009）。参加手続き（NOT_JOINED）は、接続のときに確かめる。上限額（OVER_LIMIT）は、主催者設定に金額があるときだけ判定する
+    // 参加の停止（FR-AUTH-009）。参加手続き（NOT_JOINED）は、接続のときに確かめる。個人の上限額（OVER_LIMIT）は持たない（発注者の決定）
     const blocked = this.bidGate(item.member, item);
     if (blocked) return blocked;
     if (lot.highest_member_id === item.member.id) return 'ALREADY_HIGHEST';

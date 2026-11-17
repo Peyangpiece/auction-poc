@@ -244,3 +244,46 @@ const revealAll = (root = document) => root.querySelectorAll('input[type=passwor
 revealAll();
 // あとから出る入力欄（ダイアログの中）にも付ける
 new MutationObserver((list) => { for (const m of list) for (const n of m.addedNodes) if (n.nodeType === 1) revealAll(n); }).observe(document.body, { childList: true, subtree: true });
+
+// ---- ホーム画面に追加の案内（発注者の指示）。#installSlot のあるページ（トップ・マイページ）にだけ出す。
+// Android の Chrome などは、ブラウザが出す「インストール」の画面を、ボタンから呼ぶ。iPhone・iPad には、その仕組みが無いので、手順を出す。
+// ホーム画面から開いている間と、「閉じる」を押したあとは出さない（閉じたことは、この端末のブラウザにだけ覚える）。
+let installEvent = null;
+const INSTALL_KEY = 'installHidden';
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroid = () => /Android/.test(navigator.userAgent);
+function installHidden() { try { return localStorage.getItem(INSTALL_KEY) === '1'; } catch { return false; } }
+function hideInstall(remember) {
+  if (remember) { try { localStorage.setItem(INSTALL_KEY, '1'); } catch { /* 覚えられなくても、閉じるだけはする */ } }
+  $('#installCard')?.remove();
+}
+function showInstall() {
+  const slot = $('#installSlot');
+  if (!slot || isStandalone() || installHidden()) return;
+  const how = installEvent ? 'prompt' : isIos() ? 'ios' : isAndroid() ? 'android' : null;
+  if (!how) return; // パソコンで、ブラウザに仕組みが無いときは出さない
+  const steps = how === 'ios'
+    ? ['「共有」ボタン（四角に上向きの矢印）を押す。無ければ「…」の中', '「ホーム画面に追加」を選ぶ（一覧の下のほう）', '「追加」を押す']
+    : how === 'android' ? ['ブラウザのメニュー（右上の「︙」）を押す', '「ホーム画面に追加」か「アプリをインストール」を選ぶ'] : [];
+  const card = el('section', { class: 'install card', id: 'installCard', 'aria-labelledby': 'installTitle' },
+    el('img', { class: 'install__icon', src: 'icon-192.png', width: 56, height: 56, alt: '' }),
+    el('div', { class: 'install__body' },
+      el('h2', { id: 'installTitle', text: 'ホーム画面に追加' }),
+      el('p', { text: 'アプリのように、ホーム画面からすぐに開けます。' }),
+      steps.length ? el('ol', { class: 'install__steps' }, steps.map((text) => el('li', { text }))) : null,
+      el('div', { class: 'actions' },
+        how === 'prompt' ? el('button', { class: 'btn btn-primary', type: 'button', text: '追加する', onclick: async () => {
+          const ev = installEvent; installEvent = null;
+          if (!ev) return;
+          ev.prompt();
+          const { outcome } = await ev.userChoice.catch(() => ({ outcome: 'dismissed' }));
+          hideInstall(outcome === 'accepted');
+        } }) : null,
+        el('button', { class: 'btn', type: 'button', text: '閉じる', onclick: () => hideInstall(true) }))));
+  $('#installCard')?.remove();
+  slot.append(card);
+}
+addEventListener('beforeinstallprompt', (ev) => { ev.preventDefault(); installEvent = ev; showInstall(); });
+addEventListener('appinstalled', () => hideInstall(true));
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showInstall); else showInstall();

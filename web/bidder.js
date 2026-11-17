@@ -23,7 +23,6 @@ const REJECT = {
   // 停止の理由で、言葉を分ける（FR-BID-012）
   SUSPENDED: () => (S.unpaid ? 'お支払いの確認が取れていない請求があるため、参加が停止されています' : '参加が停止されています'),
   NOT_JOINED: () => '参加手続きを済ませてください',
-  OVER_LIMIT: () => '上限額を超えるため入札できません',
   NOT_CHECKED_IN: () => '受付で、来場の確認を受けてください',
 };
 function say(text, kind = '') { $('msg').textContent = text; $('msg').dataset.kind = kind; }
@@ -337,7 +336,8 @@ function onMessage(msg, at) {
       const won = msg.status === 'sold' && msg.paddle === S.paddle;
       say('', 'ok'); // 落札は、板の帯（「あなたが落札しました」）と「落札価格」で伝える。同じことを、もう1行では書かない
       $('alert').textContent = msg.status === 'sold' ? (won ? `あなたが ${yen(msg.amount)} で落札しました` : `${msg.paddle}番が ${yen(msg.amount)} で落札しました`) : '流札になりました';
-      if (won) { beep(); if ('vibrate' in navigator) navigator.vibrate(300); }
+      if (msg.status === 'sold' && !won) stampSold(msg.paddle); // 自分の落札は、全画面の札に印があるので、板には押さない
+      if (won) { celebrateWin(msg); if ('vibrate' in navigator) navigator.vibrate([80, 60, 80, 60, 240]); }
       break;
     }
     case 'bid_void': { // 代理入札の取り消し: その入札に取り消し線を引き、品を1つ前の状態に戻す（権利表示も戻る）
@@ -370,6 +370,182 @@ function notifyOutbid(msg) {
   $('alert').textContent = `上回られました。${msg.paddle}番が ${yen(msg.amount)}。次の入札額は ${yen(msg.minBid)}`;
   document.title = `上回られました｜${yen(msg.amount)}`;
   link.event('outbid_notify', { seq: msg.seq, audio, vibrated, hidden: document.hidden, wake: $('wake').textContent });
+}
+
+// ---- 入札と落札の演出（発注者の指示）
+// After Effects のモーションデザインの手法を、ブラウザの Web Animations で組み立てる（AE そのものは、この画面では動かせないため）。
+//   予備動作（動く前の小さな逆の動き）→ 着地（行き過ぎ）→ 慣性の揺り戻し（AE の「inertial bounce」の式）→ 遅れて付いてくる動き（影・輪・揺れ）
+//   入るときは減速（ease-out）、出るときは加速（ease-in）。同時に動くものは時間差をつける。
+// 参考: motion-design-skills（iart-ai）の after-effects・animation-principles。読み上げは、これまでどおり #alert と #msg が受け持つ。
+// 「動きを減らす」設定では、動かさずに、印と札を少しのあいだ出すだけにする。
+const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const EASE = { out: 'cubic-bezier(0.16, 1, 0.3, 1)', in: 'cubic-bezier(0.7, 0, 0.84, 0)', inOut: 'cubic-bezier(0.65, 0, 0.35, 1)', pop: 'cubic-bezier(0.34, 1.56, 0.64, 1)' };
+const restart = (node, cls) => { node.classList.remove(cls); void node.offsetWidth; node.classList.add(cls); };
+/**
+ * AE の慣性の揺り戻し（value + v·amp·sin(2π·freq·t) / e^(decay·t)）を、キーフレームの列にする。
+ * at〜at+ms の区間に、n 個の点を置く。make(値) が、その点のキーフレーム（transform など）を返す。
+ */
+function inertial({ at, ms, total, base, v, amp, freq, decay, n = 14, make }) {
+  return Array.from({ length: n }, (_, i) => {
+    const t = ((i + 1) / n) * (ms / 1000);
+    const x = base + (v * amp * Math.sin(freq * t * 2 * Math.PI)) / Math.exp(decay * t);
+    return { offset: (at + (ms * (i + 1)) / n) / total, easing: 'linear', ...make(i === n - 1 ? base : x) };
+  });
+}
+const play = (node, frames, ms, opts = {}) => (node.animate ? node.animate(frames, { duration: ms, fill: 'both', ...opts }) : null);
+// 短い音。鳴らせる状態（入場のときに音の許可が取れている）のときだけ。delay は秒（着地の瞬間に合わせる）
+function tone(freqs, { gap = 0.09, len = 0.12, vol = 0.25, delay = 0, type = 'triangle' } = {}) {
+  if (!audioCtx || audioCtx.state !== 'running') return;
+  const t = audioCtx.currentTime + delay;
+  freqs.forEach((f, i) => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type; o.frequency.value = f; o.connect(g); g.connect(audioCtx.destination);
+    g.gain.setValueAtTime(0.0001, t + i * gap); g.gain.exponentialRampToValueAtTime(vol, t + i * gap + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + i * gap + len);
+    o.start(t + i * gap); o.stop(t + i * gap + len + 0.02);
+  });
+}
+
+// 自分の入札が受理されたとき（0.9 秒）: 価格が沈んで弾み、揺り戻して止まる。金の輪と光が、少し遅れて付いてくる。ボタンに金の面が満ちて引く
+function bidPop(amount) {
+  if ('vibrate' in navigator) navigator.vibrate(18);
+  tone([1047, 1568], { gap: 0.06, len: 0.11, vol: 0.16, delay: 0.17 });
+  if (calm()) return;
+  const T = 640, sc = (k) => ({ transform: `scale(${k.toFixed(4)})` });
+  play($('price'), [
+    { offset: 0, ...sc(1) },
+    { offset: 70 / T, easing: EASE.out, ...sc(0.965) },                        // 予備動作: わずかに沈む
+    { offset: 190 / T, easing: EASE.in, ...sc(1.075) },                        // 着地: 行き過ぎる
+    ...inertial({ at: 190, ms: 450, total: T, base: 1, v: 0.9, amp: 0.085, freq: 2.6, decay: 7, make: sc }), // 揺り戻して止まる
+  ], T);
+  restart($('board'), 'bidpop');                                               // 金の輪と、価格の上を走る光（CSS。40ms 遅れて始まる）
+  // ボタン: 金の面が左から満ちて、すっと引く（押したことへの返事。文字の上には重ねない）
+  const bid = $('bid');
+  restart(bid, 'sent'); // CSS（#bid.sent::before）
+  clearTimeout(bidPop.timer); bidPop.timer = setTimeout(() => { $('board').classList.remove('bidpop'); bid.classList.remove('sent'); }, 950);
+}
+
+// 品が落札になったとき（だれの落札でも。1.8 秒）: 朱の印が上から落ちて押され、板が衝撃で揺れ、墨の輪が広がる
+function stampSold(paddle) {
+  const st = $('stamp');
+  st.dataset.who = paddle === S.paddle ? 'あなた' : `${paddle}番`; // 文字は CSS で描く（飾りなので、読み上げとコントラストの検査の対象にしない）
+  st.getAnimations?.().forEach((a) => a.cancel());
+  if (calm()) { st.classList.add('on'); clearTimeout(stampSold.timer); stampSold.timer = setTimeout(() => st.classList.remove('on'), 1800); return; }
+  st.classList.remove('on');
+  const T = 1800, IMPACT = 150;
+  const s = (k, r = -12) => ({ transform: `rotate(${r}deg) scale(${k.toFixed(4)})` });
+  play(st, [
+    { offset: 0, opacity: 0, ...s(2.3, -20), easing: EASE.in },               // 上から、加速して落ちる
+    { offset: IMPACT / T, opacity: 1, ...s(0.86) },                            // 押した瞬間に、つぶれる
+    ...inertial({ at: IMPACT, ms: 380, total: T, base: 1, v: 1.6, amp: 0.07, freq: 2.2, decay: 8, n: 10, make: (k) => ({ opacity: 1, ...s(k) }) }),
+    { offset: 1500 / T, opacity: 1, ...s(1), easing: EASE.in },
+    { offset: 1, opacity: 0, ...s(1.04) },
+  ], T);
+  restart(st, 'ink');                                                          // 墨の輪（CSS。押した瞬間から広がる）
+  const ty = (y) => ({ transform: `translateY(${y.toFixed(2)}px)` });
+  play($('board'), [{ offset: 0, ...ty(0) }, { offset: IMPACT / 560, ...ty(0) },
+    ...inertial({ at: IMPACT, ms: 410, total: 560, base: 0, v: 60, amp: 0.06, freq: 4, decay: 9, n: 12, make: ty })], 560, { fill: 'none' });
+  tone([196, 147], { gap: 0.03, len: 0.16, vol: 0.22, delay: IMPACT / 1000, type: 'sine' });
+  clearTimeout(stampSold.timer); stampSold.timer = setTimeout(() => st.classList.remove('ink'), T);
+}
+
+// 自分が落札したとき（3 秒。操作はじゃましない）:
+//   0.00s 地が暗くなり、札が下から入る → 0.42s 朱の印が落ちて押される（札が揺れ、金の光の筋と紙吹雪が、押した点から出る）
+//   → 0.52s 品名、0.58s 金額が時間差で入り、金額は数え上がる → 2.75s 加速して消える
+function celebrateWin(msg) {
+  const lot = S.lots.get(msg.lotId);
+  const box = $('winFx'), card = box.querySelector('.wincard'), seal = box.querySelector('.seal');
+  $('winTitle').textContent = lot ? `No.${lot.lotNo} ${lot.title}` : '';
+  $('winPrice').textContent = yen(msg.amount);
+  box.hidden = false;
+  for (const n of [box, card, seal, $('winTitle'), $('winPrice')]) n.getAnimations?.().forEach((a) => a.cancel());
+  const T = 3000, IMPACT = 420;
+  tone([523, 659, 784, 1047], { gap: 0.1, len: 0.32, vol: 0.2, delay: IMPACT / 1000 });
+  clearTimeout(celebrateWin.timer); celebrateWin.timer = setTimeout(() => { box.hidden = true; }, T + 50);
+  if (calm()) { play(box, [{ opacity: 1 }, { opacity: 1, offset: 0.92 }, { opacity: 0 }], T, { easing: 'steps(1, end)' }); return; }
+  play(box, [{ offset: 0, backgroundColor: 'rgba(0, 1, 30, 0)' }, { offset: 0.1, backgroundColor: 'rgba(0, 1, 30, .42)' },
+    { offset: 0.88, backgroundColor: 'rgba(0, 1, 30, .42)', easing: EASE.in }, { offset: 1, backgroundColor: 'rgba(0, 1, 30, 0)' }], T);
+  const c = (y, k, o = 1) => ({ opacity: o, transform: `translateY(${y.toFixed(2)}px) scale(${k.toFixed(4)})` });
+  play(card, [
+    { offset: 0, ...c(36, 0.9, 0), easing: EASE.out },
+    { offset: 380 / T, ...c(0, 1) },
+    { offset: IMPACT / T, ...c(0, 1) },
+    ...inertial({ at: IMPACT, ms: 420, total: T, base: 0, v: 90, amp: 0.05, freq: 3.2, decay: 8, n: 12, make: (y) => c(y, 1) }), // 印の衝撃で、札が揺れる
+    { offset: 2750 / T, ...c(0, 1), easing: EASE.in },
+    { offset: 1, ...c(-14, 0.97, 0) },
+  ], T);
+  const s = (k, r = -10, o = 1) => ({ opacity: o, transform: `rotate(${r}deg) scale(${k.toFixed(4)})` });
+  play(seal, [
+    { offset: 0, ...s(2.6, -22, 0) },
+    { offset: 260 / T, ...s(2.6, -22, 0), easing: EASE.in },
+    { offset: IMPACT / T, ...s(0.84) },
+    ...inertial({ at: IMPACT, ms: 420, total: T, base: 1, v: 1.8, amp: 0.07, freq: 2.4, decay: 8, n: 12, make: (k) => s(k) }),
+    { offset: 1, ...s(1) },
+  ], T);
+  const rise = (node, at) => play(node, [{ offset: 0, opacity: 0, transform: 'translateY(10px)' }, { offset: at / T, opacity: 0, transform: 'translateY(10px)', easing: EASE.out },
+    { offset: (at + 420) / T, opacity: 1, transform: 'translateY(0)' }, { offset: 1, opacity: 1, transform: 'translateY(0)' }], T);
+  rise($('winTitle'), 520); rise($('winPrice'), 580);
+  countUp($('winPrice'), msg.amount, 580, 760);
+  setTimeout(() => {                                                          // 押した点（印の中心）から、光の筋と紙吹雪
+    const r = seal.getBoundingClientRect();
+    confetti($('winCanvas'), { x: r.left + r.width / 2, y: r.top + r.height / 2 }, T - IMPACT - 150);
+  }, IMPACT);
+}
+// 金額を数え上げる（減速しながら、最後の桁で止まる）
+function countUp(node, amount, delay, ms) {
+  const start = performance.now() + delay;
+  cancelAnimationFrame(countUp.raf);
+  const step = (now) => {
+    const t = Math.min(1, Math.max(0, (now - start) / ms));
+    node.textContent = yen(t >= 1 ? amount : Math.round(amount * (1 - Math.pow(1 - t, 4))));
+    if (t < 1) countUp.raf = requestAnimationFrame(step);
+  };
+  countUp.raf = requestAnimationFrame(step);
+}
+// 光の筋と紙吹雪（紺・金・朱・白）。押した点から放射状に飛び、空気の抵抗で減速し、ひらひら落ちる。外の部品は使わない
+function confetti(canvas, origin, ms) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const colors = ['#d4aa00', '#f2d24b', '#ff4a3d', '#ffffff', '#3a3fb8', '#d4aa00'];
+  const n = Math.min(180, Math.max(90, Math.round(w / 2.4)));
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const bits = Array.from({ length: n }, (_, i) => {
+    const ang = rand(-Math.PI, 0) + rand(-0.35, 0.35), speed = rand(5, 15) * Math.min(1.4, Math.max(0.8, w / 600));
+    return { x: origin.x, y: origin.y, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed - rand(1, 4), r: rand(0, 6.28), vr: rand(-0.25, 0.25),
+      flip: rand(0, 6.28), vf: rand(0.12, 0.3), s: rand(5, 11), c: colors[i % colors.length], round: i % 7 === 0, delay: rand(0, 90) };
+  });
+  const rays = Array.from({ length: 14 }, (_, i) => ({ a: (i / 14) * Math.PI * 2 + rand(-0.08, 0.08), len: rand(0.7, 1.15) }));
+  const start = performance.now();
+  cancelAnimationFrame(confetti.raf);
+  const step = (now) => {
+    const t = now - start;
+    ctx.clearRect(0, 0, w, h);
+    // 光の筋: 押した瞬間に伸びて、0.5 秒で消える（ease-out で伸び、ease-in で消える）
+    if (t < 520) {
+      const p = t / 520, grow = 1 - Math.pow(1 - Math.min(1, p * 1.6), 3), fade = 1 - p * p;
+      const R = Math.min(w, h) * 0.42;
+      ctx.save(); ctx.translate(origin.x, origin.y); ctx.globalAlpha = 0.55 * fade; ctx.strokeStyle = '#f2d24b'; ctx.lineCap = 'round';
+      for (const ray of rays) {
+        const r0 = 46 + R * 0.25 * grow, r1 = 46 + R * ray.len * grow;
+        ctx.lineWidth = 3 * fade + 1; ctx.beginPath(); ctx.moveTo(Math.cos(ray.a) * r0, Math.sin(ray.a) * r0); ctx.lineTo(Math.cos(ray.a) * r1, Math.sin(ray.a) * r1); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    ctx.globalAlpha = t > ms - 500 ? Math.max(0, (ms - t) / 500) : 1;
+    for (const b of bits) {
+      if (t < b.delay) continue;
+      b.vx *= 0.965; b.vy = b.vy * 0.965 + 0.38; b.vy = Math.min(b.vy, 3.2);       // 空気の抵抗と重力。落ちる速さには上限（紙がひらひら落ちる）
+      b.x += b.vx + Math.sin((t + b.s * 80) / 240) * 0.9; b.y += b.vy; b.r += b.vr; b.flip += b.vf;
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.r);
+      ctx.fillStyle = b.c;
+      if (b.round) { ctx.beginPath(); ctx.arc(0, 0, b.s / 3, 0, 6.28); ctx.fill(); }
+      else { ctx.scale(1, Math.cos(b.flip)); ctx.fillRect(-b.s / 2, -b.s / 4, b.s, b.s / 2); }  // 裏返りながら回る（紙の厚みのない回転）
+      ctx.restore();
+    }
+    if (t < ms) confetti.raf = requestAnimationFrame(step); else ctx.clearRect(0, 0, w, h);
+  };
+  confetti.raf = requestAnimationFrame(step);
 }
 
 // ---- 入札金額の入力欄
@@ -429,7 +605,7 @@ $('bidForm').addEventListener('submit', async (ev) => {
   // 受理されたときは、ボタンが「あなたが最高入札者です」に変わるので、同じことを重ねて言わない（読み上げには伝える）
   say(res.accepted ? '' : (REJECT[res.code]?.(res) ?? res.code), res.accepted ? 'ok' : 'ng');
   Object.assign(lot, { currentPrice: res.currentPrice, minBid: res.minBid });
-  if (res.accepted) { lot.highestPaddle = S.paddle; S.amountTouched = false; }
+  if (res.accepted) { lot.highestPaddle = S.paddle; S.amountTouched = false; bidPop(amount); }
   if (typeof res.urikiri === 'boolean') lot.urikiri = res.urikiri;
   render();
   // ボタンを押してから、受理・拒否が画面に出るまで（P3-7）

@@ -514,29 +514,15 @@ test('受付で、参加手続きを代わりに行う（会場参加・来場�
   } finally { await t.close(); }
 });
 
-test('個人の上限額（FR-AUTH-008）: 落札済み＋ほかの品で最高の額＋これから入れる額が、上限を超えると OVER_LIMIT', async () => {
+test('個人の上限額は持たない（発注者の決定）: 設定に送っても保存されず、入札は止まらない', async () => {
   const t = await setup();
   try {
     const a = await t.member(1);
-    const lot1 = t.sold('飯ごう', [[a, 6000]]);                        // 落札済み 6,000円
+    t.sold('飯ごう', [[a, 6000]]);
     const m = t.store.db.prepare('SELECT id, account_id, event_id FROM members WHERE id = ?').get(a.pid);
-    const open = (title, bids) => {
-      const id = t.store.db.prepare("INSERT INTO lots (lot_no, event_id, title, start_price, status, updated_at) VALUES ((SELECT MAX(lot_no) + 1 FROM lots), ?, ?, 1000, 'open', 0)").run(t.eventId, title).lastInsertRowid;
-      for (const amount of bids) {
-        const seq = t.store.db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM bids').get().n;
-        t.store.db.prepare("INSERT INTO bids (seq, lot_id, member_id, amount, received_at, result) VALUES (?,?,?,?,0,'ACCEPTED')").run(seq, id, a.pid, amount);
-        t.store.db.prepare('UPDATE lots SET current_bid_seq = ? WHERE id = ?').run(seq, id);
-      }
-      return Number(id);
-    };
-    const lot2 = open('寝袋', [3000]);                                  // ほかの品で最高 3,000円
-    const lot3 = open('水筒', []);
-    assert.equal(t.api.bidGate(m, { lotId: lot3, amount: 5000 }), null, '上限額が設定されていなければ、判定しない');
-    await t.admin.post('/api/settings', { orgName: '株式会社レイワ', returnPolicy: '仮', shippingNotice: '仮', b2cLimit: '10000' });
-    assert.equal(t.api.bidGate(m, { lotId: lot3, amount: 1000 }), null, '6,000＋3,000＋1,000 = 10,000 は、上限ちょうどなので通る');
-    assert.equal(t.api.bidGate(m, { lotId: lot3, amount: 1500 }), 'OVER_LIMIT');
-    assert.equal(t.api.bidGate(m, { lotId: lot2, amount: 4000 }), null, '同じ品の自分の入札は、二重に数えない（6,000＋4,000）');
-    assert.ok(lot1);
+    await t.admin.post('/api/settings', { orgName: '株式会社レイワ', returnPolicy: '仮', shippingNotice: '仮', b2cLimit: '1000' });
+    assert.equal((await t.admin.get('/api/settings')).json.b2cLimit, undefined);
+    assert.equal(t.api.bidGate(m, { lotId: 999, amount: 1_000_000 }), null);
   } finally { await t.close(); }
 });
 

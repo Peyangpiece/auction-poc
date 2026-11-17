@@ -63,6 +63,11 @@
   <p class="error" id="venueDlgMsg" role="alert"></p>
   <div class="actions"><button class="btn" type="button" id="venueNo">やめる</button><button class="btn btn-primary" type="button" id="venueYes">切り替える</button></div>
 </dialog>
+<!-- 落札の演出（自分が落札したとき）。読み上げは #alert が受け持つので、ここは目で見るだけ -->
+<div class="winfx" id="winFx" aria-hidden="true" hidden>
+  <canvas id="winCanvas"></canvas>
+  <div class="wincard"><span class="seal">落札</span><b class="dyn" id="winTitle"></b><span class="digits winprice" id="winPrice"></span></div>
+</div>
 <div class="overlay" id="overlay" role="alert"><div><span id="overlayText">再接続中…</span></div></div>
 
 <header class="brandbar">
@@ -102,6 +107,7 @@
         </div>
       </div>
       <p class="board-result" id="result" role="status"></p>
+      <span class="stamp" id="stamp" aria-hidden="true"></span>
       <a class="btn paylink" id="toPay" href="/mypage.html" hidden>お支払いの確認へ</a>
       <div class="lamps">
         <div class="lamp" id="urikiri" role="img"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub"></small></div>

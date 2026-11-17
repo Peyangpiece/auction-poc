@@ -12,7 +12,7 @@
     "test": "node --test --test-concurrency=1 \"server/test/*.test.js\"",
     "load": "node tools/load.js",
     "aggregate": "node tools/aggregate.js",
-    "test:e2e": "node tools/e2e/walkthrough.mjs && node tools/e2e/members.mjs",
+    "test:e2e": "node tools/e2e/walkthrough.mjs && node tools/e2e/members.mjs && node tools/e2e/effects.mjs",
     "create-admin": "node tools/create-admin.js",
     "setup": "node tools/setup-first.js",
     "demo": "node tools/setup-first.js --with-event && POC_DEV_SHOW_CODES=1 POC_TRUST_PROXY=1 POC_IVS_MODE=always-live node server/src/index.js",

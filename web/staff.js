@@ -437,8 +437,7 @@ async function settingsPanel() {
     sealBox(),
     el('h2', { class: 'subhead', text: '買歩銭' }),
     field('買歩銭の割合（%）', 'buyerPremiumRate', { value: s.buyerPremiumRate, inputMode: 'numeric' }, '落札者が、落札額に上乗せして払う手数料。変えても、すでに落札した品の金額は変わりません'),
-    el('h2', { class: 'subhead', text: '個人の上限額・違約金' }),
-    field('個人（B2C）の、開催ごとの上限額（円）', 'b2cLimit', { value: s.b2cLimit, inputMode: 'numeric' }, '空なら、上限なし。落札済み＋最高入札中＋これから入れる額が超えると、入札できません'),
+    el('h2', { class: 'subhead', text: '違約金・遅延損害金' }),
     el('div', { class: 'grid2' },
       field('解除の違約金（法人。落札額の %）', 'penaltyRateB2b', { value: s.penaltyRateB2b, inputMode: 'decimal' }),
       field('解除の違約金（個人。落札額の %）', 'penaltyRateB2c', { value: s.penaltyRateB2c, inputMode: 'decimal' }),
@@ -471,7 +470,7 @@ const AUDIT_TEXT = {
   'billing.cancel': '落札を解除', 'billing.penalty': '違約金を請求', 'billing.refund': '返金', 'billing.offer': '繰り上げを案内', 'billing.dun': '督促', 'billing.memo': 'メモを変更', 'billing.receive': '受け取り方法を変更',
   'billing.shipping': '送料を入力', 'billing.shipping_export': '配送の一覧を書き出し', 'billing.ledger_export': '帳簿用の記録を書き出し',
   'invoice.issue_on_end': '請求書を発行', 'invoice.sent': '請求書を送付済みに', 'invoice.unsent': '送付済みを取り消し', 'offer.accept': '繰り上げを承諾', 'offer.decline': '繰り上げを辞退',
-  'fee.confirm': '手数料の明細を確認', 'settings.update': '設定を変更', 'settings.legal': '規約を変更', 'settings.seal': '印鑑の画像を変更', 'sms.limit_reset': 'SMS の制限を解除',
+  'fee.confirm': '手数料の明細を確認', 'settings.update': '設定を変更', 'event.mail': '開催のお知らせメールを送信', 'member.event_mail': '開催のお知らせメールの受け取りを変更', 'settings.legal': '規約を変更', 'settings.seal': '印鑑の画像を変更', 'sms.limit_reset': 'SMS の制限を解除',
 };
 // 記録の「前」「後」（機械向けの形）を、読める言葉にする
 const AUDIT_KEY = { mode: '参加', payment: '支払', receive: '受け取り', checkedIn: '来場確認', paddle: '参加番号', kind: '区分', fields: '変えた項目', loginId: 'ログイン ID', role: '役割', by: '登録元', amount: '金額', title: '名前', status: '状態', reason: '理由', memo: 'メモ', shipping: '送料', dueDate: '期限', number: '請求番号' };

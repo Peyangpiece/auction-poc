@@ -83,6 +83,10 @@ export function loadConfig(env = process.env) {
     devShowCodes: env.POC_DEV_SHOW_CODES === '1',
     // メールの送信の取り次ぎ先（POST <ここ>/send に { to, subject, text }）。空なら、送らずに data/outbox に書き出すだけ（開発用）
     mailUrl: (env.POC_MAIL_URL || '').replace(/\/$/, ''),
+    // メールの間をあける時間（ミリ秒）。開催のお知らせのように、たくさんの会員へ続けて送るときに使う（送信サービスの速さの上限に当たらないように）
+    mailIntervalMs: num(env.POC_MAIL_INTERVAL_MS, 600),
+    // メールに載せるサイトの URL（例: https://seri.example.co.jp）。空なら、主催者管理者が開催を公開したときのページの URL を使う
+    siteUrl: (env.POC_SITE_URL || '').replace(/\/$/, ''),
     // 合言葉（検証用のトークン）での入札画面・進行コンソールへの接続を許すか。本番では 0（ログインだけで入る）
     tokenLogin: env.POC_TOKEN_LOGIN !== '0',
     // SMS（電話番号への認証番号）を使うか。0 なら、会員登録と「パスワードを忘れた方」は、メールアドレスだけ（発注者の決定: 本番では SMS を使わない）

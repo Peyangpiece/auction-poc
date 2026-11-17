@@ -40,8 +40,19 @@ const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.s
     ['住所', m.address], ['配送先', m.shipTo], ['請求先', m.billing],
   ];
   profile = m;
+  $('#eventMail').checked = m.eventMail;
   $('#facts').replaceChildren(...rows.filter(([, v]) => v).flatMap(([k, v]) => [el('dt', { text: k }), el('dd', { class: 'pre dyn', text: v })]));
 })();
+
+// 開催のお知らせメールの受け取り。切り替えたら、すぐ保存する（失敗したら、元に戻す）
+$('#eventMail').addEventListener('change', async (ev) => {
+  const box = ev.target;
+  box.disabled = true;
+  const res = await api('POST', '/api/my/event-mail', { on: box.checked });
+  box.disabled = false;
+  if (!res.ok) { box.checked = !box.checked; $('#accountMsg').textContent = res.message; return; }
+  $('#notice').textContent = res.eventMail ? '開催のお知らせメールを、お送りします。' : '開催のお知らせメールを、止めました。';
+});
 
 $('#resendEmail').addEventListener('click', async (ev) => {
   ev.target.disabled = true;

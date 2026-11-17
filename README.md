@@ -122,6 +122,8 @@ node tools/aggregate.js --label P2-6
 | `POC_MAX_CONNECTIONS` / `POC_MAX_CONNECTIONS_PER_USER` | 500 / 5 | 同時接続の上限（全体／同じ人） |
 | `POC_ALLOWED_ORIGINS` | — | 別のドメインのページから接続させるとき、そのオリジンをカンマ区切りで |
 | `POC_CSP` | on | ブラウザに守らせる読み込みの制限。off で外す |
+| `POC_SITE_URL` | — | メールに載せるサイトの URL。空なら、主催者管理者が開催を公開したときのページの URL |
+| `POC_MAIL_INTERVAL_MS` | 600 | 開催のお知らせメールを続けて送るときの間隔（送信サービスの速さの上限に当たらないように） |
 | `POC_ALLOW_CRASH` | 0 | 1 で障害の模擬（強制終了）を許す。本番では必ず 0 |
 
 秘密情報（IVS のストリームキー、obs-websocket のパスワード、AWS の認証情報、各トークン）は、ソースコードにもこのリポジトリにも書いていません。
