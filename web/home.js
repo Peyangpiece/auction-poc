@@ -79,6 +79,8 @@ $('#calNext').addEventListener('click', () => move(1));
   shown = { y, m };
   drawCalendar();
   $('#lead').hidden = !!(me.member || me.staff);
+  // 会員には、いちばん最近に終わった開催で、何をいくらで落札したかの一覧を出す
+  if (me.member) showWins(await api('GET', '/api/my/wins'));
   if (terms.ok) {
     // 落札額のほかにかかる費用は、入札の前に分かるように出す
     if (terms.premiumRate > 0) { $('#premium').textContent = `落札額のほかに、買歩銭（落札額の${terms.premiumRate}%）がかかります。`; $('#premiumBox').hidden = false; }
@@ -87,3 +89,17 @@ $('#calNext').addEventListener('click', () => move(1));
     $('#terms').hidden = false;
   }
 })();
+
+// ---- 落札の結果（開催が終わったあと）
+function showWins(res) {
+  if (!res.ok || !res.event || !res.lines.length) return;
+  const [, mo, d] = res.event.date.split('-').map(Number);
+  $('#winsTitle').textContent = `${mo}月${d}日の落札結果`;
+  $('#winsRows').replaceChildren(...res.lines.map((l) => el('tr', {},
+    el('td', { text: l.label }), el('td', { class: 'n digits', text: yen(l.amount) }), el('td', { class: 'n digits', text: yen(l.premium) }), el('td', { class: 'n digits', text: yen(l.payable) }))));
+  $('#winsCount').textContent = `合計（${res.lines.length}点）`;
+  $('#winsAmount').textContent = yen(res.total.amount);
+  $('#winsPremium').textContent = yen(res.total.premium);
+  $('#winsPayable').textContent = yen(res.total.payable);
+  $('#wins').hidden = false;
+}

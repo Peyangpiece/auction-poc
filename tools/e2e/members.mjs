@@ -355,6 +355,11 @@ try {
   const mine = await guest.textContent('#myLines');
   check(mine.includes('¥11,000') && mine.includes('買歩銭 ¥1,000'), 'マイページに、買歩銭を含めた金額と内訳が出る');
   check(mine.includes('防水シート') && mine.includes('お渡し済み') && mine.includes('（PDF）'), '落札者のマイページに、品・状態・請求書が出る');
+  const invs = await guest.textContent('#invoices');
+  check(/\d{8}-0001/.test(invs) && invs.includes('¥11,000') && invs.includes('お支払い済み') && invs.includes('請求書を開く'), 'マイページの「請求書」に、請求番号・金額・状態と、PDF を開くボタンが出る');
+  await guest.click('[data-tab=profile]');
+  check(await guest.isVisible('#facts') && await guest.isHidden('#invoices'), '「個人情報の設定」のタブに切り替えられる');
+  await guest.click('[data-tab=bills]');
   await shot(guest, 'mvp-26-mypage-billing', { fullPage: true });
   await guest.goto(sys.base + '/bidder.html');
   await guest.waitForSelector('#modePick:not([hidden])');
@@ -384,6 +389,12 @@ try {
   const after = await open('/');
   await after.waitForSelector('#calBody td');
   check(await after.isHidden('#today'), '終了した開催は、トップページの「本日開催」に出ない');
+  check(await after.isHidden('#wins'), 'ログインしていない人には、落札の結果を出さない');
+  await guest.goto(sys.base + '/');
+  await guest.waitForSelector('#wins:not([hidden])');
+  const wins = await guest.textContent('#wins');
+  check(wins.includes('落札結果') && wins.includes('防水シート') && wins.includes('¥10,000') && wins.includes('¥1,000') && wins.includes('¥11,000') && wins.includes('合計（1点）'), '開催が終わると、トップページに、何をいくらで落札したかの一覧が出る');
+  await shot(guest, 'mvp-27-home-wins', { fullPage: true });
 
   // 会員の停止と、記録
   await admin.click('#tabs [data-key=members]');
@@ -416,6 +427,7 @@ try {
   check(true, '利用規約を入れると、会員登録に同意の欄が出る');
   // 退会していない方の会員（会場 花子）が、登録内容を変える
   await guest.goto(sys.base + '/mypage.html');
+  await guest.click('[data-tab=profile]');
   await guest.waitForSelector('#facts dd');
   await guest.click('#editBtn');
   await guest.fill('#dlg [name=address1]', '川口市本町7-8-9');

@@ -181,3 +181,18 @@ td .note { font-size: 12px; }
 .check a { color: var(--action); font-weight: 700; text-underline-offset: 4px; }
 .legaldoc { margin-bottom: 48px; scroll-margin-top: 16px; }
 .legaldoc h2 { font-size: 20px; color: var(--ink); margin-bottom: 12px; }
+
+/* ---- トップページ: 落札の結果（開催が終わったあと） */
+.wins { margin-bottom: 40px; display: grid; gap: 12px; }
+.wins h2 { font-size: 20px; letter-spacing: .08em; color: var(--ink); }
+.wins td.n, .wins th.n { text-align: right; }
+.wins tfoot th, .wins tfoot td { border-top: 2px solid var(--ink); border-bottom: 0; padding-top: 12px; font-weight: 700; color: var(--ink); font-size: 14px; letter-spacing: 0; }
+.wins tfoot .total { font-size: 20px; }
+/* ---- マイページ: 請求書の一覧 */
+.invlist > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 16px 0; align-items: center; }
+.invlist__main { display: grid; gap: 2px; }
+.invlist__main b { font-size: 17px; }
+.invlist__total { font-size: 20px; font-weight: 600; text-align: right; }
+.invlist__state { color: var(--ink-2); font-size: 14px; }
+.invlist .warn { font-size: 14px; }
+.invlist .btn { justify-self: end; min-height: 44px; padding: 6px 16px; font-size: 14px; text-decoration: none; display: inline-flex; align-items: center; }

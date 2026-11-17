@@ -44,6 +44,16 @@
   <a class="btn btn-lg today__go" href="/bidder.html">参加する</a>
 </section>
 
+<section class="wins" id="wins" hidden aria-labelledby="winsTitle">
+  <h2 id="winsTitle"></h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th scope="col">品</th><th scope="col" class="n">落札額</th><th scope="col" class="n">買歩銭</th><th scope="col" class="n">お支払い額</th></tr></thead>
+    <tbody class="dyn" id="winsRows"></tbody>
+    <tfoot><tr><th scope="row" id="winsCount"></th><td class="n digits" id="winsAmount"></td><td class="n digits" id="winsPremium"></td><td class="n digits total" id="winsPayable"></td></tr></tfoot>
+  </table></div>
+  <p class="note">送料は含みません。請求書は、マイページでご覧になれます。</p>
+  <div class="actions"><a class="btn" href="/mypage.html#bills">請求書を見る</a></div>
+</section>
 <section class="cal" aria-labelledby="calTitle">
   <div class="cal__head">
     <h2 id="calTitle">開催カレンダー</h2>

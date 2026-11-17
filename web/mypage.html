@@ -38,17 +38,25 @@
 </div>
 <p class="msg ok" id="notice" role="status"></p>
 <div class="lead"><div class="actions"><a class="btn btn-primary btn-lg" href="/bidder.html">競りに参加する</a></div></div>
-<section id="billing" hidden>
-  <h2 class="subhead">落札した品とお支払い</h2>
-  <div id="offers"></div>
-  <ul class="rows mylines dyn" id="myLines"></ul>
+<div class="tabs" role="tablist" aria-label="マイページ" id="myTabs">
+  <button type="button" role="tab" id="tab-bills" data-tab="bills" aria-controls="panel-bills" aria-selected="true">請求書</button>
+  <button type="button" role="tab" id="tab-profile" data-tab="profile" aria-controls="panel-profile" aria-selected="false">個人情報の設定</button>
+</div>
+<section id="panel-bills" role="tabpanel" aria-labelledby="tab-bills">
+  <div id="invoices"><p class="empty">請求書は、まだありません。</p></div>
+  <section id="billing" hidden>
+    <h2 class="subhead">落札した品とお支払い</h2>
+    <div id="offers"></div>
+    <ul class="rows mylines dyn" id="myLines"></ul>
+  </section>
 </section>
-<h2 class="subhead">ご登録の内容</h2>
-<dl class="facts" id="facts"></dl>
-<div class="lead"><div class="actions">
-  <button class="btn" type="button" id="editBtn">登録内容を変更する</button>
-</div><p class="msg" id="accountMsg" role="alert"></p></div>
-<p class="aside">退会をご希望の方は、<button class="textbtn" type="button" id="withdrawBtn">退会の手続き</button></p>
+<section id="panel-profile" role="tabpanel" aria-labelledby="tab-profile" hidden>
+  <dl class="facts" id="facts"></dl>
+  <div class="lead"><div class="actions">
+    <button class="btn" type="button" id="editBtn">登録内容を変更する</button>
+  </div><p class="msg" id="accountMsg" role="alert"></p></div>
+  <p class="aside">退会をご希望の方は、<button class="textbtn" type="button" id="withdrawBtn">退会の手続き</button></p>
+</section>
 <dialog class="wide" id="dlg"></dialog>
 </main>
 <footer class="sitefoot">

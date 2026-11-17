@@ -624,6 +624,29 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       suspension: suspension(me.id),
       lines: db.prepare('SELECT * FROM bill_lines WHERE account_id = ? ORDER BY id DESC').all(me.id).map(lineView),
       offers,
+      // 請求書の一覧（マイページの「請求書」）。状態: paid（すべて消し込み済み）/ overdue（期限を過ぎている）/ billed（お支払い前）
+      invoices: db.prepare('SELECT * FROM invoices WHERE account_id = ? ORDER BY id DESC').all(me.id).map((i) => {
+        const open = db.prepare('SELECT COUNT(*) AS n FROM bill_lines WHERE invoice_id = ? AND cleared_at IS NULL AND cancelled_at IS NULL').get(i.id).n;
+        return { id: i.id, number: i.number, kind: i.kind, issuedOn: jst(i.issued_at), total: i.total, dueDate: i.due_date,
+          state: open === 0 ? 'paid' : i.due_date && i.due_date < today() ? 'overdue' : 'billed' };
+      }),
+    };
+  });
+  // その日に、何をいくらで落札したかの一覧（開催が終わったあと、トップページに出す）。
+  // いちばん最近に終わった開催（7日以内）で、自分が落札した品。解除された落札は出さない
+  route('GET', '/api/my/wins', (ctx) => {
+    const me = needMember(ctx);
+    syncLines();
+    const ev = db.prepare(`SELECT e.id, e.title, e.starts_at FROM events e WHERE e.phase = 'ended' AND substr(e.starts_at, 1, 10) >= ?
+      AND EXISTS (SELECT 1 FROM bill_lines l WHERE l.event_id = e.id AND l.account_id = ? AND l.kind = 'lot' AND l.cancelled_at IS NULL)
+      ORDER BY e.starts_at DESC, e.id DESC LIMIT 1`).get(addDays(today(), -7), me.id);
+    if (!ev) return { event: null, lines: [], total: null };
+    const rows = db.prepare("SELECT * FROM bill_lines WHERE event_id = ? AND account_id = ? AND kind = 'lot' AND cancelled_at IS NULL ORDER BY id").all(ev.id, me.id);
+    const sum = (f) => rows.reduce((n, l) => n + f(l), 0);
+    return {
+      event: { title: ev.title, date: ev.starts_at.slice(0, 10) },
+      lines: rows.map((l) => ({ label: l.label, amount: l.amount, premium: l.premium ?? 0, payable: payable(l) })),
+      total: { amount: sum((l) => l.amount), premium: sum((l) => l.premium ?? 0), payable: sum(payable) },
     };
   });
   route('POST', '/api/my/offers/:id', async (ctx, body, id) => {

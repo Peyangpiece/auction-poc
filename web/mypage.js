@@ -1,4 +1,4 @@
-// マイページ: 登録した内容の確認と、メールアドレスの確認の状態。
+// マイページ: 「請求書」（請求書の一覧と、落札した品）と、「個人情報の設定」（登録内容の確認・変更、退会）の2つのタブ。
 'use strict';
 
 let profile = null;
@@ -18,7 +18,9 @@ const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.s
     : q.get('email') === 'expired' ? '' : '';
   $('#notice').textContent = notice;
   if (q.get('email') === 'expired' && !m.emailVerified) $('#emailText').textContent = '確認のリンクの期限が切れています。もう一度お送りします。';
-  history.replaceState(null, '', location.pathname);
+  history.replaceState(null, '', location.pathname + location.hash);
+  // 会員登録の直後と、メールの確認のあとは、登録の内容が見えるように「個人情報の設定」を開く
+  if (q.get('registered') || q.get('email')) showTab('profile');
 
   $('#suspended').hidden = !m.suspended;
   // 停止の理由は、手動と未払いで言葉を分ける（FR-BID-012）
@@ -48,8 +50,21 @@ $('#resendEmail').addEventListener('click', async (ev) => {
 // ---- 落札した品とお支払い（請求書、支払期限、受け取り期限、繰り上げのご案内）
 const STATE_TEXT = { unsettled: 'お支払い前', billed: 'ご請求済み', unpaid: 'お支払いの期限を過ぎています', cleared: 'お支払い済み', delivered: 'お渡し済み', cancelled: '解除されました' };
 const RECEIVE_TEXT = { pickup: '現地受け取り', ship: '配送' };
+const INVOICE_STATE = { paid: 'お支払い済み', overdue: 'お支払いの期限を過ぎています', billed: 'お支払い前' };
+// 請求書の一覧: 請求番号・発行日・金額・お支払期限・状態と、PDF を開くボタン
+function showInvoices(list) {
+  if (!list.length) return;
+  $('#invoices').replaceChildren(el('ul', { class: 'rows invlist' }, list.map((i) => el('li', {},
+    el('div', { class: 'invlist__main' },
+      el('b', { class: 'digits', text: i.number }),
+      el('span', { class: 'note', text: [`発行日 ${i.issuedOn}`, i.dueDate && i.state !== 'paid' ? `お支払期限 ${i.dueDate}` : ''].filter(Boolean).join('　') })),
+    el('span', { class: 'digits invlist__total', text: yen(i.total) }),
+    el('span', { class: i.state === 'overdue' ? 'warn' : 'invlist__state', text: INVOICE_STATE[i.state] }),
+    el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: '請求書を開く（PDF）' })))));
+}
 async function loadBilling() {
   const res = await api('GET', '/api/my/billing');
+  if (res.ok) showInvoices(res.invoices ?? []);
   if (!res.ok || (!res.lines.length && !res.offers.length)) return;
   $('#billing').hidden = false;
   $('#offers').replaceChildren(...res.offers.filter((o) => o.state === 'open').map((o) => el('div', { class: 'banner' },
@@ -97,3 +112,13 @@ $('#withdrawBtn').addEventListener('click', () => {
       el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() })));
   dlg.showModal();
 });
+
+// ---- タブ（開いているタブを URL に載せる。#bills / #profile）
+function showTab(key) {
+  for (const b of $('#myTabs').children) b.setAttribute('aria-selected', String(b.dataset.tab === key));
+  $('#panel-bills').hidden = key !== 'bills';
+  $('#panel-profile').hidden = key !== 'profile';
+  if (location.hash.slice(1) !== key) history.replaceState(null, '', `#${key}`);
+}
+for (const b of $('#myTabs').children) b.addEventListener('click', () => showTab(b.dataset.tab));
+if (location.hash === '#profile') showTab('profile');
