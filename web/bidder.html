@@ -84,6 +84,9 @@
   <div id="videoBox">
     <video id="video" playsinline muted aria-label="会場のライブ映像"></video>
     <div id="break"><div class="waitbadge" aria-hidden="true"><div class="hop"><div class="spin" id="coin"><img class="face front" src="emblem-400.webp" width="148" height="148" alt=""><img class="face back" src="emblem-400.webp" width="148" height="148" alt=""></div></div><span class="ground"></span></div><strong id="breakTitle">映像は停止中です</strong></div>
+    <button class="tapzone" id="cmtTap" type="button" aria-pressed="true" aria-label="コメントの表示と非表示を切り替える"></button>
+    <div class="cmtlayer" id="cmtLayer"></div>
+    <p class="cmttoast" id="cmtToast" role="status"></p>
     <button class="btn" id="sound" type="button" aria-pressed="false" hidden>音声を出す</button>
   </div>
 
@@ -142,10 +145,7 @@
   </div>
 
   <section class="cmt" aria-labelledby="cmtTitle">
-    <div class="sechead">
-      <h2 id="cmtTitle">コメント</h2>
-      <label class="switch">表示<input type="checkbox" id="cmtOn" role="switch" checked></label>
-    </div>
+    <h2 class="sr-only" id="cmtTitle">コメント</h2>
     <div id="cmtBody">
       <ul id="comments" aria-live="polite"></ul>
       <form id="cmtForm">

@@ -273,3 +273,21 @@ details dd { overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) {
   .waitbadge .hop, .waitbadge .spin, .waitbadge .ground { animation: none; }
 }
+
+/* ---- コメントを、映像の枠の中に重ねて出す（ライブ配信のアプリと同じ見せ方）。枠をタップすると、表示と非表示が切り替わる */
+.tapzone { position: absolute; inset: 0; z-index: 1; appearance: none; border: 0; padding: 0; margin: 0; background: none; cursor: pointer; border-radius: inherit; }
+.tapzone:focus-visible { outline: 3px solid var(--gold); outline-offset: -3px; }
+.cmtlayer { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; max-height: 62%; padding: 12px 30% 12px 12px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; pointer-events: none;
+  -webkit-mask-image: linear-gradient(to top, #000 72%, transparent); mask-image: linear-gradient(to top, #000 72%, transparent); }
+.cmtlayer[hidden] { display: none; }
+.cmtlayer #comments { max-height: none; overflow: hidden; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 6px; min-height: 0; }
+.cmtlayer #comments li { display: inline-flex; gap: 8px; align-items: baseline; max-width: 100%; padding: 5px 12px; border-radius: 14px; background: rgba(0, 1, 40, .84); color: #fff; font-size: 14px; line-height: 1.4; flex: none; }
+.cmtlayer #comments li.new { animation: cmtin .25s var(--ease) both; }
+.cmtlayer #comments .who { color: rgba(255, 255, 255, .78); font-size: 12px; }
+.cmtlayer #comments li.mine .who { color: #fff; font-weight: 700; }
+@keyframes cmtin { from { opacity: 0; transform: translateY(8px); } }
+.cmttoast { position: absolute; left: 50%; top: 12px; z-index: 2; transform: translateX(-50%); padding: 6px 14px; border-radius: 14px; background: rgba(0, 1, 40, .72); color: #fff; font-size: 13px; font-weight: 700; white-space: nowrap; opacity: 0; transition: opacity .2s var(--ease); pointer-events: none; }
+.cmttoast.on { opacity: 1; }
+.cmttoast:empty { display: none; }
+/* 映像のない間の案内（コインと文字）は、少し上に寄せる（左下に重なるコメントと、ぶつかりにくくする） */
+#break { padding-bottom: 16%; }

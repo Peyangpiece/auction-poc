@@ -153,6 +153,7 @@ function renderStream() {
   $('break').style.display = live ? 'none' : 'flex';
   $('breakTitle').textContent = S.stream?.live ? '映像を準備しています' : '映像は停止中です';
   renderSound();
+  placeComments();
   if (show && live) startPlayer(); else stopPlayer();
 }
 
@@ -166,22 +167,43 @@ function setMode(mode) {
 document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => { setMode(b.dataset.mode); link?.event('mode', { mode: S.mode }); }));
 
 // ---- コメント
+// コメントは、ライブ配信のアプリのように、映像の枠の中（左下）に重ねて出す。枠をタップすると、表示と非表示が切り替わる。
+// 映像の枠を出さない人（会場参加）には、これまでどおり、入力欄の上に並べる
+function placeComments() {
+  const inVideo = $('videoBox').style.display !== 'none';
+  const home = inVideo ? $('cmtLayer') : $('cmtBody');
+  if ($('comments').parentElement !== home) home.prepend($('comments'));
+  $('cmtLayer').hidden = !S.cmtShow;
+  $('cmtTap').setAttribute('aria-pressed', String(S.cmtShow));
+}
 function renderComments() {
-  const on = $('cmtOn').checked;
-  $('cmtBody').style.display = on ? 'grid' : 'none';
-  if (!on) return;
+  placeComments();
   const ul = $('comments');
+  const seen = S.cmtSeen ?? new Set(); // すでに出したコメント（新しく届いたものだけを、動きで出す）
+  S.cmtSeen = new Set(S.comments.map((c) => c.id));
   follow(ul, () => ul.replaceChildren(...S.comments.map((c) => {
     const li = document.createElement('li');
-    if (c.paddle === S.paddle) li.className = 'mine';
+    if (c.paddle === S.paddle) li.classList.add('mine');
+    if (S.cmtReady && !seen.has(c.id)) li.classList.add('new');
     const who = document.createElement('span'); who.className = 'who num'; who.textContent = `${c.paddle}番`;
     const body = document.createElement('span'); body.className = 'dyn'; body.textContent = c.text;
     li.append(who, body);
     return li;
   })));
+  S.cmtReady = true;
 }
-$('cmtOn').checked = store.get('poc-comments', 'on') === 'on';
-$('cmtOn').addEventListener('change', () => { store.set('poc-comments', $('cmtOn').checked ? 'on' : 'off'); renderComments(); });
+S.cmtShow = store.get('poc-comments', 'on') === 'on';
+let toastTimer = null;
+$('cmtTap').addEventListener('click', () => {
+  S.cmtShow = !S.cmtShow;
+  store.set('poc-comments', S.cmtShow ? 'on' : 'off');
+  renderComments();
+  // 切り替わったことを、短く知らせる（ボタンがないので、何が起きたかを文字で返す）
+  $('cmtToast').textContent = S.cmtShow ? 'コメントを表示' : 'コメントを非表示';
+  $('cmtToast').classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('cmtToast').classList.remove('on'); $('cmtToast').textContent = ''; }, 1600);
+});
 const countComment = () => { const n = [...$('cmtText').value].length; $('cmtCount').textContent = `${n}／${S.cmtMax}`; $('cmtCount').toggleAttribute('data-empty', n === 0); };
 $('cmtText').addEventListener('input', countComment);
 $('cmtForm').addEventListener('submit', async (ev) => {
