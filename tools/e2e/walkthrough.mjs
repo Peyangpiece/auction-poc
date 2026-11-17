@@ -2,7 +2,7 @@
 // 画面の通し確認（進行コンソール1つ、入札画面3つ）。OBS と IVS は代役を使う。
 //   node tools/e2e/walkthrough.mjs            … 確認だけ
 //   node tools/e2e/walkthrough.mjs --shots docs/screenshots   … 画面写真も保存する
-// 確かめること: 入場、応札への切り替え、入札、上回りの通知、うりきり、締め、落札の表示、次の品への導線、
+// 確かめること: 入場、入札、上回りの通知、うりきり、締め、落札の表示、次の品への導線、
 //               配信の自動開始と手動停止、止め忘れの注意、切断の検知（生存確認）と再接続、ライブ画面の比率。
 import path from 'node:path';
 import { boot, chromium, devices, check } from './lib.mjs';
@@ -60,15 +60,13 @@ try {
   check((await con.isHidden('#b_next')) && (await con.isVisible('#b_close')), '受付中は「締め」と「中断」だけが出る');
 
   console.log('入札');
-  check((await text(b1, 'bid')) === '応札に切り替える', '観戦で入った人には、入札ボタンが切り替えのボタンになる');
-  await b1.click('#bid');
   await b1.waitForFunction(() => document.getElementById('bid').textContent === '入札');
+  check(true, '入ってすぐ、入札できる（切り替えは要らない）');
   await b1.click('#bid');
   await b1.waitForFunction(() => document.getElementById('right').classList.contains('on'));
   check(!(await b1.evaluate(() => document.getElementById('urikiri').classList.contains('on'))), '最低落札額に届く前は、「うりきり」は消えている');
   check(!(await b1.content()).includes('11,000'), '最低落札額の金額は、参加者の画面のどこにも出ない');
   await shot(b1, 'bidder-urikiri-before');
-  await b2.click('#bid');
   await b2.waitForFunction(() => document.getElementById('bid').textContent === '入札');
   await shot(b2, 'bidder-joined');
   await b2.waitForTimeout(700); // 金額が変わった直後は押せない時間がある
@@ -131,7 +129,7 @@ try {
   check((await text(b1, 'result')).includes('あなたが落札'), 'つながり直した後、状態が正しく戻る');
 
   console.log('強制終了からの復帰');
-  await con.click('details:not(#proxyBox) summary');
+  await con.click('#devBox summary');
   await con.click('[data-crash="now"]');
   await shot(con, 'console-dialog');
   await con.click('#dlgOk');

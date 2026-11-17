@@ -101,6 +101,8 @@ function render() {
 }
 function renderStream() {
   const s = S.stream; if (!s) return;
+  // 映像をつないでいないとき（競りだけを動かす設定）は、配信の欄を出さない
+  $('streamBox').hidden = s.mode === 'always-live';
   $('s_live').textContent = s.mode === 'always-live' ? '常に LIVE とみなす' : s.live ? 'LIVE' : s.waiting ? 'LIVE を待っています' : '停止';
   $('s_live').dataset.on = s.live ? '1' : '';
   const yn = (v) => (v ? 'LIVE' : '未検出');
@@ -110,7 +112,8 @@ function renderStream() {
 }
 setInterval(() => {
   if (!link) return;
-  $('clock').textContent = jst(link.serverNow());
+  // 千分の一秒までの時刻は、遅延を測るとき（検証用の設定）だけ出す
+  $('clock').textContent = S.dev ? jst(link.serverNow()) : jst(link.serverNow()).slice(0, 8);
   // 配信の止め忘れ: 競りがないまま配信が続いた時間が長くなったら知らせる（自動では止めない）
   const st = S.stream;
   const idleMs = st && st.idleSince && (st.obsActive || st.live) && st.mode !== 'always-live' ? link.serverNow() - st.idleSince : 0;
@@ -187,6 +190,8 @@ function onMessage(msg, at) {
         document.querySelectorAll('[data-crash]').forEach((b) => { b.disabled = !msg.allowCrash; });
         // 障害の模擬は、検証用の環境でだけ出す（本番の進行役の画面には、強制終了のボタンを置かない）
         $('crashBox').hidden = !msg.allowCrash;
+        // 検証用の道具（測定・障害の模擬）は、検証用の設定のときだけ出す
+        S.dev = !!msg.allowCrash; $('devBox').hidden = !S.dev;
       }
       render(); renderStream(); break;
     case 'lot': {

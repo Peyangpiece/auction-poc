@@ -83,3 +83,6 @@ details .stack { display: grid; gap: 8px; justify-items: start; margin-top: 8px;
 .proxy select.input { appearance: auto; }
 #history td .btn { min-height: 36px; padding: 2px 10px; font-size: 13px; }
 @media (max-width: 640px) { .proxy { grid-template-columns: minmax(0, 1fr); } .proxy .pxcheck { grid-column: auto; } }
+
+/* まだ何も無い欄（入札の履歴・落札一覧・コメント）は、出さない（見出しと空の表だけが並ぶのを避ける） */
+section[aria-labelledby="histTitle"]:has(tbody:empty), section[aria-labelledby="soldTitle"]:has(tbody:empty), section:has(> #comments:empty) { display: none; }

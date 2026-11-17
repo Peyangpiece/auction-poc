@@ -532,7 +532,9 @@ $('#backToLogin').addEventListener('click', () => { $('#setupForm').hidden = tru
   // 競りの進行は、主催者管理者と進行役（8.14）
   $('#toConsole').hidden = !['admin', 'auctioneer'].includes(me.role);
   $('#toMonitor').hidden = me.role === 'operator'; // 会場の大型モニターは、会場にいるスタッフが開く
-  const keys = Object.keys(PANELS).filter((k) => PANELS[k][2].includes(me.role));
+  // SMS を使わない設定（本番）のときは、「SMS の制限」を出さない
+  const terms = await api('GET', '/api/terms');
+  const keys = Object.keys(PANELS).filter((k) => PANELS[k][2].includes(me.role) && !(k === 'sms' && terms.sms === false));
   $('#tabs').replaceChildren(...keys.map((k) => el('button', { type: 'button', role: 'tab', 'data-key': k, text: PANELS[k][0], onclick: () => show(k) })));
   show(keys.includes(location.hash.slice(1)) ? location.hash.slice(1) : keys[0]);
 })();

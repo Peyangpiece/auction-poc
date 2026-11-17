@@ -241,14 +241,10 @@ try {
   await shot(phone, 'mvp-13-join');
   await phone.check('#join [name=payment][value=transfer]');
   await phone.click('#join button[type=submit]');
-  await phone.waitForSelector('#enter:not([hidden])');
-  check((await phone.textContent('#gateEvent')).includes('参加番号1'), '手続きが済むと、参加番号 1 が振られる');
-  await shot(phone, 'mvp-14-paddle');
-  await phone.click('#enter');
+  await phone.waitForFunction(() => document.getElementById('gate').style.display === 'none');
+  check((await phone.textContent('#gateEvent')).includes('参加番号1'), '手続きが済むと、参加番号 1 が振られ、そのまま入札画面に入る');
   await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
-  await phone.waitForFunction(() => document.getElementById('bid').textContent === '応札に切り替える');
-  await phone.click('#bid');
   await phone.waitForFunction(() => document.getElementById('bid').textContent === '入札');
   await phone.click('#bid');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('9,500'));
@@ -301,10 +297,8 @@ try {
   await guest.waitForSelector('#enter:not([hidden])', { timeout: 15000 });
   check(true, '受付係が来場を確認すると、本人の画面が自動で進めるようになる');
   await guest.click('#enter');
-  await guest.waitForFunction(() => document.getElementById('bid').textContent === '応札に切り替える');
-  check(await guest.isDisabled('#showVideo'), '会場参加の画面には、映像を出さない');
-  await guest.click('#bid');
   await guest.waitForFunction(() => document.getElementById('bid').textContent === '入札');
+  check(await guest.isDisabled('#showVideo'), '会場参加の画面には、映像を出さない');
   await guest.click('#bid');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('10,000'));
   check(true, '会場参加の人が、同じ競りに入札できる');
@@ -381,7 +375,7 @@ try {
   await guest.waitForSelector('#billing:not([hidden])');
   const mine = await guest.textContent('#myLines');
   check(mine.includes('¥11,000') && mine.includes('買歩銭 ¥1,000'), 'マイページに、買歩銭を含めた金額と内訳が出る');
-  check(mine.includes('防水シート') && mine.includes('お渡し済み') && mine.includes('（PDF）'), '落札者のマイページに、品・状態・請求書が出る');
+  check(mine.includes('防水シート') && mine.includes('お渡し済み'), '落札者のマイページに、品・状態が出る');
   const invs = await guest.textContent('#invoices');
   check(/\d{8}-0001/.test(invs) && invs.includes('¥11,000') && invs.includes('お支払い済み') && invs.includes('請求書を開く'), 'マイページの「請求書」に、請求番号・金額・状態と、PDF を開くボタンが出る');
   await guest.click('[data-tab=profile]');

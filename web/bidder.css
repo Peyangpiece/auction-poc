@@ -20,12 +20,6 @@ body.outbid #history li { border-color: rgba(255, 255, 255, .45); }
 body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #fff; }
 
 /* 応札／観戦 */
-.seg { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; flex: none; border: 1px solid var(--action); border-radius: var(--r); background: var(--field); overflow: hidden; }
-.seg button { appearance: none; border: 0; background: none; font: inherit; font-weight: 700; font-size: 14px; letter-spacing: .06em; color: var(--action); min-height: 44px; min-width: 60px; padding: 0 14px; cursor: pointer; transition: background-color .15s var(--ease), color .15s var(--ease); }
-.seg button + button { border-left: 1px solid var(--action); }
-.seg button[aria-checked="true"] { background: var(--action); color: var(--action-ink); }
-.seg button:disabled { opacity: .5; cursor: not-allowed; }
-.seg button:focus-visible { outline-offset: -3px; }
 
 /* ライブ画面は常に 4:3（停止中も同じ大きさ）。映像は元の比率のまま収め、切り取らない */
 #videoBox { display: none; position: relative; aspect-ratio: 4 / 3; width: 100%; background: #000; border-radius: var(--r-lg); overflow: hidden; }
@@ -172,7 +166,6 @@ details dd { overflow-wrap: anywhere; }
   .brand { gap: 8px; }
   .brand__name { font-size: 15px; letter-spacing: .06em; }
   .brand__service { letter-spacing: .04em; }
-  .seg button { min-width: 52px; padding: 0 10px; }
 }
 #cmtCount { font-size: 12px; color: var(--ink-3); justify-self: end; }
 #bid.locked { opacity: .6; }

@@ -43,7 +43,7 @@ for (const scheme of ['light', 'dark']) {
   p = await c.newPage(); await p.goto(B + '/mypage.html'); await p.waitForTimeout(800); await scan(p, 'mypage-bills', scheme); await p.click('[data-tab=profile]'); await p.waitForTimeout(300); await scan(p, 'mypage-profile', scheme); await p.click('#editBtn'); await p.waitForTimeout(400); await scan(p, 'mypage-edit-dialog', scheme); await p.close();
   p = await c.newPage(); await p.goto(B + '/bidder.html'); await p.waitForTimeout(900); await scan(p, 'bidder-gate-pick', scheme);
   await p.click('[data-pick=online]'); await p.waitForTimeout(400);
-  if (await p.isVisible('#join')) { await scan(p, 'bidder-gate-join', scheme); await p.check('[name=receive][value=ship]'); await p.check('[name=payment][value=transfer]'); await p.click('#join button[type=submit]'); await p.waitForSelector('#enter:not([hidden])'); await p.click('#enter'); }
+  if (await p.isVisible('#join')) { await scan(p, 'bidder-gate-join', scheme); await p.check('[name=receive][value=ship]'); await p.check('[name=payment][value=transfer]'); await p.click('#join button[type=submit]'); }
   await p.waitForSelector('#modeLine:not([hidden])'); await scan(p, 'bidder-idle', scheme);
   // スタッフ
   const sc = await mk({ width: 1280, height: 900 });
@@ -58,7 +58,7 @@ for (const scheme of ['light', 'dark']) {
   await con.fill('#newTitle', '（例）防水シート'); await con.fill('#newPrice', '9500'); await con.click('#addLot button[type=submit]'); await con.waitForTimeout(500);
   for (const id of ['#b_next', '#b_nv']) if (await con.isVisible(id) && await con.isEnabled(id)) { await con.click(id); await con.waitForTimeout(700); }
   await scan(con, 'console-open', scheme);
-  await p.click('[data-mode=bid]'); await p.waitForTimeout(500); await scan(p, 'bidder-open-bidmode', scheme);
+  await p.waitForTimeout(500); await scan(p, 'bidder-open-bidmode', scheme);
   await p.click('#bid'); await p.waitForTimeout(600); await scan(p, 'bidder-leading', scheme);
   const mon = await sc.newPage(); await mon.goto(B + '/monitor.html'); await mon.waitForTimeout(1200); await scan(mon, 'monitor', scheme);
   await con.click('#b_close'); await con.waitForTimeout(800); if (await con.isVisible('dialog[open]')) { await scan(con, 'console-dialog', scheme); await con.click('#dlgOk'); } await con.waitForTimeout(800);

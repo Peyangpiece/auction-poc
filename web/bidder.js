@@ -5,9 +5,9 @@ const net = params.get('net') || 'unlabeled'; // 測定の区別用: ?net=wifi /
 let venue = params.get('mode') === 'venue'; // 会場参加は映像なし（会員の場合は、参加手続きの内容で決まる）
 $('net').textContent = net;
 const store = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
-// 応札／観戦: 観戦の間は入札ボタンを押せない（誤って入札しないため）。最初は観戦にしておく
+// 「観戦」の切り替えは、無くした（発注者の指示: 無駄を削る）。入札は、金額の欄と「入札」ボタンで行うので、押しまちがいは起きにくい
 const S = { lots: new Map(), focus: null, paddle: null, history: [], stream: null, wasHighest: false, playerUrl: null, shownPrice: null, rendered: 0,
-  mode: store.get('poc-mode', 'watch'), comments: [], cmtMax: 20, lockUntil: 0, connected: false, sound: false };
+  mode: 'bid', comments: [], cmtMax: 20, lockUntil: 0, connected: false, sound: false };
 // 一覧は、いちばん下を見ているときだけ新しい行に追従する（読み返している途中で勝手に動かさない）
 function follow(el, update) { const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24; update(); if (atEnd) el.scrollTop = el.scrollHeight; }
 let link, audioCtx = null, wakeLock = null, player = null, playerLoading = false;
@@ -163,7 +163,7 @@ function renderStream() {
 // ---- 応札／観戦の切り替え
 function setMode(mode) {
   if (S.paddle === null) mode = 'watch'; // スタッフは入札できない
-  S.mode = mode; store.set('poc-mode', mode);
+  S.mode = mode;
   document.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.mode === mode)));
   render();
 }
@@ -426,7 +426,8 @@ $('bidForm').addEventListener('submit', async (ev) => {
   const shown = localNow();
   // 停止で断られたときは、理由（手動か、未払いか）を取り直してから伝える
   if (res.code === 'SUSPENDED' && !token) { const p = await getJson('/api/participation'); S.unpaid = p.suspendedBy === 'unpaid'; }
-  say(res.accepted ? `受理されました：${yen(res.amount)}` : (REJECT[res.code]?.(res) ?? res.code), res.accepted ? 'ok' : 'ng');
+  // 受理されたときは、ボタンが「あなたが最高入札者です」に変わるので、同じことを重ねて言わない（読み上げには伝える）
+  say(res.accepted ? '' : (REJECT[res.code]?.(res) ?? res.code), res.accepted ? 'ok' : 'ng');
   Object.assign(lot, { currentPrice: res.currentPrice, minBid: res.minBid });
   if (res.accepted) { lot.highestPaddle = S.paddle; S.amountTouched = false; }
   if (typeof res.urikiri === 'boolean') lot.urikiri = res.urikiri;
@@ -569,7 +570,8 @@ if (!token) (async () => {
     const data = new FormData($('join'));
     $('gateMsg').textContent = '';
     const res = await getJson('/api/join', { receive: data.get('receive'), payment: data.get('payment'), ...(asVenue ? (p.venue ? { venueCode } : { mode: 'venue' }) : {}) });
-    if (res.status === 200) { $('join').hidden = true; showPaddle(p.event.title, res); }
+    // 手続きが済んだら、そのまま入札画面に入る（参加番号は、入札画面にいつも出ている）。会場参加で、来場の確認がまだの人は、待つ画面へ
+    if (res.status === 200) { $('join').hidden = true; showPaddle(p.event.title, res); if (res.checkedIn) $('enter').click(); }
     else $('gateMsg').textContent = res.message ?? 'うまくいきませんでした。やり直してください';
   });
 })();

@@ -26,7 +26,7 @@
   </h1>
   <div class="meta">
     <span>参加者 <b class="num" id="presence">0</b> 人<span id="presenceSplit"></span></span>
-    <span id="clock" title="サーバー時刻（日本時間）。映像に映して遅延を測るときに使う"></span>
+    <span id="clock"></span>
   </div>
   </div>
 </header>
@@ -117,7 +117,7 @@
   </div>
 
   <div class="col">
-    <section aria-labelledby="strTitle">
+    <section aria-labelledby="strTitle" id="streamBox">
       <div class="sechead"><h2 id="strTitle">配信</h2><span class="state" id="s_live">停止</span></div>
       <dl class="kv">
         <dt>配信エージェント</dt><dd><span class="state" id="s_agent">未接続</span></dd>
@@ -135,12 +135,12 @@
       <ul id="comments"></ul>
     </section>
 
-    <section aria-labelledby="logTitle">
-      <h2 id="logTitle">操作の記録</h2>
-      <div id="log" role="log" aria-live="polite" tabindex="0"></div>
-    </section>
+    <details id="logBox">
+      <summary id="logTitle">操作の記録</summary>
+      <div id="log" role="log" aria-live="polite" aria-labelledby="logTitle" tabindex="0"></div>
+    </details>
 
-    <details>
+    <details id="devBox" hidden>
       <summary>測定と障害の模擬</summary>
       <p class="note">時刻の差 <span class="num" id="offset">0</span> ms、往復 <span class="num" id="rtt">0</span> ms</p>
       <p class="note">LIVE の判定: <span id="s_by"></span></p>

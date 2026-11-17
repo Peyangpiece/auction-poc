@@ -84,8 +84,7 @@ async function loadBilling() {
       l.receive && l.kind !== 'penalty' && l.kind !== 'late' ? `受け取り: ${RECEIVE_TEXT[l.receive]}` : '',
       l.invoice?.dueDate && l.state !== 'cleared' && l.state !== 'delivered' ? `お支払期限 ${l.invoice.dueDate}` : '',
       l.pickupBy && l.state === 'cleared' ? `受け取り期限 ${l.pickupBy}` : '',
-    ].filter(Boolean).join('　') }),
-    l.invoice && el('a', { href: `/api/billing/invoices/${l.invoice.id}/pdf`, text: `請求書 ${l.invoice.number}（PDF）` }))));
+    ].filter(Boolean).join('　') }))));
 }
 
 // ---- 登録内容の変更と、退会
