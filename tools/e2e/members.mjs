@@ -222,7 +222,7 @@ try {
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
   await phone.waitForFunction(() => document.getElementById('bid').textContent === '応札に切り替える');
   await phone.click('#bid');
-  await phone.waitForFunction(() => document.getElementById('bid').textContent.includes('で入札'));
+  await phone.waitForFunction(() => document.getElementById('bid').textContent === '入札');
   await phone.click('#bid');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('9,500'));
   check((await phone.textContent('#priceTotal')).includes('買歩銭（10%）込み ¥10,450'), '入札画面の価格の下に、買歩銭を足した金額を出す');
@@ -277,7 +277,7 @@ try {
   await guest.waitForFunction(() => document.getElementById('bid').textContent === '応札に切り替える');
   check(await guest.isDisabled('#showVideo'), '会場参加の画面には、映像を出さない');
   await guest.click('#bid');
-  await guest.waitForFunction(() => document.getElementById('bid').textContent.includes('で入札'));
+  await guest.waitForFunction(() => document.getElementById('bid').textContent === '入札');
   await guest.click('#bid');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('10,000'));
   check(true, '会場参加の人が、同じ競りに入札できる');

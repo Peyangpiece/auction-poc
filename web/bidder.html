@@ -52,6 +52,11 @@
 </div>
 
 <p class="sr-only" id="alert" role="alert"></p>
+<dialog id="bidDlg">
+  <h2 id="bidDlgTitle"></h2>
+  <p id="bidDlgText"></p>
+  <div class="actions"><button class="btn" type="button" id="bidNo">やめる</button><button class="btn btn-primary" type="button" id="bidYes">入札する</button></div>
+</dialog>
 <dialog id="venueDlg">
   <h2 id="venueDlgTitle"></h2>
   <p id="venueDlgText"></p>
@@ -103,7 +108,10 @@
         <div class="lamp" id="right" role="img"><span class="bulb"></span><b id="rightLabel">権利</b><small class="num" id="rightSub"></small></div>
       </div>
       <p id="msg" role="status" aria-live="polite"></p>
-      <button class="btn btn-lg digits" id="bid" type="button" disabled>入札</button>
+      <form class="bidrow" id="bidForm" novalidate>
+        <label class="amount" id="amountBox" hidden><span class="sr-only">入札金額</span><span class="yen" aria-hidden="true">¥</span><input class="digits" id="bidAmount" inputmode="numeric" autocomplete="off" enterkeyhint="send" aria-describedby="msg"></label>
+        <button class="btn btn-lg digits" id="bid" type="submit" disabled>入札</button>
+      </form>
     </section>
 
     <section class="hist" aria-labelledby="histTitle">

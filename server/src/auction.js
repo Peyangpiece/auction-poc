@@ -377,6 +377,7 @@ export class Auction {
     return {
       id: lot.id, lotNo: lot.lot_no, title: lot.title, status: lot.status, noVideo: !!lot.no_video,
       startPrice: lot.start_price,
+      unit: lot.unit_override ?? null, // この品だけの入札単位（なければ、共通の表を使う）。端末が、入力された金額を確かめるのに使う
       currentPrice: lot.current_price ?? null, // 入札がなければ null（画面には開始価格を出す）
       minBid: minimumBid(lot.start_price, lot.current_price, this.config.incrementTable, lot.unit_override),
       highestPaddle: lot.highest_paddle ?? null,

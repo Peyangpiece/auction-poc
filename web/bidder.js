@@ -120,7 +120,15 @@ function render() {
   bid.textContent = st !== 'open' ? (ended ? '次の品をお待ちください' : st === 'suspended' ? '中断しています' : '受付の開始をお待ちください')
     : staff ? 'スタッフは入札できません'
     : watching ? '応札に切り替える'
-    : mine ? 'あなたが最高入札者です' : `${yen(lot.minBid)} で入札`;
+    : mine ? 'あなたが最高入札者です' : '入札';
+  // 入札金額の入力欄は、入札できるときだけ出す（現在の価格の表示とは別の欄。右に入札ボタン）。
+  // はじめは最低入札額を入れておく。自分で書いた金額が、まだ最低入札額以上なら、そのまま残す
+  $('amountBox').hidden = !canBid;
+  if (canBid) {
+    const typed = parseAmount($('bidAmount').value);
+    if (S.amountLot !== lot.id || !S.amountTouched || typed === null || typed < lot.minBid) { setAmount(lot.minBid); S.amountTouched = false; }
+    S.amountLot = lot.id;
+  }
   document.title = `${yen(price)} No.${lot.lotNo}｜令和の競り`;
   S.wasHighest = mine && st === 'open';
 }
@@ -253,6 +261,7 @@ function onMessage(msg, at) {
     case 'welcome': case 'snapshot':
       if (msg.type === 'welcome') {
         S.paddle = msg.paddle; S.playerUrl = msg.playerScriptUrl; $('me').textContent = msg.paddle === null ? 'スタッフ' : `${msg.paddle}番`;
+        S.ladder = msg.ladder ?? null;
         S.cmtMax = msg.commentMaxLength ?? 20; $('cmtText').maxLength = S.cmtMax; countComment();
         $('contact').textContent = msg.venueContact ? `会場連絡先：${msg.venueContact}` : '';
         document.querySelectorAll('.seg button').forEach((b) => { b.disabled = msg.paddle === null; });
@@ -338,18 +347,53 @@ function notifyOutbid(msg) {
   link.event('outbid_notify', { seq: msg.seq, audio, vibrated, hidden: document.hidden, wake: $('wake').textContent });
 }
 
-// ---- 入札（PoC ではボタンを押すだけ。最低入札額で入札する。POC-UI-002）
-$('bid').addEventListener('click', async () => {
+// ---- 入札金額の入力欄
+const parseAmount = (text) => { const d = String(text ?? '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/[^0-9]/g, ''); return d ? Number(d) : null; };
+const setAmount = (n) => { $('bidAmount').value = n === null ? '' : n.toLocaleString('ja-JP'); };
+// 入力のたびに、数字だけにして、3桁ごとに区切る（全角の数字も直す）
+$('bidAmount').addEventListener('input', () => { S.amountTouched = true; setAmount(parseAmount($('bidAmount').value)); if ($('msg').dataset.kind === 'ng') say(''); });
+$('bidAmount').addEventListener('focus', () => $('bidAmount').select());
+// 入札できる金額（価格の段）: 最低入札額から、入札単位ずつ上がる。単位は、金額の帯で決まる
+const unitFor = (amount, lot) => { if (lot.unit) return lot.unit; for (const band of S.ladder ?? []) if (band.lt == null || amount < band.lt) return band.unit; return 1; };
+// 入力された金額を、段に合わせて確かめる。合わないときは、すぐ下とすぐ上の、入札できる金額を返す
+function checkAmount(amount, lot) {
+  if (amount === null) return { error: '入札金額を入力してください' };
+  if (amount < lot.minBid) return { error: `${yen(lot.minBid)} 以上で入力してください` };
+  if (!S.ladder) return { ok: true }; // 段の表が届いていないときは、サーバーの判定に任せる
+  let step = lot.minBid;
+  for (let i = 0; step < amount && i < 1000000; i++) step += unitFor(step, lot);
+  if (step === amount) return { ok: true };
+  const below = step - unitFor(step - 1, lot);
+  return { error: `入札できる金額は、${yen(Math.max(below, lot.minBid))} か ${yen(step)} です` };
+}
+// 現在の価格から大きく離れた金額は、押す前に確かめる（桁の打ちまちがいを防ぐ）
+const confirmBid = (amount, lot) => new Promise((resolve) => {
+  const price = lot.currentPrice ?? lot.startPrice;
+  $('bidDlgTitle').textContent = `${yen(amount)} で入札しますか？`;
+  $('bidDlgText').textContent = `${lot.currentPrice === null ? '開始価格' : '現在価格'}は ${yen(price)} です。入札は、取り消せません。`;
+  const done = (v) => { $('bidDlg').close(); $('bidYes').onclick = $('bidNo').onclick = $('bidDlg').oncancel = null; resolve(v); };
+  $('bidYes').onclick = () => done(true); $('bidNo').onclick = () => done(false); $('bidDlg').oncancel = () => done(false);
+  $('bidDlg').showModal();
+});
+
+// ---- 入札（金額の欄に入れた額で入札する。はじめは最低入札額が入っている）
+$('bidForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
   const lot = focusLot();
-  if (!lot) return;
+  if (!lot || $('bid').disabled) return;
   if ($('bid').dataset.action === 'join') { // 観戦中に押したら、まず応札に切り替えるだけ（この1回では入札しない）
     setMode('bid'); link.event('mode', { mode: 'bid', via: 'bid-button' });
     return;
   }
+  const amount = parseAmount($('bidAmount').value);
+  const checked = checkAmount(amount, lot);
+  if (checked.error) { say(checked.error, 'ng'); $('bidAmount').focus(); return; }
+  // 最低入札額より上で、いまの価格の2倍以上になる金額は、確かめてから送る
+  if (amount > lot.minBid && amount >= (lot.currentPrice ?? lot.startPrice) * 2 && !(await confirmBid(amount, lot))) return;
   $('bid').disabled = true;
   $('bid').textContent = '送信中…';
   const reqId = ++link.reqId, sent = localNow();
-  const res = await link.request(reqId, { type: 'bid', reqId, lotId: lot.id, amount: lot.minBid, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
+  const res = await link.request(reqId, { type: 'bid', reqId, lotId: lot.id, amount, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
   if (!res) {
     say(link.up ? '応答がありません。価格を確かめてください' : '通信が切れました。入札が届いたかは、つながり直した後に確かめてください', 'ng');
     render(); return;
@@ -359,7 +403,7 @@ $('bid').addEventListener('click', async () => {
   if (res.code === 'SUSPENDED' && !token) { const p = await getJson('/api/participation'); S.unpaid = p.suspendedBy === 'unpaid'; }
   say(res.accepted ? `受理されました：${yen(res.amount)}` : (REJECT[res.code]?.(res) ?? res.code), res.accepted ? 'ok' : 'ng');
   Object.assign(lot, { currentPrice: res.currentPrice, minBid: res.minBid });
-  if (res.accepted) lot.highestPaddle = S.paddle;
+  if (res.accepted) { lot.highestPaddle = S.paddle; S.amountTouched = false; }
   if (typeof res.urikiri === 'boolean') lot.urikiri = res.urikiri;
   render();
   // ボタンを押してから、受理・拒否が画面に出るまで（P3-7）

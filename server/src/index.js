@@ -340,7 +340,7 @@ function onClient(ws, req) {
       const shape = (m) => (conn.role === 'auctioneer' ? m : forMember(m));
       send(shape({
         type: 'welcome', role: conn.role, paddle: member?.paddle_no ?? null, mode: member?.mode ?? null, name: (member ?? staff).name,
-        conn: conn.id, serverTime: nowMs(), stream: stream.view(), allowCrash: config.allowCrash,
+        conn: conn.id, serverTime: nowMs(), stream: stream.view(), allowCrash: config.allowCrash, ladder: config.incrementTable,
         playerScriptUrl: config.ivsPlayerScriptUrl, venueContact: config.venueContact,
         commentMaxLength: config.commentMaxLength, comments: store.q.recentComments.all(), ...auction.snapshot(), event: api.eventState(),
         ...(conn.role === 'auctioneer' ? { sold: auction.soldList() } : {}),
