@@ -8,6 +8,16 @@ let phone = '';
 // 入札画面から来た人は、ログインのあと入札画面へ戻す（行き先は決まった2つだけ。外のサイトへは飛ばさない）
 const after = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/';
 const pwForm = $('#pwForm');
+// SMS を使わない設定（本番）のときは、連絡先の欄を、メールアドレスだけにする
+api('GET', '/api/terms').then((t) => {
+  if (t.sms !== false) return;
+  const input = phoneForm.elements.id;
+  input.closest('label').firstChild.textContent = 'メールアドレス';
+  input.type = 'email'; input.placeholder = 'taro@example.com'; input.autocomplete = 'email';
+  const note = phoneForm.querySelector('.note');
+  if (note) note.textContent = '登録したメールアドレスに、認証番号をお送りします。ログインのあと、マイページで、新しいパスワードを決めてください。';
+});
+
 onSubmit(pwForm, async (data) => {
   const res = await api('POST', '/api/login/password', { loginId: data.loginId, password: data.password });
   if (res.ok) location.href = after;

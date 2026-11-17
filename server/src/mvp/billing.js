@@ -5,6 +5,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { makeInvoiceFiles, makeInvoiceList } from './invoice-files.js';
 
+// CSV の1マス。表計算ソフトが式として動かす文字（= + - @ など）で始まる文字列は、先頭に ' を付けて、ただの文字にする
+export const csvCell = (v) => {
+  const t = String(v ?? '');
+  return `"${(typeof v === 'string' && /^[=+\-@\t\r]/.test(t) ? "'" + t : t).replaceAll('"', '""')}"`;
+};
+
 export const BILLING_SCHEMA = `
 -- 明細: 落札した品1つにつき1行（FR-INV-003）。違約金・遅延損害金・繰り上げも、同じ形の行として持つ
 CREATE TABLE IF NOT EXISTS bill_lines (
@@ -52,6 +58,8 @@ CREATE TABLE IF NOT EXISTS offers (
 );
 CREATE TABLE IF NOT EXISTS fee_confirms (month TEXT PRIMARY KEY, confirmed_at REAL NOT NULL, staff_id INTEGER);
 CREATE TABLE IF NOT EXISTS pickup_notices (line_id INTEGER PRIMARY KEY, at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS bill_lines_account ON bill_lines(account_id);
+CREATE INDEX IF NOT EXISTS bill_lines_invoice ON bill_lines(invoice_id);
 `;
 
 const DAY = 86400000;
@@ -527,7 +535,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   route('GET', '/api/billing/shipping.csv', (ctx) => {
     needStaff(ctx, 'admin');
     const rows = db.prepare("SELECT * FROM bill_lines WHERE receive = 'ship' AND cancelled_at IS NULL AND kind IN ('lot','promote') ORDER BY account_id, id").all();
-    const esc = (v) => `"${String(v ?? '').replaceAll('"', '""')}"`;
+    const esc = csvCell;
     const lines = [['氏名・会社名', '配送先', '電話番号', '品', '落札額', '消し込み', '引き渡し'].map(esc).join(',')];
     for (const l of rows) {
       const a = account(l.account_id);
@@ -542,7 +550,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     needStaff(ctx, 'admin');
     const month = ctx.url.searchParams.get('month') ?? today().slice(0, 7);
     const rows = db.prepare("SELECT * FROM bill_lines WHERE kind IN ('lot','promote') AND delivered_at IS NOT NULL ORDER BY delivered_at").all().filter((l) => jst(l.delivered_at).startsWith(month));
-    const esc = (v) => `"${String(v ?? '').replaceAll('"', '""')}"`;
+    const esc = csvCell;
     const out = [['引き渡しの日', '品目', '数量', '特徴', '代金（税込）', '相手方の氏名・名称', '相手方の住所', '相手方の電話番号'].map(esc).join(',')];
     for (const l of rows) { const a = account(l.account_id); out.push([jst(l.delivered_at), l.label, 1, '', l.amount, displayName(a), a.address, a.withdrawn_phone ?? a.phone].map(esc).join(',')); }
     audit(ctx, 'billing.ledger_export', { target: `ledger:${month}`, after: { rows: rows.length } });
@@ -695,9 +703,10 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     let pickup = 0;
     for (const l of soon) {
       const by = addDays(jst(l.cleared_at), 7);
-      if (addDays(by, -1) !== t) continue;
+      // 前日に動いていなかった日（だれも開かず、サーバーが休んでいた日）があっても、期限までは知らせる
+      if (t < addDays(by, -1) || t > by) continue;
       const a = account(l.account_id);
-      notifier.email(a.email, 'pickup', '受け取り期限のお知らせ', `${l.label} の受け取り期限は、明日（${by}）までです。会場の営業時間内に、お受け取りください。`);
+      notifier.email(a.email, 'pickup', '受け取り期限のお知らせ', `${l.label} の受け取り期限は、${by} までです。会場の営業時間内に、お受け取りください。`);
       db.prepare('INSERT INTO pickup_notices (line_id, at) VALUES (?, ?)').run(l.id, nowMs());
       pickup++;
     }

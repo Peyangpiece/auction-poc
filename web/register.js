@@ -14,6 +14,16 @@ function show(step) {
   forms[step].querySelector('input:not([type=radio])')?.focus();
 }
 
+// SMS を使わない設定（本番）のときは、連絡先の欄を、メールアドレスだけにする
+api('GET', '/api/terms').then((t) => {
+  if (t.sms !== false) return;
+  const input = forms.phone.elements.id;
+  input.closest('label').firstChild.textContent = 'メールアドレス';
+  input.type = 'email'; input.placeholder = 'taro@example.com'; input.autocomplete = 'email';
+  const note = forms.phone.querySelector('.note');
+  if (note) note.textContent = '登録したメールアドレスに、認証番号をお送りします。ログインのあと、マイページで、新しいパスワードを決めてください。';
+});
+
 onSubmit(forms.phone, async (data) => {
   phone = data.id.trim();
   const res = await api('POST', '/api/register/start', { id: phone });

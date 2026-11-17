@@ -429,3 +429,56 @@ test('画面で「会場で参加」を選んだ人は、会場参加になる�
 
   } finally { await t.end(); }
 });
+
+test('数でない金額の入札が届いても、サーバーは止まらない。断って、次の入札を受ける', async () => {
+  const t = await setup();
+  try {
+    const a = await t.register('09055550001', '検証 一郎');
+    await t.publishEvent('検証の競り');
+    await a.post('/api/join', { receive: 'ship', payment: 'transfer' });
+    const auctioneer = await connect(t.srv, t.ctx.tokens.auctioneer);
+    const wa = await t.ws(a);
+    const lot = await createLot(auctioneer, 1000);
+    await auctioneer.cmd('start', { lotId: lot.id });
+    await until(() => wa.lots.get(lot.id)?.status === 'open');
+    for (const bad of ['abc', null, {}, 1e400, 1000.5]) assert.equal((await wa.bid(lot.id, bad)).accepted, false);
+    wa.send({ type: 'bid' }); wa.send({ type: 'cmd' }); wa.send({ type: 'comment', text: { toString: 1 } });
+    assert.equal((await wa.bid(lot.id, 1000)).accepted, true, 'そのあとの入札は、受ける');
+    assert.equal((await fetch(t.srv.httpUrl + '/healthz')).status, 200);
+    wa.close(); auctioneer.close();
+  } finally { await t.end(); }
+});
+
+test('ログアウトした会員は、開いたままの入札画面からは、入札できない', async () => {
+  const t = await setup();
+  try {
+    const a = await t.register('09055550001', '検証 一郎');
+    await t.publishEvent('検証の競り');
+    await a.post('/api/join', { receive: 'ship', payment: 'transfer' });
+    const auctioneer = await connect(t.srv, t.ctx.tokens.auctioneer);
+    const wa = await t.ws(a);
+    const lot = await createLot(auctioneer, 1000);
+    await auctioneer.cmd('start', { lotId: lot.id });
+    await until(() => wa.lots.get(lot.id)?.status === 'open');
+    assert.equal((await a.post('/api/logout')).status, 200);
+    await assert.rejects(wa.bid(lot.id, 1000), /closed/);
+    await until(() => wa.closed);
+    auctioneer.close();
+  } finally { await t.end(); }
+});
+
+test('きのうの開催を終了し忘れても、翌日のうちは、終了できる', async () => {
+  const t = await setup();
+  try {
+    const yesterday = new Date(Date.now() + 9 * 3600000 - 86400000).toISOString().slice(0, 10);
+    const ev = { title: 'きのうの競り', startsAt: `${yesterday}T09:00`, endsAt: `${yesterday}T23:59`, venueName: '検証会場', venueAddress: '埼玉県◯◯市1-2-3', notified: true };
+    const { id } = (await t.staff.post('/api/events', ev)).json;
+    assert.equal((await t.staff.post(`/api/events/${id}/publish`)).status, 200);
+    const con = new Client(t.srv.url, undefined, { ack: false, headers: { cookie: t.staff.cookie } });
+    con.hello = { as: 'console' };
+    await con.connect();
+    const ended = await con.cmd('event_end');
+    assert.equal(ended.ok, true, JSON.stringify(ended));
+    con.close();
+  } finally { await t.end(); }
+});

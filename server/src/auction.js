@@ -148,7 +148,8 @@ export class Auction {
     const result = Number.isSafeInteger(item.amount) ? this.#judgeBid(lot, item) : 'OFF_LADDER';
     const accepted = result === 'ACCEPTED';
 
-    if (lot) {
+    // 金額が整数でない入札（壊れた端末・わざとの送信）は、記録にも入れずに断る（数でない値は、保存できない）
+    if (lot && Number.isSafeInteger(item.amount)) {
       // 受理も拒否も記録する。この書き込み（fsync つき）が終わるまで、端末には何も返さない（NFR-REL-001）
       tx(() => {
         q.insertBid.run(item.seq, item.lotId, item.member.id, item.amount, item.receivedAt, result, item.proxyBy);

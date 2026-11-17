@@ -161,3 +161,7 @@ class Link {
     this.send({ type: 'client_event', name, data, at: this.serverNow() });
   }
 }
+
+// 競りの画面を開いているあいだ、10分ごとに、サーバーへ短い問い合わせを送る。
+// 入札の通信（WebSocket）だけが続いていると、置き場所によっては「だれも使っていない」と見なされて、サーバーが休んでしまうため
+setInterval(() => { fetch('/healthz', { cache: 'no-store' }).catch(() => {}); }, 10 * 60 * 1000);

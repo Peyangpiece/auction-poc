@@ -8,7 +8,8 @@ import {
   randomToken, sha256, safeEqual, hashPassword, verifyPassword, newTotpSecret, verifyTotp, totp, otpauthUrl,
   newOtpCode, normalizePhone, isEmail,
 } from './security.js';
-import { Notifier, outboxSender } from './notify.js';
+import { clientIp } from './security.js';
+import { Notifier, outboxSender, httpMailSender } from './notify.js';
 import QRCode from 'qrcode';
 import { createRequire } from 'node:module';
 
@@ -77,13 +78,14 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = ?").get(col)) db.exec(`ALTER TABLE member_accounts ADD COLUMN ${col} ${type}`);
   }
   // 以前の版のデータベースに、後から足した列を加える
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('email_tokens') WHERE name = 'email'").get()) db.exec('ALTER TABLE email_tokens ADD COLUMN email TEXT');
   for (const col of ['phase', 'resume_at']) if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = ?").get(col)) db.exec(`ALTER TABLE events ADD COLUMN ${col} TEXT`);
   if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'venue_code'").get()) db.exec('ALTER TABLE events ADD COLUMN venue_code TEXT');
   if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'highlights'").get()) db.exec("ALTER TABLE events ADD COLUMN highlights TEXT NOT NULL DEFAULT ''");
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
 
   const notifier = new Notifier(
-    outboxSender(path.join(config.dataDir, 'outbox')),
+    config.mailUrl ? httpMailSender(config.mailUrl, outboxSender(path.join(config.dataDir, 'outbox'))) : outboxSender(path.join(config.dataDir, 'outbox')),
     (failure) => db.prepare('INSERT INTO notices (at, kind, body) VALUES (?, ?, ?)').run(nowMs(), 'send_failed', JSON.stringify(failure)),
   );
   const setting = (key) => db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? '';
@@ -145,13 +147,16 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
 
   // ------------------------------------------------------------ 認証の試行の速さ（総当たりを遅くする）
   const attempts = new Map(); // ip -> [時刻…]
-  function throttle(ctx) {
+  // 種類ごとに数える（住所の検索で、ログインの回数を使い切らないように）
+  function throttle(ctx, bucket = 'auth', limit = config.authRatePerMin) {
     if (!(config.authRatePerMin > 0)) return;
     const now = nowMs();
-    const list = (attempts.get(ctx.ip) ?? []).filter((t) => now - t < MIN);
-    if (list.length >= config.authRatePerMin) throw new HttpError(429, '試行が多すぎます。1分ほど待ってから、やり直してください');
+    const key = `${bucket}:${ctx.ip}`;
+    if (attempts.size > 20000) for (const [k, v] of attempts) if (!v.some((t) => now - t < MIN)) attempts.delete(k); // たまった古い分を捨てる
+    const list = (attempts.get(key) ?? []).filter((t) => now - t < MIN);
+    if (list.length >= limit) throw new HttpError(429, '試行が多すぎます。1分ほど待ってから、やり直してください');
     list.push(now);
-    attempts.set(ctx.ip, list);
+    attempts.set(key, list);
   }
 
   // ------------------------------------------------------------ SMS の認証番号（FR-AUTH-004・010）
@@ -165,8 +170,11 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       .run(phone, sha256(phone + ':' + code), now + OTP_TTL);
     db.prepare('INSERT INTO otp_sends (phone, at) VALUES (?, ?)').run(phone, now);
     // 送信の失敗による自動の再送（IF-EXT-003）は、上の回数に数えない（1回の送信として記録済み）
-    if (phone.startsWith('email:')) await notifier.email(phone.slice(6), 'otp', '【令和の競り】認証番号', `認証番号は ${code} です。5分以内に入力してください。\nお心当たりがない場合は、このメールを破棄してください。`);
-    else await notifier.sms(phone, 'otp', `【令和の競り】認証番号は ${code} です。5分以内に入力してください。`);
+    let delivered;
+    if (phone.startsWith('email:')) delivered = await notifier.email(phone.slice(6), 'otp', '【令和の競り】認証番号', `認証番号は ${code} です。5分以内に入力してください。\nお心当たりがない場合は、このメールを破棄してください。`);
+    else delivered = await notifier.sms(phone, 'otp', `【令和の競り】認証番号は ${code} です。5分以内に入力してください。`);
+    // 送れなかったのに「送りました」と出さない（再送しても失敗したとき。主催者管理者にも、知らせが残る）
+    if (!delivered) throw new HttpError(502, '認証番号を送れませんでした。少し待ってから、やり直してください。続くときは、主催者へご連絡ください');
     return code;
   }
   function checkOtp(phone, code) {
@@ -205,6 +213,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       if (!isEmail(raw)) throw bad('メールアドレスを正しく入力してください');
       return 'email:' + raw.toLowerCase();
     }
+    if (!config.sms) throw bad('メールアドレスを入力してください');
     const phone = normalizePhone(raw);
     if (!phone) throw bad('携帯電話の番号（例: 090-1234-5678）か、メールアドレスを入力してください');
     return phone;
@@ -219,6 +228,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       const rows = db.prepare('SELECT * FROM member_accounts WHERE lower(email) = ? AND email_verified = 1 AND withdrawn_at IS NULL AND approved_at IS NOT NULL').all(email);
       return { key: 'email:' + email, member: rows.length === 1 ? rows[0] : null };
     }
+    if (!config.sms) throw bad('メールアドレスを入力してください');
     const phone = normalizePhone(raw);
     if (!phone) throw bad('携帯電話の番号（例: 090-1234-5678）か、メールアドレスを入力してください');
     // メールで登録した人の電話番号は、本人のものと確かめていないので、SMS でのログインには使わせない
@@ -259,7 +269,9 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   });
   async function sendEmailVerification(ctx, member) {
     const token = randomToken();
-    db.prepare('INSERT INTO email_tokens (token_hash, member_id, expires_at) VALUES (?,?,?)').run(sha256(token), member.id, nowMs() + DAY);
+    // 確認のリンクは、送った先のアドレスにだけ効く（あとでアドレスを変えた人が、古いリンクで、別のアドレスを確認済みにできないように）
+    db.prepare('DELETE FROM email_tokens WHERE member_id = ?').run(member.id);
+    db.prepare('INSERT INTO email_tokens (token_hash, member_id, expires_at, email) VALUES (?,?,?,?)').run(sha256(token), member.id, nowMs() + DAY, String(member.email).toLowerCase());
     const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
     await notifier.email(member.email, 'verify_email', 'メールアドレスの確認', `次のリンクを開いて、メールアドレスを確認してください（24時間以内）。\n${origin}/api/email/verify?token=${token}`);
     return `${origin}/api/email/verify?token=${token}`;
@@ -466,7 +478,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   });
   // 郵便番号から住所を引く（会員登録の入力の手間を減らす）
   route('GET', '/api/postal', (ctx) => {
-    throttle(ctx);
+    throttle(ctx, 'postal', 60);
     const code = toHalfDigits(ctx.url.searchParams.get('code')).replace(/[^0-9]/g, '');
     if (code.length !== 7) throw bad('郵便番号を、7桁の数字で入力してください');
     return { ok: true, results: lookupPostal(code).slice(0, 20) };
@@ -474,7 +486,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   route('GET', '/api/email/verify', (ctx) => {
     const token = ctx.url.searchParams.get('token') ?? '';
     const row = db.prepare('SELECT * FROM email_tokens WHERE token_hash = ?').get(sha256(token));
-    const ok = !!row && nowMs() <= row.expires_at;
+    const owner = row ? db.prepare('SELECT email FROM member_accounts WHERE id = ?').get(row.member_id) : null;
+    const ok = !!row && nowMs() <= row.expires_at && !!row.email && String(owner?.email ?? '').toLowerCase() === row.email;
     if (ok) {
       db.prepare('UPDATE member_accounts SET email_verified = 1, updated_at = ? WHERE id = ?').run(nowMs(), row.member_id);
       db.prepare('DELETE FROM email_tokens WHERE member_id = ?').run(row.member_id);
@@ -522,7 +535,9 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const mail = String(body.email ?? '').trim().toLowerCase();
     let staff = staffByLogin(mail);
     // 最初の主催者管理者: 設定にあるメールアドレス（ハッシュで照らす）なら、ここで登録する（まだ登録が無いときだけ）
-    if (!staff && config.adminEmailHash && isEmail(mail) && safeEqual(sha256(mail), config.adminEmailHash)) {
+    // メールアドレスの主催者管理者が1人でもできたら、この道は閉じる（2人目は、主催者管理者が登録する）
+    const hasEmailAdmin = () => !!db.prepare("SELECT 1 FROM staff_accounts WHERE role = 'admin' AND email IS NOT NULL").get();
+    if (!staff && config.adminEmailHash && isEmail(mail) && safeEqual(sha256(mail), config.adminEmailHash) && !hasEmailAdmin()) {
       const made = inviteStaff({ email: mail, name: '管理者', role: 'admin' });
       audit({ ...ctx, system: true }, 'staff.create', { target: `staff:${made.id}`, after: { role: 'admin', by: '最初の主催者管理者' } });
       staff = staffByLogin(mail);
@@ -654,9 +669,9 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     db.prepare('UPDATE member_accounts SET login_id = ?, password_hash = ?, login_failed = 0, login_locked_until = 0, updated_at = ? WHERE id = ?').run(loginId, hashPassword(password), nowMs(), m.id);
     db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ?").run(m.id); // 前のパスワードでのログインは切る
     const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
-    await notifier.email(m.email, 'credentials', subject, `${lead}\n\nログイン ID: ${loginId}\nパスワード: ${password}\n\nログインはこちら: ${origin}/login.html\n\nパスワードは、ログインのあと、マイページの「個人情報の設定」で変えられます。\nこのメールにお心当たりがない場合は、破棄してください。`);
+    const sent = await notifier.email(m.email, 'credentials', subject, `${lead}\n\nログイン ID: ${loginId}\nパスワード: ${password}\n\nログインはこちら: ${origin}/login.html\n\nパスワードは、ログインのあと、マイページの「個人情報の設定」で変えられます。\nこのメールにお心当たりがない場合は、破棄してください。`);
     // お試し用の設定のときだけ、発行した内容を画面に返す（メールの送信サービスをつなぐ前に、動きを確かめるため）
-    return { loginId, ...(config.devShowCodes ? { devPassword: password } : {}) };
+    return { loginId, sent, ...(config.devShowCodes ? { devPassword: password } : {}) };
   }
   // 会員登録の承認（主催者管理者だけ）。承認すると、ログイン ID とパスワードを、承認のメールで送る
   route('POST', '/api/members/:id/approve', async (ctx, body, id) => {
@@ -769,7 +784,13 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
    * いまの開催: 公開中の開催のうち、開催日が今日（日本時間）のもの【前提】。同じ日に2つあれば、開始が早いほう。
    * 開催は月に2〜3回（発注者の決定）。参加手続きと入札は、開催の当日だけ受け付ける。終了した開催（FR-EVT-003）は除く。
    */
-  const activeEvent = () => db.prepare("SELECT * FROM events WHERE status = 'published' AND substr(starts_at, 1, 10) = ? AND (phase IS NULL OR phase <> 'ended') ORDER BY starts_at, id LIMIT 1").get(todayJst()) ?? null;
+  // 日付をまたいでも続けられるように、今日の開催が無ければ、きのう始まって、まだ「開催終了」していない開催を、いまの開催とする
+  // （終了の操作を忘れても、翌日のうちは、終了して請求書を出せる）
+  const activeEvent = () => {
+    const q = db.prepare("SELECT * FROM events WHERE status = 'published' AND substr(starts_at, 1, 10) = ? AND (phase IS NULL OR phase <> 'ended') ORDER BY starts_at, id LIMIT 1");
+    const today = todayJst();
+    return q.get(today) ?? q.get(new Date(Date.parse(today + 'T00:00:00Z') - DAY).toISOString().slice(0, 10)) ?? null;
+  };
   // 開催の予定（トップページのカレンダー用）。公開中の開催だけ。だれでも見られる
   route('GET', '/api/schedule', () => {
     const today = todayJst();
@@ -829,7 +850,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     // 開催終了の後は、主催者管理者だけが変えられる（AC-FR-SHIP-008-1）
     if (!p) throw new HttpError(409, '開催が終了したため、ここでは変更できません。変更は主催者に連絡してください');
     const next = { receive: body.receive ?? p.receive, payment: body.payment ?? p.payment };
-    if (!RECEIVE[next.receive] || !PAYMENT[next.payment]) throw bad('受け取り方法と支払方法を選んでください');
+    if (!Object.hasOwn(RECEIVE, next.receive) || !Object.hasOwn(PAYMENT, next.payment)) throw bad('受け取り方法と支払方法を選んでください');
     if (p.mode === 'online' && next.payment === 'cash') throw bad('当日現金は、会場で参加する方だけが選べます');
     db.transaction(() => {
       db.prepare('UPDATE members SET receive = ?, payment = ? WHERE id = ?').run(next.receive, next.payment, p.id);
@@ -848,9 +869,9 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (body.venueCode && !venueMatches(event, body.venueCode)) throw bad('会場の QR コードが、本日の開催のものではありません。受付で、もう一度読み取ってください');
     const mode = body.venueCode || body.mode === 'venue' ? 'venue' : 'online';
     const errors = {};
-    if (!RECEIVE[body.receive]) errors.receive = '受け取り方法を選んでください';
+    if (!Object.hasOwn(RECEIVE, body.receive)) errors.receive = '受け取り方法を選んでください';
     // オンライン参加の人は、銀行振込だけを選べる。会場参加の人は、当日現金と銀行振込のどちらも選べる（FR-PAY-002）
-    if (!PAYMENT[body.payment]) errors.payment = '支払方法を選んでください';
+    if (!Object.hasOwn(PAYMENT, body.payment)) errors.payment = '支払方法を選んでください';
     else if (mode === 'online' && body.payment === 'cash') errors.payment = '当日現金は、会場で参加する方だけが選べます';
     if (Object.keys(errors).length) throw bad('受け取り方法と支払方法の両方に、お答えください', { errors });
     const existing = participant(member.id, event.id);
@@ -902,7 +923,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (!event) throw new HttpError(409, '本日の開催はありません');
     const m = db.prepare('SELECT * FROM member_accounts WHERE phone = ?').get(phoneOf(body));
     if (!m) throw new HttpError(404, 'この電話番号の会員が見つかりません。先に、会員登録をしてもらってください');
-    if (!RECEIVE[body.receive] || !PAYMENT[body.payment]) throw bad('受け取り方法と支払方法を、本人に聞いて選んでください');
+    if (!Object.hasOwn(RECEIVE, body.receive) || !Object.hasOwn(PAYMENT, body.payment)) throw bad('受け取り方法と支払方法を、本人に聞いて選んでください');
     const existing = participant(m.id, event.id);
     if (existing) throw new HttpError(409, `この会員は、参加番号 ${existing.paddle_no} で参加手続きが済んでいます`);
     const paddle = db.transaction(() => {
@@ -924,7 +945,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     let payment = p.payment;
     if (p.mode === 'online') {
       // オンライン参加から会場参加への変更は、来場を確認したときだけ（FR-MODE-004）。支払方法は、本人に聞いて選び直す（FR-PAY-002）
-      if (!PAYMENT[body.payment]) throw bad('会場参加に切り替えます。支払方法を、本人に聞いて選んでください');
+      if (!Object.hasOwn(PAYMENT, body.payment)) throw bad('会場参加に切り替えます。支払方法を、本人に聞いて選んでください');
       payment = body.payment;
     }
     db.prepare("UPDATE members SET mode = 'venue', payment = ?, checked_in_at = ? WHERE id = ?").run(payment, nowMs(), id);
@@ -973,7 +994,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   // ------------------------------------------------------------ 表示する文言
   // 商品は、競りの最中に進行コンソールからその場で登録する（発注者の決定）。事前の登録・審査・カタログは持たない。
   // 送料が含まれないことの表示（FR-SHIP-003）と、返品特約の表示（FR-LEG-002）。だれでも見られる
-  route('GET', '/api/terms', () => ({ devShowCodes: config.devShowCodes, orgName: setting('org_name'), shippingNotice: setting('shipping_notice'), returnPolicy: setting('return_policy'), premiumRate: billing.premiumRate() }));
+  route('GET', '/api/terms', () => ({ devShowCodes: config.devShowCodes, sms: config.sms, orgName: setting('org_name'), shippingNotice: setting('shipping_notice'), returnPolicy: setting('return_policy'), premiumRate: billing.premiumRate() }));
 
   // ------------------------------------------------------------ 主催者設定（FR-ORG-001 の一部）・監査ログ・知らせ
   // 請求書・手数料に使う設定（FR-ORG-001 の一部）。未入力でも動くが、請求書には「（未設定）」と出る
@@ -1046,7 +1067,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   }
 
   async function handle(req, res, url) {
-    const ctx = { req, res, url, ip: req.socket.remoteAddress };
+    const ctx = { req, res, url, ip: clientIp(req, config) };
     try {
       loadSession(ctx);
       const found = routes.map((r) => ({ r, m: r.re.exec(url.pathname) })).filter((x) => x.m);
@@ -1090,6 +1111,12 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return { staff: { id: ctx.staff.id, name: ctx.staff.name, role: ctx.staff.role, account: true } };
   }
   /** ログインしているか（会員かスタッフ）。トップページを開いた人を、ログインの画面へ送るかどうかに使う */
+  /** ログイン中の会員の番号（ログインが切れていれば null）。開いたままの入札画面の、確かめ直しに使う */
+  function memberIdFromCookie(req) {
+    const ctx = { req };
+    loadSession(ctx);
+    return ctx.member && !ctx.member.withdrawn_at ? ctx.member.id : null;
+  }
   function signedIn(req) {
     const ctx = { req };
     loadSession(ctx);
@@ -1125,6 +1152,6 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   }
   return {
     handle, createStaff, inviteStaff, audit, participantFromCookie, bidGate, eventId: () => activeEvent()?.id ?? null,
-    staffFromCookie, viewerFromCookie, signedIn, eventState, setPhase, proxyTarget, billing,
+    staffFromCookie, viewerFromCookie, signedIn, memberIdFromCookie, eventState, setPhase, proxyTarget, billing,
   };
 }

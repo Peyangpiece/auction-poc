@@ -15,6 +15,28 @@ export function outboxSender(dir) {
   };
 }
 
+/**
+ * 本番用: メールを、取り次ぎ先（Cloudflare の Worker → 送信サービス）へ送る。
+ * メール以外（請求メールの下書き・SMS）は、other に任せる。
+ * 送ったメールの本文（認証番号やパスワードを含む）は、ファイルに残さない。
+ */
+export function httpMailSender(url, other) {
+  return async (message) => {
+    if (message.channel !== 'email') return other(message);
+    const res = await fetch(url + '/send', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to: message.to, subject: message.subject, text: message.body }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) {
+      let why = '';
+      try { why = (await res.json()).error ?? ''; } catch { /* 理由なし */ }
+      throw new Error(`メールを送れませんでした（${res.status}）${why ? ' ' + why : ''}`);
+    }
+    await res.body?.cancel();
+  };
+}
+
 export class Notifier {
   /**
    * @param {(message: object) => Promise<void>} send 1通を送る関数（失敗したら例外を投げる）

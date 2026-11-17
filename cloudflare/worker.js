@@ -2,17 +2,30 @@
 // 画面・API・WebSocket（入札）のすべてが、ここを通る。配り方は docs/03 の 32 章。
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import { handleStore } from './store.js';
+import { handleMail } from './mail.js';
 
 const PORT = 8080;
 // コンテナの中のアプリが、データの保存先（R2）を呼ぶときの名前。外のインターネットには出ない
 const STORE_HOST = 'store.internal';
+// メールの送信を頼むときの名前（Worker が、送信サービスへ取り次ぐ）
+const MAIL_HOST = 'mail.internal';
 // 通信が途絶えてから、コンテナを止めるまでの時間。止まっても、データは R2 から戻る
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+
+// 立ち上がりを待っているあいだに出す案内（5秒ごとに、自動で開き直す）
+const STARTING_PAGE = '<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="5"><title>令和の競り</title><body style="font-family:sans-serif;text-align:center;padding:20vh 16px"><h1 style="font-size:20px">起動しています</h1><p>しばらくお待ちください。自動で開き直します。</p></body></html>';
 
 // コンテナからの「保存先」あての通信を受けて、R2 に出し入れする
 export class DataStore extends WorkerEntrypoint {
   fetch(request) {
     return handleStore(request, this.env.DATA);
+  }
+}
+
+// コンテナからの「メールの送信」を受けて、送信サービス（Resend）へ取り次ぐ
+export class MailSender extends WorkerEntrypoint {
+  fetch(request) {
+    return handleMail(request, this.env);
   }
 }
 
@@ -28,7 +41,14 @@ export class AuctionApp extends DurableObject {
   async fetch(request) {
     // 同時に届いた通信は、1回の起動を待ち合わせる
     this.starting ??= this.startAndWait().finally(() => { this.starting = undefined; });
-    await this.starting;
+    try { await this.starting; } catch (err) {
+      // 立ち上がりに時間がかかっているとき（データを戻している最中など）。エラーの画面ではなく、案内を返す
+      console.error('[start]', err);
+      const html = request.headers.get('upgrade') !== 'websocket' && (request.headers.get('accept') ?? '').includes('text/html');
+      return new Response(html ? STARTING_PAGE : '起動中です。少し待ってから、もう一度お試しください', {
+        status: 503, headers: { 'content-type': `${html ? 'text/html' : 'text/plain'}; charset=utf-8`, 'retry-after': '5', 'cache-control': 'no-store' },
+      });
+    }
     const url = new URL(request.url);
     const publicHost = url.host;
     url.protocol = 'http:';
@@ -38,6 +58,8 @@ export class AuctionApp extends DurableObject {
     // 外から見たサイトの名前と HTTPS であることを、アプリへ伝える（外から届いた同名のヘッダーは、ここで上書きする）
     forwarded.headers.set('x-forwarded-host', publicHost);
     forwarded.headers.set('x-forwarded-proto', 'https');
+    // 利用者の接続元（Cloudflare が付ける値）。試行の回数の制限と、記録に使う
+    forwarded.headers.set('x-real-ip', request.headers.get('cf-connecting-ip') ?? '');
     // 返事をそのまま返す（WebSocket への切り替えも、そのまま通る）
     return this.ctx.container.getTcpPort(PORT).fetch(forwarded);
   }
@@ -56,13 +78,24 @@ export class AuctionApp extends DurableObject {
     }
     if (!container.running) {
       const demo = this.env.DEMO === '1';
+      const mail = Boolean(this.env.RESEND_API_KEY && this.env.MAIL_FROM);
+      // 映像（Amazon IVS）: チャンネルと AWS の鍵が入っていれば、つなぐ。無ければ、映像なしで競りだけを動かす
+      const e = this.env;
+      const ivs = Boolean(e.IVS_CHANNEL_ARN && e.IVS_PLAYBACK_URL && e.AWS_ACCESS_KEY_ID && e.AWS_SECRET_ACCESS_KEY);
       const env = {
         POC_TRUST_PROXY: '1',
         POC_COOKIE_SECURE: '1',
-        POC_IVS_MODE: 'always-live',
+        ...(ivs ? {
+          POC_IVS_MODE: 'aws', IVS_CHANNEL_ARN: e.IVS_CHANNEL_ARN, IVS_PLAYBACK_URL: e.IVS_PLAYBACK_URL, AWS_REGION: e.AWS_REGION || 'ap-northeast-1',
+          AWS_ACCESS_KEY_ID: e.AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY: e.AWS_SECRET_ACCESS_KEY,
+          ...(e.EVENTBRIDGE_SECRET ? { POC_EVENTBRIDGE_SECRET: e.EVENTBRIDGE_SECRET } : {}),
+        } : { POC_IVS_MODE: 'always-live' }),
         POC_PERSIST_URL: `http://${STORE_HOST}`,
         // お試し用: 認証番号を画面に出し、今日の開催を自動で作る（SMS がまだつながっていないため）
         ...(demo ? { POC_DEV_SHOW_CODES: '1', POC_SETUP_ARGS: '--with-event' } : {}),
+        // メールの送信がつながっていれば、実際に送る。SMS は使わない（発注者の決定）ので、本番では、電話番号での認証を止める
+        ...(mail ? { POC_MAIL_URL: `http://${MAIL_HOST}` } : {}),
+        ...(demo ? {} : { POC_SMS: '0', POC_TOKEN_LOGIN: '0' }),
         // 管理者（admin）の最初のパスワード。ソースには書かず、wrangler secret put ADMIN_PASSWORD で入れる
         ...(this.env.ADMIN_PASSWORD ? { POC_ADMIN_PASSWORD: this.env.ADMIN_PASSWORD } : {}),
         // 最初の主催者管理者のメールアドレス（秘密の値。ソースには書かない）。あれば、起動のときに登録する
@@ -71,8 +104,9 @@ export class AuctionApp extends DurableObject {
       };
       // コンテナごとに、登録し直す決まり
       await container.interceptOutboundHttp(STORE_HOST, this.ctx.exports.DataStore);
+      await container.interceptOutboundHttp(MAIL_HOST, this.ctx.exports.MailSender);
       if (build) await this.ctx.storage.put('build', build);
-      container.start({ image: container.images.base, instance: this.env.INSTANCE_TYPE || 'standard-1', enableInternet: false, env });
+      container.start({ image: container.images.base, instance: this.env.INSTANCE_TYPE || 'standard-1', enableInternet: ivs, env }); // 外への通信は、IVS の状態を AWS に問い合わせるときだけ開ける
     }
     await container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS);
     const port = container.getTcpPort(PORT);
@@ -96,5 +130,10 @@ export default {
       return new Response('準備中です。管理者の最初のパスワードを入れてください: npx wrangler secret put ADMIN_PASSWORD（12文字以上）', { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } });
     }
     return env.AUCTION_APP.getByName('main').fetch(request);
+  },
+  // 1日1回、アプリを起こす（だれも開かない日にも、支払期限・受け取り期限の知らせを送るため）
+  scheduled(controller, env, ctx) {
+    if (!env.ADMIN_PASSWORD || env.ADMIN_PASSWORD.length < 12) return;
+    ctx.waitUntil(env.AUCTION_APP.getByName('main').fetch(new Request('https://internal/healthz')).then((r) => r.body?.cancel()));
   },
 };

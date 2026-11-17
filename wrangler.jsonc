@@ -5,6 +5,8 @@
   "compatibility_date": "2026-11-16",
   "workers_dev": true,
   "observability": { "enabled": true },
+  // 毎日 9:30（日本時間）に、アプリを起こす（期限の知らせを、だれも開かない日にも送る）
+  "triggers": { "crons": ["30 0 * * *"] },
   "vars": {
     // 1 = お試し用（認証番号を画面に出す。今日の開催を自動で作る）。本番の運用では使わない
     "DEMO": "1",

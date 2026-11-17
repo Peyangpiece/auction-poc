@@ -81,6 +81,12 @@ export function loadConfig(env = process.env) {
     trustProxy: env.POC_TRUST_PROXY === '1',
     // お試し用: SMS の認証番号と、スタッフの認証コードを、画面に出す（送信サービスをつなぐ前に、動きを確かめるため）。本番では必ず 0
     devShowCodes: env.POC_DEV_SHOW_CODES === '1',
+    // メールの送信の取り次ぎ先（POST <ここ>/send に { to, subject, text }）。空なら、送らずに data/outbox に書き出すだけ（開発用）
+    mailUrl: (env.POC_MAIL_URL || '').replace(/\/$/, ''),
+    // 合言葉（検証用のトークン）での入札画面・進行コンソールへの接続を許すか。本番では 0（ログインだけで入る）
+    tokenLogin: env.POC_TOKEN_LOGIN !== '0',
+    // SMS（電話番号への認証番号）を使うか。0 なら、会員登録と「パスワードを忘れた方」は、メールアドレスだけ（発注者の決定: 本番では SMS を使わない）
+    sms: env.POC_SMS !== '0',
     // データの置き場が消える環境（Cloudflare のコンテナなど）で、外の保存先へ保存・復元する（server/src/persist.js）。空なら使わない
     persistUrl: (env.POC_PERSIST_URL || '').replace(/\/$/, ''),
     // 保存の間隔。書き込みがあったときだけ送る

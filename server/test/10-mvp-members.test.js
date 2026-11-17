@@ -520,3 +520,26 @@ test('スタッフ: 設定にあるメールアドレス（ハッシュ）の人
     assert.equal((await t.browser().post('/api/staff/login', { email: 'saisho@example.com', password: 'tadashii-password-1' })).status, 200);
   } finally { await t.close(); }
 });
+
+test('SMS を使わない設定では、登録と「パスワードを忘れた方」は、メールアドレスだけ', async () => {
+  const t = await setup({ POC_SMS: '0' });
+  try {
+    assert.equal((await t.browser().get('/api/terms')).json.sms, false);
+    const r = await t.browser().post('/api/register/start', { id: '09011112222' });
+    assert.equal(r.status, 400);
+    assert.match(r.json.message, /メールアドレス/);
+    assert.equal((await t.browser().post('/api/login/start', { id: '09011112222' })).status, 400);
+    assert.equal((await t.browser().post('/api/register/start', { id: 'mail-only@example.com' })).status, 200);
+    assert.ok(!t.outbox().some((m) => m.channel === 'sms'));
+  } finally { await t.close(); }
+});
+
+test('メールアドレスの主催者管理者ができたあとは、設定のメールアドレスでの登録の道は、閉じる', async () => {
+  const hash = crypto.createHash('sha256').update('saisho@example.com').digest('hex');
+  const t = await setup({ POC_ADMIN_EMAIL_SHA256: hash });
+  try {
+    const admin = await t.staffLogin('admin', 'kanri', null);
+    assert.equal((await admin.post('/api/staff/accounts', { email: 'betsu@example.com', name: '別の管理者', role: 'admin' })).status, 200);
+    assert.equal((await t.browser().post('/api/staff/setup', { email: 'saisho@example.com', password: 'tadashii-password-1' })).status, 401);
+  } finally { await t.close(); }
+});

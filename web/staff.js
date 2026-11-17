@@ -82,7 +82,9 @@ function eventDialog(e) {
 // ログイン ID とパスワードを発行したあとの知らせ。メールで送った旨を出す。お試し用の設定のときだけ、内容も出す
 function issuedDialog(title, res) {
   openDialog(title,
-    el('p', { text: `ログイン ID とパスワードを、${res.email} へメールで送りました。` }),
+    res.sent === false
+      ? el('p', { class: 'warn', role: 'alert', text: `${res.email} へのメールを、送れませんでした。少し待ってから、会員の一覧の「ログイン情報を発行」で、送り直してください。` })
+      : el('p', { text: `ログイン ID とパスワードを、${res.email} へメールで送りました。` }),
     res.devPassword && el('dl', { class: 'facts' },
       el('dt', { text: 'ログイン ID' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.loginId }))),
       el('dt', { text: 'パスワード' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.devPassword })))),

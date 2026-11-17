@@ -6,6 +6,11 @@ on:
   push:
     branches: [deploy/cloudflare]
   workflow_dispatch:
+    inputs:
+      force:
+        description: 競りの最中でも配る（接続が切れ、進行中の品は中断になる）
+        type: boolean
+        default: false
 
 concurrency: deploy-cloudflare
 
@@ -18,6 +23,19 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
       ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      MAIL_FROM: ${{ secrets.MAIL_FROM }}
+      # 1 にすると、本番の設定で配る（認証番号を画面に出さない。お試しの開催を作らない）。メールの送信が入っていないと、配らない
+      PRODUCTION: ${{ secrets.PRODUCTION }}
+      # 公開しているサイトの URL（例: https://<名前>.<アカウント>.workers.dev）。入れておくと、競りの最中には配らない
+      SITE_URL: ${{ secrets.SITE_URL }}
+      FORCE: ${{ inputs.force }}
+      # 映像（Amazon IVS）。5つとも入っているときだけ、つなぐ
+      IVS_CHANNEL_ARN: ${{ secrets.IVS_CHANNEL_ARN }}
+      IVS_PLAYBACK_URL: ${{ secrets.IVS_PLAYBACK_URL }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      EVENTBRIDGE_SECRET: ${{ secrets.EVENTBRIDGE_SECRET }}
       WRANGLER: npx --yes wrangler@4.163.0
     steps:
       - uses: actions/checkout@v4
@@ -29,11 +47,38 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN が入っていません"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID が入っていません"; exit 1; }
           test "${#ADMIN_PASSWORD}" -ge 12 || { echo "ADMIN_PASSWORD を、12文字以上で入れてください"; exit 1; }
+      - name: 競りの最中でないことを確かめる（SITE_URL があるときだけ）
+        if: env.SITE_URL != '' && env.FORCE != 'true'
+        run: |
+          body="$(curl -fsS --max-time 60 "$SITE_URL/healthz" || true)"
+          echo "$body"
+          if echo "$body" | grep -q '"busy":true'; then
+            echo "競りが進行中です。配ると、全員の接続が切れ、進行中の品が中断になります。終わってから、やり直してください（手動の実行で force を選ぶと、それでも配ります）"
+            exit 1
+          fi
       - name: データの保存先（R2 のバケット）を作る（すでにあれば、そのまま）
         run: $WRANGLER r2 bucket create reiwa-no-seri-data || echo "すでにあるか、作れませんでした（次の段で分かる）"
+      - name: メールの送信（Resend）の API キーと、送り元を入れる（GitHub にあるときだけ。配る前に入れて、新しいコンテナが最初から使えるようにする）
+        if: env.RESEND_API_KEY != '' && env.MAIL_FROM != ''
+        run: |
+          printf '%s' "$RESEND_API_KEY" | $WRANGLER secret put RESEND_API_KEY
+          printf '%s' "$MAIL_FROM" | $WRANGLER secret put MAIL_FROM
+      - name: 映像（Amazon IVS）の設定を入れる（GitHub にあるときだけ）
+        if: env.IVS_CHANNEL_ARN != '' && env.IVS_PLAYBACK_URL != '' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+        run: |
+          for name in IVS_CHANNEL_ARN IVS_PLAYBACK_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY EVENTBRIDGE_SECRET; do
+            value="$(printenv "$name" || true)"
+            if [ -n "$value" ]; then printf '%s' "$value" | $WRANGLER secret put "$name"; fi
+          done
       - name: コンテナを組み立てて、配る
         # BUILD（この版の印）が変わると、入口の Worker が、動いているコンテナを新しい版に入れ替える
-        run: $WRANGLER deploy --var BUILD:${{ github.sha }}
+        run: |
+          if [ "$PRODUCTION" = "1" ]; then
+            if [ -z "$RESEND_API_KEY" ] || [ -z "$MAIL_FROM" ]; then echo "本番の設定（PRODUCTION=1）には、RESEND_API_KEY と MAIL_FROM が要ります"; exit 1; fi
+            $WRANGLER deploy --var BUILD:${{ github.sha }} --var DEMO:0
+          else
+            $WRANGLER deploy --var BUILD:${{ github.sha }}
+          fi
       - name: 管理者の最初のパスワードを入れる
         run: printf '%s' "$ADMIN_PASSWORD" | $WRANGLER secret put ADMIN_PASSWORD
       - name: 最初の主催者管理者のメールアドレスを入れる（GitHub に ADMIN_EMAIL があるときだけ）

@@ -14,6 +14,7 @@ import { StreamControl } from './stream.js';
 import { Auction } from './auction.js';
 import { nowMs } from './clock.js';
 import { createApi } from './mvp/api.js';
+import { clientIp } from './mvp/security.js';
 
 const config = loadConfig();
 const store = openDb(config.dbPath);
@@ -22,6 +23,8 @@ const saver = config.persistUrl ? createSaver({ db: store.db, config }) : null;
 const metrics = new Metrics(config.metricsDir, { level: config.metricsLevel, fileMb: config.metricsFileMb, maxMb: config.metricsMaxMb });
 
 // ---------------------------------------------------------------- 接続の管理
+let errorCount = 0; // 思いがけないエラーの数（/healthz に出す）
+const pending = new Map(); // 名乗る前の接続の数（接続元ごと）
 const clients = new Set(); // { ws, role: 'member'|'auctioneer', member?, staff?, id }
 let connSeq = 0;
 
@@ -123,7 +126,17 @@ if (recovered.length) console.log('[recovery]', JSON.stringify(recovered));
 
 // 起動のときと1時間ごとに、請求の見回りをする（落札の明細の作り漏れ、期限を過ぎた知らせ、受け取り期限の前日の知らせ）
 try { api.billing.sweep(); } catch (err) { console.error('[billing]', err); }
-setInterval(() => { try { api.billing.sweep(); } catch (err) { console.error('[billing]', err); } }, 3600000).unref();
+// 期限の切れた記録（ログイン・認証番号・確認のリンク）を捨てる。たまり続けて、保存のたびに送る量が増えるのを防ぐ
+function prune() {
+  const now = nowMs(), day = 86400000;
+  store.db.prepare("DELETE FROM sessions WHERE last_seen_at < ?").run(now - 401 * day);
+  store.db.prepare("DELETE FROM sessions WHERE kind IN ('staff','register') AND last_seen_at < ?").run(now - 30 * day);
+  store.db.prepare('DELETE FROM otp_sends WHERE at < ?').run(now - day);
+  store.db.prepare('DELETE FROM otp_codes WHERE expires_at < ?').run(now - day);
+  store.db.prepare('DELETE FROM email_tokens WHERE expires_at < ?').run(now - day);
+}
+try { prune(); } catch (err) { console.error('[prune]', err); }
+setInterval(() => { try { api.billing.sweep(); prune(); } catch (err) { console.error('[billing]', err); } }, 3600000).unref();
 
 // ---------------------------------------------------------------- HTTP
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
@@ -161,7 +174,7 @@ const server = http.createServer((req, res) => {
     let db = true;
     try { store.db.prepare('SELECT 1').get(); } catch { db = false; }
     res.statusCode = db ? 200 : 503;
-    return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, agent: stream.view().agentConnected, ...(saver ? { persist: saver.status() } : {}) }));
+    return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, busy: auction.snapshot().lots.some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status)), errors: errorCount, agent: stream.view().agentConnected, ...(saver ? { persist: saver.status() } : {}) }));
   }
   if (url.pathname === '/hooks/ivs' && req.method === 'POST') return handleEventBridge(req, res);
   if (url.pathname.startsWith('/api/')) return api.handle(req, res, url);
@@ -273,13 +286,33 @@ heartbeat.unref();
 function onClient(ws, req) {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
-  const conn = { ws, role: null, member: null, staff: null, id: ++connSeq, ip: req.socket.remoteAddress };
+  const conn = { ws, role: null, member: null, staff: null, id: ++connSeq, ip: clientIp(req, config) };
+  // 名乗る前の接続は、同じ接続元から 20 本まで（1人が、空の接続で席を埋めて、ほかの人を入れなくするのを防ぐ）
+  const pendingKey = conn.ip;
+  pending.set(pendingKey, (pending.get(pendingKey) ?? 0) + 1);
+  const leavePending = () => { if (conn.pendingLeft) return; conn.pendingLeft = true; const n = (pending.get(pendingKey) ?? 1) - 1; if (n > 0) pending.set(pendingKey, n); else pending.delete(pendingKey); };
+  if (pending.get(pendingKey) > 20) { leavePending(); return ws.close(4429, 'too many pending connections'); }
   const send = (msg) => ws.readyState === 1 && ws.send(JSON.stringify(msg));
   const allow = limiter(config.messageRate);
   // 名乗らないままの接続を残さない
   const helloTimer = config.helloTimeoutMs > 0 ? setTimeout(() => { if (!conn.role) ws.close(4408, 'hello timeout'); }, config.helloTimeoutMs) : null;
 
+  // 1通の処理でエラーが起きても、サーバーは止めない（その1通だけを断る）
   ws.on('message', (raw) => {
+    try { onMessage(raw); } catch (err) {
+      console.error('[ws]', err);
+      metrics.write('message_error', { conn: conn.id, message: String(err?.message ?? err) });
+      send({ type: 'error', message: '処理できませんでした。画面を開き直して、もう一度お試しください' });
+    }
+  });
+  // ログインが切れた人（ログアウト・停止・パスワードの変更・期限切れ）は、開いたままの画面からも、操作できない
+  const stillSignedIn = () => {
+    if (!conn.recheck || conn.recheck()) return true;
+    send({ type: 'error', code: 'SIGNED_OUT', message: 'ログインが切れました。ログインし直してください' });
+    ws.close(4403, 'signed out');
+    return false;
+  };
+  const onMessage = (raw) => {
     // 受信が速すぎる接続は切る（壊れた端末や、わざとの連打からサーバーを守る）
     if (!allow()) {
       metrics.write('rejected_flood', { conn: conn.id, role: conn.role });
@@ -297,6 +330,10 @@ function onClient(ws, req) {
       // 合言葉（検証用の URL と、進行役）で名乗るか、合言葉なしで、ログインのクッキーと参加手続きで名乗る
       let member = null, staff = null;
       if (msg.token) {
+        if (!config.tokenLogin) {
+          send({ type: 'error', message: 'この環境では、合言葉（トークン）では入れません。ログインしてください' });
+          return ws.close(4401, 'unauthorized');
+        }
         const hash = hashToken(msg.token);
         member = store.q.memberByToken.get(hash) ?? null;
         staff = member ? null : store.q.staffByToken.get(hash) ?? null;
@@ -312,6 +349,7 @@ function onClient(ws, req) {
           return ws.close(4403, found.code);
         }
         staff = found.staff;
+        conn.recheck = () => api.staffFromCookie(req).staff?.id === staff.id;
       } else if (msg.as === 'monitor') {
         // 会場の大型モニター: スタッフのログインで名乗る。見るだけで、操作も入札もできない
         const found = api.viewerFromCookie(req);
@@ -321,6 +359,7 @@ function onClient(ws, req) {
         }
         staff = found.staff;
         conn.viewer = true;
+        conn.recheck = () => api.viewerFromCookie(req).staff?.id === staff.id;
       } else {
         const found = api.participantFromCookie(req);
         if (!found.member) {
@@ -328,6 +367,9 @@ function onClient(ws, req) {
           return ws.close(4403, found.code);
         }
         member = found.member;
+        // 参加の手続きは、入札のたびに別に確かめている（bidGate）。ここでは、ログインが続いているかだけを見る
+        const accountId = api.memberIdFromCookie(req);
+        conn.recheck = () => api.memberIdFromCookie(req) === accountId;
       }
       if (conn.role) return; // 名乗り直しは受け付けない
       // 同じ人の同時接続に上限を置く（合言葉が漏れたときに、際限なくつながれないようにする）
@@ -340,6 +382,7 @@ function onClient(ws, req) {
       userConnections.set(userKey, open + 1);
       conn.userKey = userKey;
       clearTimeout(helloTimer);
+      leavePending();
       conn.role = member ? 'member' : conn.viewer ? 'viewer' : 'auctioneer';
       conn.member = member ?? null;
       conn.staff = staff ?? null;
@@ -363,6 +406,7 @@ function onClient(ws, req) {
       case 'bid':
         // 主催者側のスタッフは入札できない（FR-CON-004）
         if (conn.role !== 'member') return send({ type: 'error', message: 'スタッフは入札できません' });
+        if (!stillSignedIn()) return;
         {
           // 入札の速さの上限（会員ごと）。人の操作ではありえない速さの入札は、受け付けずに返す。記録にも残さない
           let ok = bidLimiters.get(conn.member.id);
@@ -383,17 +427,20 @@ function onClient(ws, req) {
       case 'client_event':
         return metrics.write('client_event', { conn: conn.id, paddle: conn.member?.paddle_no ?? null, name: String(msg.name).slice(0, 64), data: msg.data ?? null, clientAt: msg.at ?? null });
       case 'comment':
+        if (!stillSignedIn()) return;
         return onComment(conn, msg, send);
       case 'cmd':
         if (conn.role !== 'auctioneer') return send({ type: 'error', message: '進行役だけができる操作です' });
+        if (!stillSignedIn()) return;
         return onAuctioneer(conn, msg, send);
       default:
         return send({ type: 'error', message: `知らないメッセージです: ${msg.type}` });
     }
-  });
+  };
 
   ws.on('close', () => {
     clearTimeout(helloTimer);
+    leavePending();
     if (conn.userKey) {
       const left = (userConnections.get(conn.userKey) ?? 1) - 1;
       if (left > 0) userConnections.set(conn.userKey, left); else userConnections.delete(conn.userKey);
@@ -530,6 +577,10 @@ server.listen(config.port, config.host, () => {
   console.log(`[server] metrics -> ${metrics.file ?? '（記録しない）'}`);
 });
 
+// 思いがけないエラーで、サーバーごと止まらないようにする（競りの最中に、全員の接続が切れるのを防ぐ）。記録して、続ける
+process.on('uncaughtException', (err) => { if (err?.syscall === 'listen') { console.error(err); process.exit(1); } errorCount++; console.error('[uncaught]', err); });
+process.on('unhandledRejection', (err) => { errorCount++; console.error('[unhandled]', err); });
+
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, async () => {
     stream.stop();
@@ -537,7 +588,13 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     server.close();
     await metrics.close();
     // 止まる前に、まだ送っていない分を保存先へ送る
-    if (saver) { saver.stop(); await saver.flush(); }
+    // 1回で送れなければ、送れるまで（50秒まで）くり返す
+    if (saver) {
+      saver.stop();
+      const until = Date.now() + 50000;
+      do { await saver.flush(); } while (saver.status().pending && Date.now() < until && (await new Promise((r) => setTimeout(r, 1000)), true));
+      if (saver.status().pending) console.error('[persist] 止まる前に、送り切れませんでした');
+    }
     store.db.close();
     process.exit(0);
   });

@@ -114,3 +114,33 @@ test('保存先は、置き場の外を指す名前を断る', async () => {
   assert.equal(r.status, 400);
   assert.equal(bucket.objects.size, 0);
 });
+
+test('保存先のデータベースが壊れていたら、日ごとの控えから戻す。戻したファイルは、送り直さない', async () => {
+  const bucket = fakeBucket();
+  const { server, url } = await storeServer(bucket);
+  const a = machine(url);
+  const storeA = openDb(a.dbPath);
+  storeA.db.exec('CREATE TABLE t_persist (v TEXT)');
+  storeA.db.prepare('INSERT INTO t_persist VALUES (?)').run('控えにある');
+  fs.mkdirSync(path.join(a.dataDir, 'invoices'), { recursive: true });
+  fs.writeFileSync(path.join(a.dataDir, 'invoices', 'a.pdf'), 'PDF');
+  await createSaver({ db: storeA.db, config: a }).flush();
+  storeA.db.close();
+  bucket.objects.set('data/' + DB_KEY, Buffer.from('こわれた中身'));
+
+  const b = machine(url);
+  const logs = [];
+  await restore(b, { log: (m) => logs.push(m) });
+  assert.ok(logs.some((m) => /日ごとの控え/.test(m)));
+  const storeB = openDb(b.dbPath);
+  assert.equal(storeB.db.prepare('SELECT v FROM t_persist').get().v, '控えにある');
+  // 2台目の最初の保存: 戻したばかりの請求書は、送り直さない。データベースは、送る
+  const puts = [];
+  const put = bucket.put;
+  bucket.put = async (key, body) => { puts.push(key); return put(key, body); };
+  await createSaver({ db: storeB.db, config: b }).flush();
+  assert.ok(puts.includes('data/' + DB_KEY));
+  assert.ok(!puts.includes('data/invoices/a.pdf'));
+  storeB.db.close();
+  server.close();
+});

@@ -92,3 +92,13 @@ export function normalizePhone(input) {
   return digits;
 }
 export const isEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(text ?? '')) && String(text).length <= 254;
+
+/**
+ * 利用者の接続元。手前にプロキシがあるとき（POC_TRUST_PROXY=1）は、プロキシが付けた x-real-ip を使う
+ * （付けなければ、全員が同じ接続元に見えて、1人の連打で全員のログインが止まる）。
+ * x-real-ip は、入口（Cloudflare の Worker・Caddy）が、利用者から届いた同名のヘッダーを上書きして付ける。
+ */
+export function clientIp(req, config) {
+  const real = config.trustProxy ? String(req.headers['x-real-ip'] ?? '').trim() : '';
+  return real && real.length <= 64 ? real : req.socket.remoteAddress;
+}
