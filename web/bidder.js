@@ -440,9 +440,26 @@ if (!token) (async () => {
   if (p.status !== 200) { $('gateMsg').textContent = p.message ?? '開けませんでした。開き直してください'; return; }
   if (!p.event) { $('gateMsg').textContent = '本日の開催はありません。'; return; }
   if (p.joined) {
-    // 参加モードは、1回の開催の中では変えられない。オンラインで手続き済みの人が会場に来たら、受付で切り替える（FR-MODE-004）
-    if (p.venue && p.mode === 'online') $('gateMsg').textContent = 'オンライン参加で手続き済みです。会場で参加するには、受付にお申し出ください。';
-    return showPaddle(p.event.title, p);
+    // 手続きが済んでいる人にも、入るたびに、オンラインか会場かを選んでもらう（発注者の指示）。
+    // いまと同じほうを選べば、そのまま入る。違うほうを選べば、切り替えてから入る（会場にした場合は、来場の確認を待つ）
+    // 会場参加で、来場の確認を待っている人は、選び直しの画面ではなく、待つ画面を出す（そこから、オンラインに切り替えられる）
+    if (p.mode === 'venue' && !p.checkedIn) return showPaddle(p.event.title, p);
+    $('gateEvent').textContent = p.event.title;
+    $('pickNow').textContent = `いまは、${p.mode === 'venue' ? '会場参加' : 'オンライン参加'}（参加番号 ${p.paddle}）です。`;
+    $('modePick').hidden = false;
+    for (const b of document.querySelectorAll('[data-pick]')) b.addEventListener('click', async () => {
+      const want = b.dataset.pick;
+      let now = p;
+      if (want !== p.mode) {
+        const res = await getJson(`/api/my/participation/${want}`, {});
+        if (res.status !== 200) { $('gateMsg').textContent = res.message ?? 'うまくいきませんでした。やり直してください'; return; }
+        now = res;
+      }
+      $('modePick').hidden = true;
+      showPaddle(p.event.title, now);
+      if (now.checkedIn) $('enter').click(); // 選んだその操作で、そのまま入る
+    });
+    return;
   }
   // まず、オンラインか会場かを選んでもらう（発注者の指示）。会場の QR コードから来た人は、会場参加に決まっているので聞かない
   getJson('/api/terms').then((t) => { if (t.status === 200) $('joinTerms').textContent = `${premiumText(t)}${t.shippingNotice}\n${t.returnPolicy}`; });

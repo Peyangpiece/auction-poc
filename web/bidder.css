@@ -181,3 +181,4 @@ details dd { overflow-wrap: anywhere; }
 #eventNote { border-top: 3px solid var(--gold); background: var(--ground-alt); padding: 12px 16px; font-weight: 700; }
 #eventNote:empty { display: none; }
 @media (max-width: 560px) { .brand__logo { height: 38px; } }
+#pickNow:empty { display: none; }

@@ -357,9 +357,11 @@ try {
   check(mine.includes('防水シート') && mine.includes('お渡し済み') && mine.includes('（PDF）'), '落札者のマイページに、品・状態・請求書が出る');
   await shot(guest, 'mvp-26-mypage-billing', { fullPage: true });
   await guest.goto(sys.base + '/bidder.html');
-  await guest.waitForSelector('#enter:not([hidden])');
-  await guest.click('#enter');
+  await guest.waitForSelector('#modePick:not([hidden])');
+  check((await guest.textContent('#pickNow')).includes('会場参加') && await guest.isHidden('#enter'), '手続きが済んだ人にも、入るたびに、オンラインか会場かの2択が出る（いまの参加のしかたつき）');
+  await guest.click('[data-pick=venue]');
   await guest.waitForFunction(() => document.getElementById('bid').textContent.length > 0);
+  check(await guest.isHidden('#gate'), 'いまと同じほうを選ぶと、そのまま入札の画面に入る');
   await admin.click('#tabs [data-key=fees]');
   await admin.waitForFunction(() => { const t = document.querySelector('#panel .facts')?.textContent ?? ''; return t.includes('¥10,000') && t.includes('¥550'); });
   check(true, '手数料の集計: 対象 10,000円 → 手数料 500円 ＋ 消費税 50円');
