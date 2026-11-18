@@ -292,3 +292,36 @@ details dd { overflow-wrap: anywhere; }
 .wintitle { font-size: 20px; font-weight: 700; }
 .wincard b { font-size: 15px; font-weight: 400; color: var(--ink-2); max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .winprice { font-size: 32px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+
+/* ==== リキッドグラス（報告書 77 章） ==== */
+/* スマホ: 下に固定した表示板は、濃いめのガラス（後ろの履歴・コメントが、ぼけて透ける）。価格の数字が読めるよう、透けすぎない */
+.board { background: color-mix(in srgb, var(--board) 86%, transparent); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-edge), 0 -8px 30px -18px rgb(0 0 0 / .25); }
+body.outbid .board { box-shadow: var(--glass-edge), inset 0 0 0 2px var(--board-ng); }
+/* 広い画面・低い画面: 表示板は中身の一部（固定しない）なので、不透明の面に戻す */
+@media (max-height: 520px) and (max-width: 699px) {
+  .board { background: var(--board); -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+  body.outbid .board { box-shadow: inset 0 0 0 2px var(--board-ng); }
+}
+@media (min-width: 960px), (min-width: 700px) and (orientation: landscape) {
+  .board { background: var(--board); -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+  body.outbid .board { box-shadow: inset 0 0 0 2px var(--board-ng); }
+}
+/* 表示板の中の部品は、ぼかしなし（ガラスの中にガラスを重ねない） */
+.board .state[data-st] { background: color-mix(in srgb, var(--ground) 72%, transparent); box-shadow: inset 0 1px 0 rgb(255 255 255 / .5); }
+
+/* 映像の上のコメント・音声・知らせ: 暗いガラスの札（映像が、ぼけて透ける） */
+.cmtlayer #comments li, .cmttoast, #sound {
+  background: rgb(20 20 22 / .38); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .18), inset 0 0 0 1px rgb(255 255 255 / .08); border-color: transparent;
+}
+#sound { border-radius: 999px; }
+#sound:hover:not(:disabled) { background: rgb(20 20 22 / .55); }
+/* 上回られたときの帯: 赤い面は残し、上の縁に光を足す */
+.outbidbar { box-shadow: inset 0 1px 0 rgb(255 255 255 / .3), var(--shadow-2); }
+/* 落札の知らせの札 */
+.wincard { background: var(--glass-tint-strong); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-edge), var(--shadow-2); }
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .board, .wincard { background: var(--board); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .cmtlayer #comments li, .cmttoast, #sound { background: rgb(0 0 0 / .8); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

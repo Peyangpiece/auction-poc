@@ -250,3 +250,49 @@ details[open] > summary::before { transform: rotate(45deg); }
 @supports (corner-shape: squircle) {
   .btn, .input, .board, dialog, .seg, #videoBox, .mode, .amount, .pick label, .choice label, .banner, .today, .verified, .secret, .board-result, #eventNote { corner-shape: squircle; }
 }
+
+/* ==== リキッドグラス（発注者の指示。報告書 77 章） ====
+   参考: liquid-glass-frontend-skill（ngocanhnckh）と、Apple の Liquid Glass の考え方。
+   - ガラスは「浮いている層」だけに使う: 上の帯・下のタブバー・下に固定した表示板・シート・ダイアログ・映像の上の札。
+     中身（カード・表・価格の数字）は、これまでどおり不透明の面（読みやすさを優先）
+   - ガラスの4つの要素: 強いぼかし（blur）・彩度の持ち上げ（saturate）・上の縁の光（inset の白い線）・うすい影
+   - ガラスの中に、もう1枚ガラスを重ねない（backdrop-filter の入れ子は描画が崩れる）。中の部品は「インセット」（ぼかしなし）
+   - 「透明度を下げる」「コントラストを上げる」の設定、ぼかしに対応していないブラウザでは、不透明の面に戻す */
+:root {
+  --glass-tint: color-mix(in srgb, var(--ground) 62%, transparent);        /* 帯・タブバー */
+  --glass-tint-strong: color-mix(in srgb, var(--ground) 78%, transparent); /* シート・表示板（文字が多い所は、濃いめ） */
+  --glass-filter: blur(30px) saturate(190%);
+  --glass-edge: inset 0 1px 0 rgb(255 255 255 / .6), inset 0 0 0 1px rgb(255 255 255 / .28);
+  --glass-shadow: 0 10px 30px -12px rgb(0 0 0 / .18), 0 0 0 1px rgb(0 0 0 / .05);
+  --ease: cubic-bezier(.22, 1, .36, 1); /* 動きの曲線は1つにそろえる（スキルの共通の曲線） */
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --glass-tint: color-mix(in srgb, #1c1c1e 58%, transparent);
+    --glass-tint-strong: color-mix(in srgb, #1c1c1e 80%, transparent);
+    --glass-filter: blur(30px) saturate(170%);
+    --glass-edge: inset 0 1px 0 rgb(255 255 255 / .14), inset 0 0 0 1px rgb(255 255 255 / .07);
+    --glass-shadow: 0 10px 30px -12px rgb(0 0 0 / .6), 0 0 0 1px rgb(255 255 255 / .06);
+  }
+}
+/* 共通の部品: .glass（帯）・.glass-strong（シート・ダイアログ） */
+.glass { background: var(--glass-tint); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-edge), var(--glass-shadow); }
+.glass-strong { background: var(--glass-tint-strong); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-edge), var(--glass-shadow); }
+
+/* 上の帯: ガラス（スクロールした中身が、ぼけて透ける） */
+.brandbar { background: var(--glass-tint); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 rgb(255 255 255 / .35); }
+/* ダイアログ: 濃いめのガラス（文字が多いので、透けすぎない） */
+dialog { background: var(--glass-tint-strong); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-edge), var(--shadow-2); }
+dialog::backdrop { background: rgb(0 0 0 / .22); }
+
+/* ぼかしが使えない・透明度を下げる・コントラストを上げる: 不透明の面に戻す（読みやすさを優先） */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root { --glass-tint: var(--ground); --glass-tint-strong: var(--ground); }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root { --glass-tint: var(--ground); --glass-tint-strong: var(--ground); --glass-filter: none; }
+  .brandbar, .glass, .glass-strong, dialog { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  :root { --glass-edge: inset 0 0 0 1px var(--edge); }
+}

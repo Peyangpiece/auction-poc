@@ -14,7 +14,7 @@ body { overflow: hidden; background: var(--ground); }
 .controls { display: grid; gap: clamp(8px, 1.6dvh, 16px); min-width: 0; }
 
 /* 品と価格: 灰色の面に、大きな数字 */
-.lot { container-type: size; min-height: 0; display: grid; align-content: center; gap: clamp(4px, 1dvh, 10px); padding: clamp(14px, 2.6dvh, 28px) clamp(16px, 3vw, 32px); border-radius: var(--r-lg); background: var(--board); overflow: hidden; }
+.lot { container-type: size; min-height: 0; display: grid; align-content: center; gap: clamp(4px, 1dvh, 10px); padding: 16px 20px; border-radius: var(--r-lg); background: var(--board); overflow: hidden; }
 .lot__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .lot__name { font-size: clamp(18px, 2.6dvh, 26px); font-weight: 700; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 #lotNo { color: var(--ink-2); margin-right: .5em; }
@@ -130,3 +130,24 @@ dialog.sheet[open] { animation: sheet-in .28s var(--ease); }
 .sheet__err:empty { display: none; }
 .sheet__go { grid-area: auto; width: 100%; min-height: 96px; } /* 画面の「締め」と同じ見た目。置き場所の指定（grid-area）は引き継がない */
 .textbtn { appearance: none; border: 0; background: none; padding: 12px; min-height: 44px; font: 600 17px/1.3 var(--font); color: var(--action); cursor: pointer; justify-self: center; }
+
+/* ==== リキッドグラス（報告書 77 章） ==== */
+/* 上の帯と、開始値のシートはガラス。価格の面と操作のボタンは、不透明のまま（読みやすさと、押す場所の分かりやすさを優先） */
+.bar { background: var(--glass-tint); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: inset 0 -1px 0 var(--line); border-bottom: 0; }
+dialog.sheet { background: var(--glass-tint-strong); }
+/* 押すボタン: 上の縁に、うすい光（押せる面であることを、質感で伝える。ぼかしは使わない） */
+.act { box-shadow: inset 0 1px 0 rgb(255 255 255 / .35); }
+.act--close { box-shadow: inset 0 1px 0 rgb(255 255 255 / .22), 0 8px 24px -12px color-mix(in srgb, var(--action) 60%, transparent); }
+.act:disabled { box-shadow: none; }
+.barbtn { border-radius: 999px; box-shadow: inset 0 1px 0 rgb(255 255 255 / .45); }
+@media (prefers-color-scheme: dark) {
+  .act { box-shadow: inset 0 1px 0 rgb(255 255 255 / .1); }
+  .act--close { box-shadow: inset 0 1px 0 rgb(255 255 255 / .3); }
+  .barbtn { box-shadow: inset 0 1px 0 rgb(255 255 255 / .1); }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .bar { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* 価格の面の内側の余白: 高い画面では広く */
+@media (min-height: 700px) { .lot { padding: 24px 28px; } }
