@@ -103,7 +103,7 @@ test('当日現金の精算と、開催終了の請求書（AC-FR-PAY-010-1、AC
     const first = await t.line('飯ごう');
     assert.deepEqual([first.state, first.amount, first.paddle, first.payment], ['unsettled', 2000, 1, 'cash']);
     assert.deepEqual([first.premium, first.payable], [200, 2200], '買歩銭は、落札額の10%。払う金額は、落札額＋買歩銭');
-    assert.match(t.outbox().find((m) => m.kind === 'won' && m.to === a.email).body, /買歩銭 ¥200（落札額の10%）.*¥2,200/s, '落札の知らせに、買歩銭と払う金額を書く');
+    assert.match(t.outbox().find((m) => m.kind === 'won' && m.to === a.email).body, /買歩銭\s+¥200（落札額の10%）.*¥2,200/s, '落札の知らせに、買歩銭と払う金額を書く');
     assert.ok(t.outbox().some((m) => m.kind === 'won' && m.to === a.email), '落札者に、メールでも知らせる');
 
     assert.equal((await auctioneer.post('/api/billing/settle', { lineIds: [first.id] })).status, 403, '進行役は、精算できない');

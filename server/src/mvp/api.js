@@ -11,6 +11,7 @@ import {
 } from './security.js';
 import { clientIp } from './security.js';
 import { Notifier, outboxSender, httpMailSender } from './notify.js';
+import { jpDay, compose, subjectOf } from './mails.js';
 import QRCode from 'qrcode';
 import { createRequire } from 'node:module';
 
@@ -94,6 +95,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     (failure) => db.prepare('INSERT INTO notices (at, kind, body) VALUES (?, ?, ?)').run(nowMs(), 'send_failed', JSON.stringify(failure)),
   );
   const setting = (key) => db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? '';
+  // メールの宛名（法人は、会社名と担当者名）
+  const nameOf = (m) => (m.kind === 'b2b' ? [m.company, m.contact_name].filter(Boolean).join('　') || m.name : m.name);
 
   // ------------------------------------------------------------ 監査ログ（DATA-001）
   function audit(ctx, type, { target = '', before = null, after = null, reason = null } = {}) {
@@ -176,8 +179,14 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     db.prepare('INSERT INTO otp_sends (phone, at) VALUES (?, ?)').run(phone, now);
     // 送信の失敗による自動の再送（IF-EXT-003）は、上の回数に数えない（1回の送信として記録済み）
     let delivered;
-    if (phone.startsWith('email:')) delivered = await notifier.email(phone.slice(6), 'otp', '【令和の競り】認証番号', `認証番号は ${code} です。5分以内に入力してください。\nお心当たりがない場合は、このメールを破棄してください。`);
-    else delivered = await notifier.sms(phone, 'otp', `【令和の競り】認証番号は ${code} です。5分以内に入力してください。`);
+    if (phone.startsWith('email:')) delivered = await notifier.email(phone.slice(6), 'otp', subjectOf('ログインの認証番号'), compose(setting, { lines: [
+      `認証番号は ${code} です。`,
+      '5分以内に、ログインの画面に入力してください。',
+      '',
+      'この番号は、ほかの人に教えないでください。',
+      'ログインをしようとしていない場合は、このメールを破棄してください。',
+    ] }));
+    else delivered = await notifier.sms(phone, 'otp', `【令和の競り】認証番号は ${code} です。5分以内に入力してください。ほかの人に教えないでください。`);
     // 送れなかったのに「送りました」と出さない（再送しても失敗したとき。主催者管理者にも、知らせが残る）
     if (!delivered) throw new HttpError(502, '認証番号を送れませんでした。少し待ってから、やり直してください。続くときは、主催者へご連絡ください');
     return code;
@@ -289,7 +298,14 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     db.prepare('DELETE FROM email_tokens WHERE member_id = ?').run(member.id);
     db.prepare('INSERT INTO email_tokens (token_hash, member_id, expires_at, email) VALUES (?,?,?,?)').run(sha256(token), member.id, nowMs() + DAY, String(member.email).toLowerCase());
     const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
-    await notifier.email(member.email, 'verify_email', 'メールアドレスの確認', `次のリンクを開いて、メールアドレスを確認してください（24時間以内）。\n${origin}/api/email/verify?token=${token}`);
+    await notifier.email(member.email, 'verify_email', subjectOf('メールアドレスの確認'), compose(setting, { name: nameOf(member), lines: [
+      'このメールアドレスを、令和の競りの会員のアドレスとして登録しました。',
+      '次のリンクを開くと、確認が終わります（このメールから24時間、有効です）。',
+      '',
+      `${origin}/api/email/verify?token=${token}`,
+      '',
+      'お心当たりがない場合は、リンクを開かずに、このメールを破棄してください。',
+    ] }));
     return `${origin}/api/email/verify?token=${token}`;
   }
 
@@ -607,7 +623,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     // 主催者管理者が、新しいスタッフのメールアドレスを登録する（発注者の指示）。パスワードは、本人が最初のログインで決める
     const created = inviteStaff({ email: body.email, name: body.name, role: body.role, phone: body.phone });
     audit(ctx, 'staff.create', { target: `staff:${created.id}`, after: { email: created.email, role: created.role } });
-    await sendStaffInvite(ctx, created);
+    await sendStaffInvite(ctx, { ...created, name: String(body.name ?? '').trim() });
     return { ok: true, ...created };
   });
   // パスワードと認証アプリの再発行（端末をなくした・忘れたとき）。それまでのログインは、すべて切る
@@ -621,7 +637,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       db.prepare("DELETE FROM sessions WHERE kind = 'staff' AND subject_id = ?").run(id);
       audit(ctx, 'staff.reset', { target: `staff:${id}` });
       const out = { id: Number(id), email: target.email, role: target.role };
-      await sendStaffInvite(ctx, out);
+      await sendStaffInvite(ctx, { ...out, name: target.name }, { reset: true });
       return { ok: true, ...out };
     }
     const password = randomToken(12), secret = newTotpSecret();
@@ -660,9 +676,18 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     db.prepare('UPDATE staff_accounts SET setup_expires = ? WHERE id = ?').run(nowMs() + SETUP_LIFETIME, id);
     return { id, email: mail, role };
   }
-  async function sendStaffInvite(ctx, s) {
+  async function sendStaffInvite(ctx, s, { reset = false } = {}) {
     const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
-    await notifier.email(s.email, 'staff_invite', '【令和の競り】スタッフの登録のお知らせ', `スタッフとして登録されました。\n次のページの「はじめての方」から、このメールアドレスを入れて、パスワードを決めてください（7日以内）。\n\n${origin}/staff.html\n\nお心当たりがない場合は、このメールを破棄してください。`);
+    const end = new Date(nowMs() + 9 * HOUR + SETUP_LIFETIME).toISOString();
+    const by = `${jpDay(end)} ${end.slice(11, 16)}`;
+    await notifier.email(s.email, 'staff_invite', subjectOf(reset ? 'スタッフのパスワードを決め直してください' : 'スタッフとして登録しました'), compose(setting, { name: s.name || null, lines: [
+      reset ? `主催者管理者が、スタッフ（${ROLE_LABEL[s.role]}）のパスワードを、リセットしました。` : `令和の競りのスタッフ（${ROLE_LABEL[s.role]}）として、登録しました。`,
+      `次のページの「はじめての方」から、このメールアドレスを入れて、パスワードを決めてください（${by}まで）。`,
+      '',
+      `${origin}/staff.html`,
+      '',
+      'お心当たりがない場合は、このメールを破棄してください。',
+    ] }));
   }
   function createStaff({ loginId, name, role, phone, password: given }) {
     const id = String(loginId ?? '').trim();
@@ -693,7 +718,18 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     db.prepare('UPDATE member_accounts SET login_id = ?, password_hash = ?, login_failed = 0, login_locked_until = 0, updated_at = ? WHERE id = ?').run(loginId, hashPassword(password), nowMs(), m.id);
     db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ?").run(m.id); // 前のパスワードでのログインは切る
     const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
-    const sent = await notifier.email(m.email, 'credentials', subject, `${lead}\n\nログイン ID: ${loginId}\nパスワード: ${password}\n\nログインはこちら: ${origin}/login.html\n\nパスワードは、ログインのあと、マイページの「個人情報の設定」で変えられます。\nこのメールにお心当たりがない場合は、破棄してください。`);
+    const sent = await notifier.email(m.email, 'credentials', subject, compose(setting, { name: nameOf(m), lines: [
+      ...lead,
+      '',
+      `ログイン ID: ${loginId}`,
+      `パスワード: ${password}`,
+      '',
+      `${origin}/login.html`,
+      '',
+      'このパスワードは、ログインのあと、マイページの「個人情報の設定」で、ご自分で決めたものに変えられます。',
+      'このメールは、ほかの人に見せたり、転送したりしないでください。',
+      'お心当たりがない場合は、このメールにご返信ください。',
+    ] }));
     // お試し用の設定のときだけ、発行した内容を画面に返す（メールの送信サービスをつなぐ前に、動きを確かめるため）
     return { loginId, sent, ...(config.devShowCodes ? { devPassword: password } : {}) };
   }
@@ -704,7 +740,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (!m || m.withdrawn_at) throw new HttpError(404, '会員が見つかりません');
     if (m.approved_at) throw new HttpError(409, 'この会員は、すでに承認済みです');
     db.prepare('UPDATE member_accounts SET approved_at = ?, updated_at = ? WHERE id = ?').run(nowMs(), nowMs(), id);
-    const issued = await issueCredentials(ctx, m, '【令和の競り】会員登録を承認しました', `${m.kind === 'b2b' ? m.company : m.name} 様\n\n会員登録を承認しました。次のログイン ID とパスワードで、ログインしてください。`);
+    const issued = await issueCredentials(ctx, m, subjectOf('会員登録を承認しました'), ['会員登録を承認しました。ご登録、ありがとうございます。', '次のログイン ID とパスワードで、ログインしてください。']);
     audit(ctx, 'member.approve', { target: `member:${id}`, after: { loginId: issued.loginId } });
     return { ok: true, ...issued, email: m.email };
   });
@@ -717,7 +753,12 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const reason = String(body.reason ?? '').trim();
     if (!reason) throw bad('断る理由を入力してください（記録に残ります。本人には送りません）');
     db.prepare('UPDATE member_accounts SET rejected_at = ?, withdrawn_at = ?, withdrawn_phone = phone, phone = ?, updated_at = ? WHERE id = ?').run(nowMs(), nowMs(), `却下:${m.id}`, nowMs(), id);
-    await notifier.email(m.email, 'rejected', '【令和の競り】会員登録について', `${m.kind === 'b2b' ? m.company : m.name} 様\n\nこのたびは、会員登録をお申し込みいただき、ありがとうございます。\n誠に恐れ入りますが、今回のお申し込みは、お受けできませんでした。`);
+    await notifier.email(m.email, 'rejected', subjectOf('会員登録のお申し込みについて'), compose(setting, { name: nameOf(m), lines: [
+      'このたびは、会員登録をお申し込みいただき、ありがとうございます。',
+      '誠に恐れ入りますが、今回のお申し込みは、お受けできませんでした。',
+      '',
+      'ご不明な点は、このメールにご返信ください。',
+    ] }));
     audit(ctx, 'member.reject', { target: `member:${id}`, reason });
     return { ok: true };
   });
@@ -727,7 +768,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const m = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(id);
     if (!m || m.withdrawn_at) throw new HttpError(404, '会員が見つかりません');
     if (!m.approved_at) throw new HttpError(409, '先に、会員登録を承認してください');
-    const issued = await issueCredentials(ctx, m, '【令和の競り】ログイン ID とパスワードのお知らせ', `${m.kind === 'b2b' ? m.company : m.name} 様\n\nログイン ID とパスワードを、発行しました。`);
+    const issued = await issueCredentials(ctx, m, subjectOf('ログイン ID とパスワードのお知らせ'), ['ログイン ID とパスワードを、発行しました。', 'これまでのパスワードは、使えなくなりました。']);
     audit(ctx, 'member.credentials_issue', { target: `member:${id}`, after: { loginId: issued.loginId } });
     return { ok: true, ...issued, email: m.email };
   });
@@ -820,15 +861,11 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (setting('site_url') !== url) db.prepare("INSERT INTO settings (key, value) VALUES ('site_url', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(url);
   }
   const addDaysJst = (date, n) => new Date(Date.parse(date + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
-  const jpDate = (iso) => { const d = new Date(iso.slice(0, 10) + 'T00:00:00Z'); return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日（${'日月火水木金土'[d.getUTCDay()]}）`; };
+  const jpDate = jpDay;
   function eventMailText(e, a, when) {
     const site = config.siteUrl || setting('site_url');
-    const org = setting('org_name');
     const highlights = String(e.highlights ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
-    const contact = [setting('org_address') && `住所: ${setting('org_address').replace(/\n/g, ' ')}`, setting('org_tel') && `電話: ${setting('org_tel')}`, setting('org_email') && `メール: ${setting('org_email')}`].filter(Boolean);
-    return [
-      `${a.kind === 'b2b' ? a.company || a.name : a.name} 様`,
-      '',
+    return compose(setting, { name: nameOf(a), lines: [
       `${when}、「${e.title}」を開催します。`,
       '',
       `日時: ${jpDate(e.starts_at)} ${e.starts_at.slice(11, 16)}〜${e.ends_at.slice(11, 16)}`,
@@ -838,10 +875,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       'オンラインでも、会場でも参加できます。参加の手続きは、当日、ログインしてから行えます。',
       ...(site ? [`${site}/`] : []),
       '',
-      '――',
       'このお知らせが不要な場合は、マイページの「個人情報の設定」で、受け取らない設定にできます。',
-      org, ...contact,
-    ].join('\n');
+    ] });
   }
   // 送っている途中で、もう一度呼ばれたら（見回りと公開の操作が重なったとき）、走っている方の終わりを待つ
   let eventMailRun = null;

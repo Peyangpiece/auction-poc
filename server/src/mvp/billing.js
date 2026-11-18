@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeInvoiceFiles, makeInvoiceList } from './invoice-files.js';
+import { jpDay, compose, subjectOf, kv, signature } from './mails.js';
 
 // CSV の1マス。表計算ソフトが式として動かす文字（= + - @ など）で始まる文字列は、先頭に ' を付けて、ただの文字にする
 export const csvCell = (v) => {
@@ -143,7 +144,19 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
         .run('lot', r.event_id, r.lot_id, r.participant_id, r.account_id, `No.${r.lot_no} ${r.title}`, r.amount, premium, r.receive, nowMs());
       const a = account(r.account_id);
       // 落札者に、メールでも知らせる（画面には、締めの時点で出ている）
-      notifier.email(a.email, 'won', '落札のお知らせ', `No.${r.lot_no} ${r.title} を、${yen(r.amount)}（税込）で落札しました。\n買歩銭 ${yen(premium)}（落札額の${premiumRate()}%）を合わせた、お支払いの金額は ${yen(r.amount + premium)} です。\nお支払いと受け取りについては、マイページをご覧ください。\n落札価格に送料は含まれません。`);
+      notifier.email(a.email, 'won', subjectOf(`落札しました　No.${r.lot_no} ${r.title}`), compose(setting, { name: displayName(a), lines: [
+        `No.${r.lot_no} ${r.title} を、落札しました。`,
+        '',
+        ...kv([
+          ['落札額', `${yen(r.amount)}（税込）`],
+          ['買歩銭', `${yen(premium)}（落札額の${premiumRate()}%）`],
+          ['お支払いの金額', yen(r.amount + premium)],
+          ['お受け取り', { ship: '配送（送料は別にかかります）', pickup: '会場で受け取り' }[r.receive]],
+        ]),
+        '',
+        '当日、会場で精算しなかった品は、開催の終了後に、銀行振込の請求書をお送りします。',
+        'お支払いと受け取りの状況は、マイページでいつでも確かめられます。',
+      ] }));
     }
     return rows.length;
   }
@@ -181,8 +194,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
    * 金額・期限・振込先は、添付の請求書（PDF）と同じ値。PDF に載せていない注記（依頼人名・振込手数料・受け取り方法）は、ここに書く。
    */
   function invoiceMail(inv, lines, shipping, a, org) {
-    const WD = '日月火水木金土';
-    const day = (d) => { const [y, m, dd] = d.split('-').map(Number); return `${m}月${dd}日（${WD[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()]}）`; };
+    const day = jpDay;
     const ev = db.prepare('SELECT starts_at FROM events WHERE id = ?').get(inv.event_id);
     const evDay = ev ? day(ev.starts_at.slice(0, 10)) : '';
     const due = inv.due_date ? day(inv.due_date) : '';
@@ -204,7 +216,6 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       ...(ships ? [shipping.length ? '・配送の品の送料は、このご請求に含まれています。' : '・配送の品の送料は、このご請求には含まれていません。'] : []),
       ...(picks ? ['・現地受け取りの品は、ご入金の確認から7日以内に、会場でお受け取りください。'] : []),
     ];
-    const contact = [org.org_address && org.org_address.replace(/\n/g, ' '), org.org_tel && `TEL ${org.org_tel}`, org.org_email].filter(Boolean);
     const body = [
       `${displayName(a)} 様`,
       '',
@@ -227,9 +238,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       '',
       'ご不明な点は、このメールにご返信ください。',
       '',
-      '――',
-      `${org.org_name || '令和の競り'}（令和の競り）`,
-      ...contact,
+      ...signature(setting),
     ].join('\n');
     return { subject, body };
   }
@@ -501,7 +510,13 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     if (!isUnpaid(l)) throw new HttpError(409, '解除できるのは、支払期限を過ぎて消し込まれていない（未払いの）明細だけです');
     db.prepare('UPDATE bill_lines SET cancelled_at = ?, cancel_reason = ? WHERE id = ?').run(nowMs(), reason, id);
     const a = account(l.account_id);
-    notifier.email(a.email, 'cancelled', '落札の解除のお知らせ', `${l.label}（${yen(l.amount)}）について、お支払いの確認が取れなかったため、落札を解除しました。\n理由: ${reason}`);
+    notifier.email(a.email, 'cancelled', subjectOf(`落札を解除しました　${l.label}`), compose(setting, { name: displayName(a), lines: [
+      `${l.label}（落札額 ${yen(l.amount)}）は、お支払いの確認が取れなかったため、落札を解除しました。`,
+      '',
+      ...kv([['理由', reason]]),
+      '',
+      'お支払い済みの場合や、お心当たりがない場合は、このメールにご返信ください。',
+    ] }));
     audit(ctx, 'billing.cancel', { target: `line:${id}`, before: { cancelled: false }, after: { cancelled: true }, reason });
     return { ok: true };
   });
@@ -558,7 +573,19 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const deadline = addDays(today(), 3);
     db.prepare('INSERT INTO offers (line_id, participant_id, account_id, amount, offered_at, deadline) VALUES (?,?,?,?,?,?)').run(id, next.participant_id, next.account_id, next.amount, nowMs(), deadline);
     const a = account(next.account_id);
-    notifier.email(a.email, 'offer', '繰り上げ落札のご案内', `${l.label} について、落札者の解除があったため、次点のお客様に繰り上げをご案内します。\n価格: ${yen(next.amount)}（税込）。このほかに、買歩銭（落札額の${premiumRate()}%）がかかります\n回答期限: ${deadline}\nマイページで、承諾か辞退をお選びください。期限までにご回答がなければ、辞退とさせていただきます。`);
+    notifier.email(a.email, 'offer', subjectOf(`繰り上げ落札のご案内（${jpDay(deadline)}までにご回答ください）`), compose(setting, { name: displayName(a), lines: [
+      `${l.label} の落札が解除されたため、次点のお客様に、繰り上げて落札いただけるかをお尋ねします。`,
+      '',
+      ...kv([
+        ['価格', `${yen(next.amount)}（税込。あなたが最後に入れた入札額です）`],
+        ['買歩銭', `${yen(premiumOf(next.amount))}（落札額の${premiumRate()}%）`],
+        ['お支払いの金額', yen(next.amount + premiumOf(next.amount))],
+        ['ご回答の期限', `${jpDay(deadline)}まで`],
+      ]),
+      '',
+      'マイページで、「承諾」か「辞退」をお選びください。承諾いただくと、請求書をお送りします。',
+      '期限までにご回答がない場合は、辞退とさせていただきます。',
+    ] }));
     audit(ctx, 'billing.offer', { target: `line:${id}`, after: { amount: next.amount, deadline } });
     return { ok: true, amount: next.amount, deadline };
   });
@@ -755,7 +782,17 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       WHERE i.due_date IS NOT NULL AND i.due_date < ? AND i.overdue_notified = 0 AND l.cleared_at IS NULL AND l.cancelled_at IS NULL`).all(t);
     for (const i of overdue) {
       const a = account(i.account_id);
-      notifier.email(a.email, 'overdue', 'お支払いの確認が取れていません', `請求書 ${i.number}（${yen(i.total)}）のお支払期限（${i.due_date}）を過ぎました。\nお支払いの確認が取れるまで、競りへの参加を停止しています。`);
+      const bank = setting('bank_account');
+      notifier.email(a.email, 'overdue', subjectOf(`お支払いの確認が取れていません（請求書 ${i.number}）`), compose(setting, { name: displayName(a), lines: [
+        `請求書 ${i.number} のお支払い期限（${jpDay(i.due_date)}）を過ぎましたが、まだお支払いの確認が取れていません。`,
+        '',
+        ...kv([['ご請求額', yen(i.total)], ['請求書番号', i.number]]),
+        '',
+        'お支払いの確認が取れるまで、競りへの参加を停止しています。確認が取れると、自動で解除されます。',
+        '', '【お振込先】', bank || '（振込先は、お送りした請求書をご覧ください）', `ご依頼人名の前に、請求書番号「${i.number}」を入れてください。`,
+        '',
+        'すでにお支払い済みの場合は、行き違いですので、ご容赦ください。ご不明な点は、このメールにご返信ください。',
+      ] }));
       db.prepare('UPDATE invoices SET overdue_notified = 1 WHERE id = ?').run(i.id);
     }
     // 現地受け取りの期限の前日に、落札者に知らせる
@@ -766,7 +803,14 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       // 前日に動いていなかった日（だれも開かず、サーバーが休んでいた日）があっても、期限までは知らせる
       if (t < addDays(by, -1) || t > by) continue;
       const a = account(l.account_id);
-      notifier.email(a.email, 'pickup', '受け取り期限のお知らせ', `${l.label} の受け取り期限は、${by} までです。会場の営業時間内に、お受け取りください。`);
+      const ev = l.event_id && db.prepare('SELECT venue_name, venue_address FROM events WHERE id = ?').get(l.event_id);
+      notifier.email(a.email, 'pickup', subjectOf(`お受け取りの期限は${jpDay(by)}です`), compose(setting, { name: displayName(a), lines: [
+        `${l.label} の、お受け取りの期限が近づいています。`,
+        '',
+        ...kv([['期限', `${jpDay(by)}まで`], ['場所', ev && `${ev.venue_name}（${ev.venue_address}）`]]),
+        '',
+        '会場の営業時間内に、お受け取りください。期限に間に合わない場合は、このメールにご返信ください。',
+      ] }));
       db.prepare('INSERT INTO pickup_notices (line_id, at) VALUES (?, ?)').run(l.id, nowMs());
       pickup++;
     }
