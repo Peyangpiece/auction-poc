@@ -55,7 +55,8 @@ function content({ invoice, lines, shipping = [], org: rawOrg, to: rawTo, issued
 const TOP_ADJUST = 0.2;
 function writePdf(file, c) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 0, info: { Title: `${c.title} ${c.number}` } });
+    // 2ページ以上になったら、あとから各ページに請求番号とページ数を書き足すので、ページを貯めておく
+    const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true, info: { Title: `${c.title} ${c.number}` } });
     const out = fs.createWriteStream(file);
     out.on('finish', resolve);
     out.on('error', reject);
@@ -80,7 +81,20 @@ function writePdf(file, c) {
     T(c.title, (595.28 - doc.widthOfString(c.title)) / 2, 81.4, 24);
 
     // 左: 宛先（下線つき）・件名・ご請求金額（下線つき）・期限
-    const nameW = T(`${c.to.name} 様`, L, 125.7, 14);
+    // 宛名は、右の発行者（エンブレム）に重ならない幅（275）に収める。長い名前は、文字を小さくして1行に収める（原本の 14 から、10 まで）
+    const NAME_MAX = 275;
+    const nameText = `${c.to.name} 様`;
+    let nameSize = 14;
+    doc.font('M');
+    while (nameSize > 10 && doc.fontSize(nameSize).widthOfString(nameText) > NAME_MAX) nameSize -= 0.5;
+    let nameW;
+    if (doc.fontSize(nameSize).widthOfString(nameText) <= NAME_MAX) {
+      nameW = T(nameText, L, 125.7 + (14 - nameSize) * 0.8, nameSize);
+    } else {
+      // それでも収まらない名前は、10 の大きさで、2行に折り返す（下線は、2行目の下）
+      doc.font('M').fontSize(10).text(nameText, L, 113 - 10 * TOP_ADJUST, { width: NAME_MAX, lineGap: 1 });
+      nameW = NAME_MAX;
+    }
     // 宛名の下線: 原本と同じ高さ（139.29）で、宛名の文字の幅ちょうど
     doc.moveTo(L, 139.29).lineTo(L + nameW, 139.29).stroke();
     T(`件名 : ${c.subject}`, LT, 158, 9.5, { width: 270 });
@@ -102,6 +116,8 @@ function writePdf(file, c) {
 
     // 表: 品番・品名｜数量｜単価｜金額
     const col = [L, 350, 417, 482, R], H = 25;
+    // 2ページ目からは、上に請求番号を書いて、どの請求書の続きか分かるようにする
+    const nextPage = () => { doc.addPage(); right(`${c.title}　請求番号: ${c.number}（続き）`, R + 0.2, 24, 9); return 46; };
     const head = (top) => {
       doc.rect(L, top, R - L, H).fillAndStroke('#d9d8d8', '#000').fillColor('#000');
       for (const x of col.slice(1, 4)) doc.moveTo(x, top).lineTo(x, top + H).stroke();
@@ -109,22 +125,24 @@ function writePdf(file, c) {
     };
     let y = Math.max(318.44, ry + 20);
     head(y); y += H;
+    const NAME_W = col[1] - L - PAD * 2;
     for (const [label, qty, unit, amount] of c.rows) {
-      if (y + H > 800) { doc.addPage(); y = 40; head(y); y += H; }
-      doc.rect(L, y, R - L, H).stroke();
-      for (const x of col.slice(1, 4)) doc.moveTo(x, y).lineTo(x, y + H).stroke();
-      // 長い品名は、枠の幅に収まるところで切る
+      // 長い品名は、切らずに枠の中で折り返し、行を高くする（品目は、請求書に最後まで載せる。1行に収まる品は、原本と同じ高さ 25）
       doc.font('M').fontSize(9.5);
-      let name = label;
-      while (name.length > 1 && doc.widthOfString(name) > col[1] - L - PAD * 2) name = name.slice(0, -2) + '…';
-      T(name, L + PAD, y + 7.9, 9.5);
+      const lines = Math.max(1, Math.round(doc.heightOfString(label, { width: NAME_W, lineGap: 2.5 }) / (doc.currentLineHeight() + 2.5)));
+      const rh = H + (lines - 1) * 12.5;
+      if (y + rh > 800) { y = nextPage(); head(y); y += H; }
+      doc.rect(L, y, R - L, rh).stroke();
+      for (const x of col.slice(1, 4)) doc.moveTo(x, y).lineTo(x, y + rh).stroke();
+      if (lines === 1) T(label, L + PAD, y + 7.9, 9.5);
+      else doc.font('M').fontSize(9.5).text(label, L + PAD, y + 7.9 - 9.5 * TOP_ADJUST, { width: NAME_W, lineGap: 2.5 });
       right(String(qty), col[2] - PAD, y + 7.9, 9.5);
       right(num(unit), col[3] - NUM_R, y + 7.9, 9.5);
       right(num(amount), col[4] - NUM_R, y + 7.9, 9.5);
-      y += H;
+      y += rh;
     }
     // 小計・消費税・合計（表の右下）
-    if (y + H * 3 > 800) { doc.addPage(); y = 40; }
+    if (y + H * 3 > 800) y = nextPage();
     for (const [label, value] of [['小計', num(c.total)], [c.taxLabel, c.taxValue], ['合計', num(c.total)]]) {
       doc.rect(col[1], y, R - col[1], H).stroke();
       doc.moveTo(col[3], y).lineTo(col[3], y + H).stroke();
@@ -133,13 +151,23 @@ function writePdf(file, c) {
       y += H;
     }
     y += 14.3;
-    if (y > 770) { doc.addPage(); y = 40; }
+    if (y > 770) y = nextPage();
     if (c.bank) {
       T('お振込先：', L, y, 10, { font: 'B' });
       T(c.bank, LT, y + 12.6, 10, { width: R - L });
       y += 34;
     }
     for (const note of c.notes) { T(note, L, y, 9, { width: R - L }); y = doc.y + 3; }
+    // 2ページ以上のときだけ、各ページの下に「1 / 2」と書く（1ページの請求書は、原本と同じく何も書かない）
+    const { count } = doc.bufferedPageRange();
+    if (count > 1) {
+      for (let i = 0; i < count; i++) {
+        doc.switchToPage(i);
+        const label = `${i + 1} / ${count}`;
+        doc.font('M').fontSize(9);
+        T(label, (595.28 - doc.widthOfString(label)) / 2, 815, 9);
+      }
+    }
     doc.end();
   });
 }
