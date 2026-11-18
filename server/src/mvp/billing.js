@@ -175,6 +175,65 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
    * 請求書のファイル（PDF・Excel）を、いまの明細から作る。送料を足したり直したりしたときは、作り直す
    * （作り直せるのは、送付済みにする前だけ。送ったあとの請求書は、変えない）。
    */
+  /**
+   * 請求メールの下書きの件名と本文（発注者の指示で見直した）。開いてすぐ分かるように、上から
+   * 「いつの、何の請求か」→ ご請求額とお支払い期限 → 内訳 → お振込先 → 受け取り → 連絡先 の順に書く。
+   * 金額・期限・振込先は、添付の請求書（PDF）と同じ値。PDF に載せていない注記（依頼人名・振込手数料・受け取り方法）は、ここに書く。
+   */
+  function invoiceMail(inv, lines, shipping, a, org) {
+    const WD = '日月火水木金土';
+    const day = (d) => { const [y, m, dd] = d.split('-').map(Number); return `${m}月${dd}日（${WD[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()]}）`; };
+    const ev = db.prepare('SELECT starts_at FROM events WHERE id = ?').get(inv.event_id);
+    const evDay = ev ? day(ev.starts_at.slice(0, 10)) : '';
+    const due = inv.due_date ? day(inv.due_date) : '';
+    const what = inv.kind === 'penalty' ? '落札の解除などに伴うご請求'
+      : inv.kind === 'promote' ? '繰り上げ落札をご承諾いただいた品のご請求'
+      : `${evDay}の競りで落札された品のご請求`;
+    const subject = `【令和の競り】${inv.kind === 'penalty' ? '違約金などの' : inv.kind === 'promote' ? '繰り上げ落札の' : `${evDay}の`}ご請求　${yen(inv.total)}（お支払い期限 ${due}）`;
+    const RECV = { pickup: '現地受け取り', ship: '配送' };
+    const premiumTotal = lines.reduce((t, l) => t + (l.premium ?? 0), 0);
+    const tax = inv.kind === 'penalty' ? null : Math.floor(inv.total * 10 / 110);
+    const items = [
+      ...lines.map((l) => `・${l.label}　${yen(l.amount)}${l.receive && RECV[l.receive] && !['penalty', 'late'].includes(l.kind) ? `（${RECV[l.receive]}）` : ''}`),
+      ...(premiumTotal ? [`・買歩銭（落札額の${premiumRate()}%）　${yen(premiumTotal)}`] : []),
+      ...shipping.map((l) => `・${l.label}　${yen(l.amount)}`),
+    ];
+    const ships = lines.some((l) => l.receive === 'ship'), picks = lines.some((l) => l.receive === 'pickup');
+    const receive = [
+      // 発送の時期は、決まりがないので書かない。送料が、この請求に入っているかどうかだけを書く
+      ...(ships ? [shipping.length ? '・配送の品の送料は、このご請求に含まれています。' : '・配送の品の送料は、このご請求には含まれていません。'] : []),
+      ...(picks ? ['・現地受け取りの品は、ご入金の確認から7日以内に、会場でお受け取りください。'] : []),
+    ];
+    const contact = [org.org_address && org.org_address.replace(/\n/g, ' '), org.org_tel && `TEL ${org.org_tel}`, org.org_email].filter(Boolean);
+    const body = [
+      `${displayName(a)} 様`,
+      '',
+      'いつも令和の競りをご利用いただき、ありがとうございます。',
+      `${what}をお送りします。請求書（PDF）を添付しています。`,
+      '',
+      `ご請求額　　　${yen(inv.total)}（税込）`,
+      `お支払い期限　${due}`,
+      `請求書番号　　${inv.number}`,
+      '',
+      '【内訳】',
+      ...items,
+      `合計　${yen(inv.total)}${tax !== null ? `（うち消費税 ${yen(tax)}）` : '（消費税の対象外）'}`,
+      '',
+      '【お振込先】',
+      org.bank_account || '（振込先は、添付の請求書をご覧ください）',
+      `・ご依頼人名の前に、請求書番号「${inv.number}」を入れてください。`,
+      '・振込手数料は、お客様のご負担となります。',
+      ...(receive.length ? ['', '【お受け取り】', ...receive] : []),
+      '',
+      'ご不明な点は、このメールにご返信ください。',
+      '',
+      '――',
+      `${org.org_name || '令和の競り'}（令和の競り）`,
+      ...contact,
+    ].join('\n');
+    return { subject, body };
+  }
+
   function renderInvoice(invoiceId, { draft = false } = {}) {
     const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
     const all = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ? ORDER BY id').all(invoiceId);
@@ -192,7 +251,8 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     db.prepare('UPDATE invoices SET pdf_file = ?, xlsx_file = ? WHERE id = ?').run(files.pdf, files.xlsx, inv.id);
     // 送付用のメールの下書き（FR-INV-007）。送信は、利用会社の担当者が自分で行う。当日現金の精算では作らない
     if (draft) {
-      files.done.then(() => notifier.draft(a.email, `【${org.org_name}】ご請求書（${inv.number}）`, `${displayName(a)} 様\n\n令和の競りのご請求書をお送りします。\n請求書番号: ${inv.number}\nご請求額: ${yen(inv.total)}（税込）\n\nお振込の際は、依頼人名に請求書番号を入れてください。振込手数料は、お客様のご負担となります。`, [files.pdf]))
+      const mail = invoiceMail(inv, lines, shipping, a, org);
+      files.done.then(() => notifier.draft(a.email, mail.subject, mail.body, [files.pdf]))
         .then((ok) => db.prepare('UPDATE invoices SET draft_state = ? WHERE id = ?').run(ok ? 'made' : 'failed', inv.id))
         .catch(() => db.prepare("UPDATE invoices SET draft_state = 'failed' WHERE id = ?").run(inv.id));
     }

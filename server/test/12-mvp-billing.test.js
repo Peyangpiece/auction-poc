@@ -136,6 +136,10 @@ test('当日現金の精算と、開催終了の請求書（AC-FR-PAY-010-1、AC
     const drafts = t.outbox().filter((m) => m.channel === 'draft');
     assert.deepEqual(drafts.map((d) => d.to).sort(), [a.email, b.email], '送付用のメールの下書きを作る（送信はしない）');
     assert.ok(fs.existsSync(drafts[0].attachments[0]), '下書きには、PDF を添付する');
+    // 請求メールの下書き: 件名に金額と期限、本文に期限・内訳・振込先・依頼人名の書き方・連絡先（報告書 68 章）
+    const mine = drafts.find((d) => d.to === a.email);
+    assert.match(mine.subject, /^【令和の競り】\d+月\d+日（.）のご請求　¥[\d,]+（お支払い期限 \d+月\d+日（.））$/);
+    for (const want of ['お支払い期限', '【内訳】', '買歩銭（落札額の10%）', '【お振込先】', 'ご依頼人名の前に、請求書番号', '振込手数料は、お客様のご負担', '（うち消費税']) assert.ok(mine.body.includes(want), want);
     const list = (await t.admin.get('/api/billing/invoices')).json.invoices;
     assert.deepEqual(list.map((i) => [i.kind, i.sentOn, i.dueDate]), [['transfer', null, '2026-12-12'], ['transfer', null, '2026-12-12'], ['cash', null, null]], '支払期限は、発行日（12/7）の5日後の日付。現金の精算には、期限はない');
   } finally { await t.close(); }
