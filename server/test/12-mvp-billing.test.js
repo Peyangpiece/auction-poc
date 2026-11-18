@@ -339,7 +339,10 @@ test('受け取り方法・支払方法の変更は、開催終了まで本人�
     await t.admin.post(`/api/billing/lines/${l.id}/receive`, { receive: 'ship' });
     const csv = await t.admin.get('/api/billing/shipping.csv');
     assert.match(csv.type, /text\/csv/);
-    assert.match(csv.buf.toString('utf8'), /"検証 1郎","東京都千代田区1","09066660001","No\.1 飯ごう","2000","未","未"/);
+    assert.match(csv.buf.toString('utf8'), /"2026-12-07","1","飯ごう","2000","検証 1郎","","東京都千代田区1","090-6666-0001","",""/);
+    // 配送先を別に書いた会員: 先頭の郵便番号を、郵便番号の列に分ける。電話番号は、表計算ソフトで先頭の 0 が消えない形
+    await a.post('/api/my/profile', { name: '検証 1郎', email: 'a1@example.com', address: '東京都千代田区1', shipTo: '〒1500001 東京都渋谷区神宮前1-1' });
+    assert.match((await t.admin.get('/api/billing/shipping.csv')).buf.toString('utf8'), /"検証 1郎","150-0001","東京都渋谷区神宮前1-1","090-6666-0001"/);
     await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);
     await t.advance(33);
     assert.equal((await t.admin.get('/api/billing/long-unpaid')).json.lines.length, 0, '期限の翌日から30日たつまでは、載らない');
@@ -551,7 +554,7 @@ test('違約金・遅延損害金の金額の案、帳簿の出力、請求書�
     assert.deepEqual([late.days, late.amount], [10, Math.floor(11000 * 14.6 / 100 * 10 / 365)], '遅延損害金の案: 期限の翌日から解除の日までを日割りし、1円未満は切り捨て');
 
     const ledger = await t.admin.get('/api/billing/ledger.csv?month=2026-12');
-    assert.match(ledger.buf.toString('utf8'), /"2026-12-07","No\.2 寝袋","1","","3000","検証 2郎","東京都千代田区2","09066660002"/, '引き渡した品だけが、帳簿に出る');
+    assert.match(ledger.buf.toString('utf8'), /"2026-12-07","2","寝袋","1","","3000","検証 2郎","東京都千代田区2","090-6666-0002"/, '引き渡した品だけが、帳簿に出る');
     assert.equal(ledger.buf.toString('utf8').includes('飯ごう'), false);
     const xlsx = await t.admin.get('/api/billing/invoices.xlsx?month=2026-12');
     assert.equal(xlsx.buf.subarray(0, 2).toString(), 'PK');

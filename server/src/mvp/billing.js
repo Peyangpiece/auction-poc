@@ -619,29 +619,46 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const rows = db.prepare("SELECT * FROM bill_lines WHERE receive = 'pickup' AND cleared_at IS NOT NULL AND delivered_at IS NULL AND cancelled_at IS NULL AND kind IN ('lot','promote') ORDER BY cleared_at").all();
     return { today: today(), lines: rows.map(staffLineView) };
   });
+  // CSV の共通（発注者の指示で見直した。報告書 70 章）。表計算ソフトで開いたときに、値が化けないようにする:
+  // 電話番号・郵便番号は、ハイフンを入れる（数字だけだと、先頭の 0 が消える）。品番と品名は、別の列にする
+  const telCsv = (p) => (/^0\d{9,10}$/.test(p ?? '') ? (p.length === 11 ? `${p.slice(0, 3)}-${p.slice(3, 7)}-${p.slice(7)}` : `${p.slice(0, 2)}-${p.slice(2, 6)}-${p.slice(6)}`) : p ?? '');
+  const zipCsv = (z) => (/^\d{7}$/.test(z ?? '') ? `${z.slice(0, 3)}-${z.slice(3)}` : '');
+  const lotOf = db.prepare('SELECT l.lot_no, l.title, e.starts_at FROM lots l LEFT JOIN events e ON e.id = l.event_id WHERE l.id = ?');
+  const csvFile = (header, rows, name) => ({ file: { body: Buffer.from('\ufeff' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n'), type: 'text/csv; charset=utf-8', name } });
+  /** 住所を、郵便番号とそれ以外に分ける。分けて登録された住所はその値、自由に書かれた配送先は、先頭の「〒123-4567」を取り出す */
+  function addressParts(a) {
+    if (a.ship_to) {
+      const m = /^\s*〒?\s*(\d{3})[-－ー]?(\d{4})\s*/.exec(a.ship_to);
+      return m ? [`${m[1]}-${m[2]}`, a.ship_to.slice(m[0].length)] : ['', a.ship_to];
+    }
+    if (a.postal_code && a.address1) return [zipCsv(a.postal_code), `${a.prefecture ?? ''}${a.address1}${a.address2 ? ' ' + a.address2 : ''}`];
+    return ['', a.address ?? ''];
+  }
   route('GET', '/api/billing/shipping.csv', (ctx) => {
     needStaff(ctx, 'admin');
     const rows = db.prepare("SELECT * FROM bill_lines WHERE receive = 'ship' AND cancelled_at IS NULL AND kind IN ('lot','promote') ORDER BY account_id, id").all();
-    const esc = csvCell;
-    const lines = [['氏名・会社名', '配送先', '電話番号', '品', '落札額', '消し込み', '引き渡し'].map(esc).join(',')];
-    for (const l of rows) {
-      const a = account(l.account_id);
-      lines.push([displayName(a), a.ship_to || a.address, a.phone, l.label, l.amount, l.cleared_at ? `済（${jst(l.cleared_at)}）` : '未', l.delivered_at ? '済' : '未'].map(esc).join(','));
-    }
+    const out = rows.map((l) => {
+      const a = account(l.account_id), lot = lotOf.get(l.lot_id) ?? {};
+      const [zip, addr] = addressParts(a);
+      return [lot.starts_at?.slice(0, 10) ?? '', lot.lot_no ?? '', lot.title ?? l.label, l.amount, displayName(a), zip, addr, telCsv(a.withdrawn_phone ?? a.phone),
+        l.cleared_at ? jst(l.cleared_at) : '', l.delivered_at ? jst(l.delivered_at) : ''];
+    });
     audit(ctx, 'billing.shipping_export', { target: 'shipping.csv', after: { rows: rows.length } });
-    return { file: { body: Buffer.from('﻿' + lines.join('\r\n') + '\r\n'), type: 'text/csv; charset=utf-8', name: 'shipping.csv' } };
+    return csvFile(['開催日', '品番', '品名', '落札額（税込）', '氏名・会社名', '郵便番号', '配送先の住所', '電話番号', '入金の確認日', '引き渡しの日'], out, `shipping-${today()}.csv`);
   });
 
   // 古物営業法16条の帳簿に使うための、取引の記録（FR-LEG-001）。引き渡した品を、日付・品目・数量・特徴・相手方で出す
   route('GET', '/api/billing/ledger.csv', (ctx) => {
     needStaff(ctx, 'admin');
     const month = ctx.url.searchParams.get('month') ?? today().slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) throw bad('月を、2026-12 の形で指定してください');
     const rows = db.prepare("SELECT * FROM bill_lines WHERE kind IN ('lot','promote') AND delivered_at IS NOT NULL ORDER BY delivered_at").all().filter((l) => jst(l.delivered_at).startsWith(month));
-    const esc = csvCell;
-    const out = [['引き渡しの日', '品目', '数量', '特徴', '代金（税込）', '相手方の氏名・名称', '相手方の住所', '相手方の電話番号'].map(esc).join(',')];
-    for (const l of rows) { const a = account(l.account_id); out.push([jst(l.delivered_at), l.label, 1, '', l.amount, displayName(a), a.address, a.withdrawn_phone ?? a.phone].map(esc).join(',')); }
+    const out = rows.map((l) => {
+      const a = account(l.account_id), lot = lotOf.get(l.lot_id) ?? {};
+      return [jst(l.delivered_at), lot.lot_no ?? '', lot.title ?? l.label, 1, '', l.amount, displayName(a), a.address, telCsv(a.withdrawn_phone ?? a.phone)];
+    });
     audit(ctx, 'billing.ledger_export', { target: `ledger:${month}`, after: { rows: rows.length } });
-    return { file: { body: Buffer.from('\ufeff' + out.join('\r\n') + '\r\n'), type: 'text/csv; charset=utf-8', name: `ledger-${month}.csv` } };
+    return csvFile(['引き渡しの日', '品番', '品目', '数量', '特徴', '代金（税込）', '相手方の氏名・名称', '相手方の住所', '相手方の電話番号'], out, `ledger-${month}.csv`);
   });
   // 月ごとに、全請求書を1つの Excel にまとめた一覧（FR-INV-007）
   route('GET', '/api/billing/invoices.xlsx', async (ctx) => {
