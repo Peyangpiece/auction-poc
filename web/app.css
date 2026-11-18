@@ -110,7 +110,7 @@ h1, h2, h3, p, dl, dd, ul { margin: 0; }
 /* 字を詰める組み方（palt）と、字間の足し算はしない（Apple の純正アプリの日本語は、詰めずに、字間 0 で組む） */
 h1, h2, h3 { font-weight: 700; line-height: 1.35; text-wrap: balance; letter-spacing: 0; }
 h2, h3 { font-weight: 600; }
-h2 { font-size: 15px; color: var(--action); }
+h2 { font-size: 17px; color: var(--ink); } /* 見出しは、文字の色（Apple の見出しは、色を付けない） */
 p { text-wrap: pretty; }
 .num { font-variant-numeric: tabular-nums; }
 .digits { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0; }
@@ -186,6 +186,12 @@ main:focus { outline: none; }
 .state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; white-space: nowrap; }
 .state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
 .state[data-on="1"]::before { background: currentColor; }
+/* 表示板の状態は、色の付いた丸と言葉の札（受付中は緑、中断は橙、配信準備中は黄、終わった品は灰） */
+.board .state[data-st] { padding: 4px 12px 4px 10px; border-radius: 999px; background: rgba(255, 255, 255, .12); font-size: 14px; color: var(--board-ink); }
+.board .state[data-st]::before { border: 0; width: 9px; height: 9px; background: #8e8e93; }
+.board .state[data-st="open"]::before { background: #30d158; }
+.board .state[data-st="suspended"]::before { background: #ff9f0a; }
+.board .state[data-st="preparing"]::before, .board .state[data-st="preparing_warn"]::before { background: #ffd60a; }
 
 /* ---- 表（区切りは細い線だけ） */
 .rows { list-style: none; padding: 0; }

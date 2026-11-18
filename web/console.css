@@ -25,7 +25,9 @@ section > h2 { margin-bottom: 8px; }
 .price { font-size: 92px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
 .actions [hidden] { display: none; }
-#b_close, #b_next { min-width: 220px; }
+/* 進行役の主な操作（締め・次を開始）は、板の幅いっぱいの大きなボタン */
+#b_close, #b_next { flex: 1 1 260px; min-height: 60px; font-size: 19px; }
+#b_suspend, #b_resume, #b_back, #b_nv { min-height: 60px; padding-inline: 24px; }
 #cmdMsg { margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--danger); }
 #cmdMsg:empty { display: none; }
 #idleWarn { margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--danger); }
@@ -44,7 +46,9 @@ td.digits { font-size: 16px; }
 tr.void td { text-decoration: line-through; color: var(--ink-3); }
 tr.focus td { font-weight: 700; background: var(--ground-alt); }
 td .btn { min-height: 40px; padding: 4px 14px; font-size: 14px; }
-.addlot { display: grid; grid-template-columns: minmax(0, 1fr) 130px 170px auto; gap: 8px; align-items: end; margin-top: 16px; }
+.addlot { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 10px; align-items: end; margin-top: 20px; padding: 16px; border-radius: var(--r-lg); background: var(--ground-alt); }
+.addlot__title { grid-column: 1 / -1; font-size: 15px; font-weight: 600; margin: 0; }
+.addlot .field:first-of-type, .addlot .btn { grid-column: 1 / -1; }
 @media (max-width: 640px) { .addlot { grid-template-columns: minmax(0, 1fr); } }
 
 /* 配信 */
@@ -86,3 +90,42 @@ details .stack { display: grid; gap: 8px; justify-items: start; margin-top: 8px;
 
 /* まだ何も無い欄（入札の履歴・落札一覧・コメント）は、出さない（見出しと空の表だけが並ぶのを避ける） */
 section[aria-labelledby="histTitle"]:has(tbody:empty), section[aria-labelledby="soldTitle"]:has(tbody:empty), section:has(> #comments:empty) { display: none; }
+
+/* 出品一覧（行の一覧）: 番号・品名と価格・状態の札・操作 */
+.lotlist { list-style: none; padding: 0; margin: 0; }
+.lotlist > li { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--line); }
+.lotlist > li.focus { background: var(--ground-alt); border-radius: var(--r); border-bottom-color: transparent; padding-inline: 10px; }
+.lotlist__no { flex: none; min-width: 2ch; font-size: 17px; color: var(--ink-2); text-align: right; }
+.lotlist__main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.lotlist__main b { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.lotlist__sub { font-size: 13px; color: var(--ink-2); }
+.lotlist .btn { flex: none; min-height: 40px; padding: 4px 16px; font-size: 15px; }
+.lotlist .iconbtn { flex: none; appearance: none; border: 0; background: none; min-height: 40px; padding: 4px 6px; font: 500 14px/1 var(--font); color: var(--ink-2); cursor: pointer; border-radius: var(--r-sm); }
+.lotlist .iconbtn:hover { color: var(--danger); }
+.lotlist__empty { color: var(--ink-2); font-size: 15px; justify-content: center; padding: 20px 0 !important; }
+#lotsHint { margin-top: 8px; }
+/* 状態の札（明るい地の上） */
+.pill { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; background: var(--ground-alt); color: var(--ink-2); }
+.pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.lotlist > li.focus .pill { background: var(--ground); }
+.pill[data-st="open"] { color: var(--ok); }
+.pill[data-st="suspended"] { color: #b25000; }
+.pill[data-st="preparing"], .pill[data-st="preparing_warn"] { color: #8a6d00; }
+.pill[data-st="sold"] { color: var(--action); }
+@media (prefers-color-scheme: dark) {
+  .pill[data-st="suspended"] { color: #ff9f0a; }
+  .pill[data-st="preparing"], .pill[data-st="preparing_warn"] { color: #ffd60a; }
+  .addlot { background: var(--ground-alt); }
+}
+/* 上の帯: 「進行コンソール」を、ページの名前として読める大きさに */
+.brand__service { font-size: 17px; font-weight: 600; color: var(--ink); }
+@media (prefers-color-scheme: dark) { .addlot .input { background: var(--ground-3); } }
+.addlot .btn { background: var(--ground); box-shadow: var(--shadow-1); }
+@media (prefers-color-scheme: dark) { .addlot .btn { background: var(--ground-3); } }
+/* タブレットの幅: 上の帯を1行に収める（ロゴを小さく、参加者の内訳は出さない） */
+@media (max-width: 900px) {
+  .brand__logo { height: 40px; }
+  .meta { gap: 12px; font-size: 13px; }
+  #presenceSplit { display: none; }
+  #clock { font-size: 20px; }
+}

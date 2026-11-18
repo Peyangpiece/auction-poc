@@ -100,21 +100,21 @@
       </div>
     </section>
 
+  </div>
+
+  <div class="col">
     <section aria-labelledby="lotsTitle">
-      <h2 id="lotsTitle">出品一覧</h2>
-      <div class="tablewrap">
-        <table><thead><tr><th scope="col">No.</th><th scope="col">品名</th><th scope="col">開始価格</th><th scope="col">最低落札額</th><th scope="col">状態</th><th scope="col">結果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="lots"></tbody></table>
-      </div>
+      <div class="sechead"><h2 id="lotsTitle">出品一覧</h2><span class="count num" id="lotsCount"></span></div>
+      <ul class="lotlist" id="lots"></ul>
+      <p class="note" id="lotsHint" hidden>進行中の品を締めると、次の品を開始できます。</p>
       <form class="addlot" id="addLot">
+        <h3 class="addlot__title">品を追加</h3>
         <label class="field">品名<input class="input" id="newTitle" name="title" autocomplete="off" maxlength="60" placeholder="例: 未使用品／ブーツ 10.5R 1足" required></label>
         <label class="field">開始価格（税込）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="例: 9500" required></label>
         <label class="field">最低落札額（任意・非公開）<input class="input num" id="newReserve" name="reserve" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="なし"></label>
         <button class="btn" id="create" type="submit">品を追加</button>
       </form>
     </section>
-  </div>
-
-  <div class="col">
     <section aria-labelledby="strTitle" id="streamBox">
       <div class="sechead"><h2 id="strTitle">配信</h2><span class="state" id="s_live">停止</span></div>
       <dl class="kv">

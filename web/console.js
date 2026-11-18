@@ -31,6 +31,7 @@ function render() {
   $('board').classList.toggle('idle', !lot);
   $('status').textContent = lot ? STATE_LABEL[st] + (lot.noVideo && st === 'open' ? '（映像なし）' : '') : '待機中';
   $('status').dataset.on = st === 'open' ? '1' : '';
+  $('status').dataset.st = st ?? 'idle';
   $('lotNo').textContent = lot ? `No.${lot.lotNo}` : '';
   $('title').textContent = lot ? lot.title : '進行中の品はありません';
   $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札価格' : lot.currentPrice === null ? '開始価格' : '現在価格';
@@ -79,25 +80,37 @@ function render() {
   $('histCount').textContent = `${S.history.filter((h) => h.valid).length}件`;
 
   const busy = [...S.lots.values()].some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status));
-  const tb = $('lots'); tb.replaceChildren();
-  for (const l of S.lots.values()) {
-    const tr = document.createElement('tr');
-    if (l.id === S.focus) tr.className = 'focus';
-    tr.append(cell(l.lotNo, 'digits'), cell(l.title, 'dyn'), cell(yen(l.startPrice), 'num'), cell(l.reservePrice === null ? 'なし' : yen(l.reservePrice), 'num'), cell(STATE_LABEL[l.status]),
-      cell(l.status === 'sold' ? `${l.highestPaddle}番 ${yen(l.currentPrice)}` : l.status === 'unsold' && l.currentPrice !== null ? '最低落札額に届かず' : '', 'num'));
-    const td = document.createElement('td');
-    if (l.status === 'waiting') {
-      const b1 = document.createElement('button'); b1.type = 'button'; b1.textContent = '競り開始'; b1.className = 'btn'; b1.disabled = busy;
-      if (busy) b1.title = '進行中の品を締めてから開始できます';
+  // 出品一覧は、表ではなく行の一覧（1行目に番号と品名、2行目に価格と状態）。押せるのは、待機中の品の「開始」と「…」の除外だけ。
+  // ほかの品が進行中のあいだは、押せないボタンを並べない（「進行中の品を締めると、開始できます」と一度だけ出す）
+  const items = [...S.lots.values()];
+  $('lotsCount').textContent = items.length ? `${items.filter((l) => l.status === 'waiting').length}件 待機／全${items.length}件` : '';
+  $('lots').replaceChildren(...(items.length ? items.map((l) => {
+    const li = document.createElement('li');
+    if (l.id === S.focus) li.className = 'focus';
+    const no = document.createElement('span'); no.className = 'lotlist__no digits'; no.textContent = l.lotNo;
+    const main = document.createElement('span'); main.className = 'lotlist__main';
+    const name = document.createElement('b'); name.className = 'dyn'; name.textContent = l.title;
+    const sub = document.createElement('span'); sub.className = 'lotlist__sub num';
+    const result = l.status === 'sold' ? `${l.highestPaddle}番 ${yen(l.currentPrice)} で落札` : l.status === 'unsold' && l.currentPrice !== null ? '最低落札額に届かず流札' : '';
+    sub.textContent = [`開始 ${yen(l.startPrice)}`, l.reservePrice === null ? '' : `最低落札額 ${yen(l.reservePrice)}`, result].filter(Boolean).join('・');
+    main.append(name, sub);
+    const tag = document.createElement('span'); tag.className = 'pill'; tag.dataset.st = l.status; tag.textContent = STATE_LABEL[l.status];
+    li.append(no, main, tag);
+    if (l.status === 'waiting' && !busy) {
+      const b1 = document.createElement('button'); b1.type = 'button'; b1.textContent = '開始'; b1.className = 'btn';
       b1.setAttribute('aria-label', `No.${l.lotNo} の競りを開始`);
       b1.onclick = () => lotCmd('start', l.id);
-      const b2 = document.createElement('button'); b2.type = 'button'; b2.textContent = '除外…'; b2.className = 'btn';
+      li.append(b1);
+    }
+    if (l.status === 'waiting') {
+      const b2 = document.createElement('button'); b2.type = 'button'; b2.className = 'iconbtn'; b2.textContent = '除外…';
       b2.setAttribute('aria-label', `No.${l.lotNo} を除外`);
       b2.onclick = () => lotCmd('exclude', l.id, true);
-      td.append(b1, ' ', b2);
+      li.append(b2);
     }
-    tr.appendChild(td); tb.appendChild(tr);
-  }
+    return li;
+  }) : [Object.assign(document.createElement('li'), { className: 'lotlist__empty', textContent: '品はまだありません。下の欄から追加してください。' })]));
+  $('lotsHint').hidden = !(busy && items.some((l) => l.status === 'waiting'));
 }
 function renderStream() {
   const s = S.stream; if (!s) return;

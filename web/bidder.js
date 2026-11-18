@@ -69,7 +69,7 @@ function render() {
   if (!lot) {
     $('lotNo').textContent = ''; $('title').textContent = '次の品をお待ちください';
     $('boardNo').textContent = ''; $('boardTitle').textContent = '次の品をお待ちください'; $('board').classList.remove('haslot');
-    $('status').textContent = '待機中'; $('status').dataset.on = '';
+    $('status').textContent = '待機中'; $('status').dataset.on = ''; $('status').dataset.st = 'idle';
     $('priceLabel').textContent = '現在価格'; $('price').textContent = ''; $('result').textContent = '';
     setLamp('urikiri', '', 'うりきり', ''); setLamp('right', '', '権利', '');
     $('priceTotal').textContent = ''; $('toPay').hidden = true; $('board').classList.remove('lead', 'won');
@@ -84,6 +84,7 @@ function render() {
   $('boardNo').textContent = `No.${lot.lotNo}`; $('boardTitle').textContent = lot.title; $('board').classList.add('haslot');
   $('status').textContent = STATE_LABEL[st] + (lot.noVideo && st === 'open' ? '（映像なし）' : '');
   $('status').dataset.on = st === 'open' ? '1' : '';
+  $('status').dataset.st = st;
   $('priceLabel').textContent = st === 'sold' ? '落札価格' : lot.currentPrice === null ? '開始価格' : '現在価格';
   const price = lot.currentPrice ?? lot.startPrice;
   $('price').textContent = yen(price);
