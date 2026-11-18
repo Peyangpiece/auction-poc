@@ -6,8 +6,6 @@ let profile = null;
 function showDevVerify(url) {
   $('#emailBanner').append(el('a', { class: 'btn', href: url, text: '【お試し用】確認のリンクを開く' }));
 }
-// 電話番号を、読みやすく区切る（携帯の 11 桁は 3-4-4。それ以外は、そのまま）
-const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.slice(3, 7)}-${p.slice(7)}` : p);
 (async () => {
   const me = await setupNav();
   const m = me.member;
@@ -65,8 +63,6 @@ $('#resendEmail').addEventListener('click', async (ev) => {
 // ---- 落札した品とお支払い（請求書、支払期限、受け取り期限、繰り上げのご案内）
 const STATE_TEXT = { unsettled: 'お支払い前', billed: 'ご請求済み', unpaid: 'お支払いの期限を過ぎています', cleared: 'お支払い済み', delivered: 'お渡し済み', cancelled: '解除されました' };
 const RECEIVE_TEXT = { pickup: '現地受け取り', ship: '配送' };
-// 2026-11-23 → 11月23日（月）
-const jpDay = (d) => { if (!d) return ''; const [y, m, dd] = d.split('-').map(Number); return `${m}月${dd}日（${'日月火水木金土'[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()]}）`; };
 const INVOICE_STATE = { paid: 'お支払い済み', overdue: 'お支払いの期限を過ぎています', billed: 'お支払い前' };
 // 請求書の一覧: 請求番号・発行日・金額・お支払期限・状態と、PDF を開くボタン
 function showInvoices(list) {

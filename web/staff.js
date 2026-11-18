@@ -45,7 +45,7 @@ async function eventsPanel() {
   const res = await api('GET', '/api/events');
   const rows = res.events.map((e) => el('tr', {},
     el('td', { class: 'dyn', text: e.title }),
-    el('td', { class: 'n', text: `${e.startsAt.replace('T', ' ')} 〜 ${e.endsAt.slice(11)}` }),
+    el('td', { class: 'n', text: `${jpDay(e.startsAt)} ${e.startsAt.slice(11)} 〜 ${e.endsAt.slice(11)}` }),
     el('td', { class: 'dyn', text: e.venueName }),
     el('td', { text: e.notified ? '届出済み' : '未届出' }),
     el('td', {}, el('span', { class: 'state', 'data-on': e.status === 'published' ? '1' : '0', text: e.status === 'published' ? '公開中' : '準備中' })),
@@ -116,7 +116,7 @@ async function membersPanel() {
     el('td', { class: 'dyn' }, m.kind === 'b2b' ? `${m.company}　${m.contactName}` : m.name),
     el('td', { text: m.kind === 'b2b' ? '法人' : '個人' }),
     el('td', { text: m.loginId ?? '' }),
-    el('td', { class: 'n', text: m.phone }),
+    el('td', { class: 'n', text: telFmt(m.phone) }),
     el('td', { class: 'dyn', text: m.email + (m.emailVerified ? '' : '（未確認）') }),
     el('td', { class: 'dyn' }, m.rejected ? '承認しなかった' : m.withdrawn ? '退会' : !m.approved ? el('span', { class: 'warn', text: '承認待ち' }) : m.suspendedBy === 'manual' ? el('span', { class: 'warn', text: `停止中: ${m.suspendReason}` })
       : m.suspendedBy === 'unpaid' ? el('span', { class: 'warn', text: '未払いによる停止（消し込むと、自動で解ける）' }) : '利用中'),
@@ -229,9 +229,11 @@ async function billingPanel() {
     openDialog('精算しました', el('p', { text: `請求書（領収書を兼ねる）${r.invoice.number} を発行しました。金額 ${yen(r.invoice.total)}` }),
       el('div', { class: 'actions' }, el('a', { class: 'btn btn-primary', href: `/api/billing/invoices/${r.invoice.id}/pdf`, text: 'PDF を開く' }), closeBtn()));
   }, 'btn-primary');
-  settleBtn.disabled = true;
+  // 押せない大きなボタンを先に見せない。明細を選ぶと「○件を当日現金で精算」が出る
+  settleBtn.hidden = true;
+  const syncSettle = () => { settleBtn.hidden = picked.size === 0; settleBtn.textContent = `${picked.size}件を、当日現金で精算`; };
   const rows = res.lines.map((l) => {
-    const box = l.state === 'unsettled' && el('input', { type: 'checkbox', 'aria-label': `${l.label} を精算に選ぶ`, onchange: (ev) => { if (ev.target.checked) picked.add(l.id); else picked.delete(l.id); settleBtn.disabled = picked.size === 0; } });
+    const box = l.state === 'unsettled' && el('input', { type: 'checkbox', 'aria-label': `${l.label} を精算に選ぶ`, onchange: (ev) => { if (ev.target.checked) picked.add(l.id); else picked.delete(l.id); syncSettle(); } });
     const a = isAdmin();
     return el('tr', {},
       el('td', {}, box || ''),
@@ -241,8 +243,8 @@ async function billingPanel() {
       el('td', { class: 'n' }, yen(l.payable), l.premium ? el('div', { class: 'note', text: `落札 ${yen(l.amount)}＋買歩銭 ${yen(l.premium)}` }) : null),
       el('td', { text: `${RECV[l.receive] ?? ''}${l.payment ? '・' + PAY[l.payment] : ''}` }),
       el('td', {}, el('span', { class: l.state === 'unpaid' ? 'warn' : 'state', 'data-on': ['cleared', 'delivered'].includes(l.state) ? '1' : '0', text: LINE_STATE[l.state] }),
-        l.invoice && el('div', { class: 'note', text: `${l.invoice.number}${l.invoice.dueDate ? '　期限 ' + l.invoice.dueDate : ''}` }),
-        l.pickupBy && l.state === 'cleared' && el('div', { class: l.pickupLate ? 'warn' : 'note', text: `受け取り期限 ${l.pickupBy}` }),
+        l.invoice && el('div', { class: 'note', text: `${l.invoice.number}${l.invoice.dueDate ? '　期限 ' + jpDay(l.invoice.dueDate) : ''}` }),
+        l.pickupBy && l.state === 'cleared' && el('div', { class: l.pickupLate ? 'warn' : 'note', text: `受け取り期限 ${jpDay(l.pickupBy)}` }),
         l.offer && el('div', { class: 'note', text: `繰り上げ: ${{ open: '回答待ち', accepted: '承諾', declined: '辞退', expired: '期限切れ' }[l.offer.state]}` })),
       act(
         a && ['billed', 'unpaid'].includes(l.state) && smallBtn('消し込み', () => askForm('振込の消し込み', `${l.name}　${l.label}。入金の金額が、明細の金額（${yen(l.payable)}${l.premium ? '。買歩銭を含む' : ''}）と一致するときだけ消し込めます。`,
@@ -267,9 +269,10 @@ async function billingPanel() {
   });
   const nodes = [
     el('div', { class: 'toolbar' }, el('p', { class: 'note', text: '当日現金は、明細を選んで「精算」。振込は、入金を確かめて「消し込み」。引き渡しは、消し込みのあとにだけ記録できます。' }),
-      el('div', {}, settleBtn, ' ', isAdmin() && el('a', { class: 'btn', href: '/api/billing/shipping.csv', text: '配送の一覧（CSV）' }), ' ',
-        isAdmin() && el('a', { class: 'btn', href: `/api/billing/ledger.csv?month=${res.today.slice(0, 7)}`, text: '帳簿用の記録（CSV）' }), ' ',
-        isAdmin() && el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（Excel）' }))),
+      el('div', { class: 'exports' }, settleBtn, isAdmin() && el('span', { class: 'exports__label', text: '書き出す:' }),
+        isAdmin() && el('a', { class: 'btn btn-quiet', href: '/api/billing/shipping.csv', text: '配送の一覧（CSV）' }),
+        isAdmin() && el('a', { class: 'btn btn-quiet', href: `/api/billing/ledger.csv?month=${res.today.slice(0, 7)}`, text: '帳簿用の記録（CSV）' }),
+        isAdmin() && el('a', { class: 'btn btn-quiet', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（Excel）' }))),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['', '参加番号', '落札者・品', '金額', '受け取り・支払', '状態', ''], rows, '落札した品は、まだありません。'),
   ];
@@ -278,8 +281,8 @@ async function billingPanel() {
     nodes.push(el('h2', { class: 'subhead', text: '請求書' }),
       el('p', { class: 'note', text: '支払期限は、発行日の5日後です（違約金などは7日後）。メールの下書きを送ったら「送付済みにする」を押してください。' }),
       table(['請求番号', '宛先', '種類', '金額', '発行日', '送付・期限', ''], inv.invoices.map((i) => el('tr', {},
-        el('td', { class: 'n', text: i.number }), el('td', { class: 'dyn', text: i.name }), el('td', { text: INV_KIND[i.kind] }), el('td', { class: 'n', text: yen(i.total) }), el('td', { class: 'n', text: i.issuedOn }),
-        el('td', {}, i.kind === 'cash' ? 'その場で渡した' : el('span', { class: !i.sentOn && i.stale ? 'warn' : '', text: `${i.sentOn ? `送付 ${i.sentOn}` : i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付'}　期限 ${i.dueDate}` })),
+        el('td', { class: 'n', text: i.number }), el('td', { class: 'dyn', text: i.name }), el('td', { text: INV_KIND[i.kind] }), el('td', { class: 'n', text: yen(i.total) }), el('td', { class: 'n', text: jpDay(i.issuedOn) }),
+        el('td', {}, i.kind === 'cash' ? 'その場で渡した' : el('span', { class: !i.sentOn && i.stale ? 'warn' : '', text: `${i.sentOn ? `送付 ${jpDay(i.sentOn)}` : i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付'}　期限 ${jpDay(i.dueDate)}` })),
         act(el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: 'PDF' }), el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/xlsx`, text: 'Excel' }),
           !['cash', 'penalty'].includes(i.kind) && !i.sentOn && smallBtn(i.shipping ? `送料 ${yen(i.shipping.amount)}` : '送料を入力', () => shippingForm(i.accountId, i.eventId, i.name, i.shipping)),
           i.kind !== 'cash' && (i.sentOn ? smallBtn('送付を取り消す', () => post(`/api/billing/invoices/${i.id}/unsent`)) : smallBtn('送付済みにする', () => post(`/api/billing/invoices/${i.id}/sent`), 'btn-primary'))))), '請求書は、まだありません。'));
@@ -291,7 +294,7 @@ async function pickupPanel() {
   return [el('p', { class: 'note', text: '現地受け取りで、支払いは済んでいるのに、まだ受け取っていない品です。期限は、消し込みの日の翌日から7日目まで。' }),
     table(['落札者', '品', '消し込み', '受け取り期限'], res.lines.map((l) => el('tr', {},
       el('td', { class: 'dyn', text: l.name }), el('td', { class: 'dyn', text: l.label }), el('td', { class: 'n', text: l.clearedOn }),
-      el('td', {}, el('span', { class: l.pickupLate ? 'warn' : 'n', text: `${l.pickupBy}${l.pickupLate ? '（期限を過ぎています）' : ''}` })))), '未引き取りの品はありません。')];
+      el('td', {}, el('span', { class: l.pickupLate ? 'warn' : 'n', text: `${jpDay(l.pickupBy)}${l.pickupLate ? '（期限を過ぎています）' : ''}` })))), '未引き取りの品はありません。')];
 }
 let feeMonth = null;
 async function feesPanel() {
@@ -313,7 +316,7 @@ async function feesPanel() {
       el('td', { class: 'dyn', text: d.label }), el('td', { class: 'n', text: yen(Math.abs(d.amount)).replace('¥', d.amount < 0 ? '−¥' : '¥') }), el('td', { text: d.method ?? '' }), el('td', { class: 'n', text: d.clearedOn }), el('td', { text: d.note }))), 'この月の明細はありません。'),
     el('h2', { class: 'subhead', text: '長く未払いのままの明細（期限の翌日から30日以上）' }),
     table(['落札者', '品', '金額', '期限', '督促', '引き渡し'], long.lines.map((l) => el('tr', {},
-      el('td', { class: 'dyn', text: l.name }), el('td', { class: 'dyn', text: l.label }), el('td', { class: 'n', text: yen(l.amount) }), el('td', { class: 'n', text: l.invoice.dueDate }),
+      el('td', { class: 'dyn', text: l.name }), el('td', { class: 'dyn', text: l.label }), el('td', { class: 'n', text: yen(l.amount) }), el('td', { class: 'n', text: jpDay(l.invoice.dueDate) }),
       el('td', { text: `${l.dunning.length} 回` }), el('td', { text: l.deliveredOn ? '済' : '未' }))), '該当する明細はありません。'),
   ];
 }

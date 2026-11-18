@@ -356,7 +356,7 @@ try {
   check((await admin.textContent('#panel table')).includes('¥11,000') && (await admin.textContent('#panel table')).includes('落札 ¥10,000＋買歩銭 ¥1,000'), '落札すると、請求の画面に「未精算」の明細が出る。金額は、落札額＋買歩銭10%');
   await admin.check('#panel table input[type=checkbox]');
   await shot(admin, 'mvp-24-billing-settle');
-  await admin.click('#panel >> text=選んだ明細を、当日現金で精算');
+  await admin.click('#panel >> text=1件を、当日現金で精算');
   await admin.waitForSelector('#dlg[open]');
   check(/請求書（領収書を兼ねる）\d{8}-0001 を発行しました/.test(await admin.textContent('#dlg')), '精算すると、請求書（領収書を兼ねる）を発行する');
   const pdfUrl = await admin.getAttribute('#dlg a', 'href');

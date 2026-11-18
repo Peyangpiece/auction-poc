@@ -5,6 +5,15 @@ const yenFmt = new Intl.NumberFormat('ja-JP');
 const yen = (n) => (n === null || n === undefined ? '' : '¥' + yenFmt.format(n));
 const dateFmt = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 const $ = (sel, root = document) => root.querySelector(sel);
+// 2026-11-23 → 11月23日（月）。年が今年でなければ、年も付ける
+const jpDay = (d) => {
+  if (!d) return '';
+  const [y, m, dd] = d.slice(0, 10).split('-').map(Number);
+  const w = '日月火水木金土'[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()];
+  return `${y !== new Date().getFullYear() ? `${y}年` : ''}${m}月${dd}日（${w}）`;
+};
+// 携帯の 11 桁は 3-4-4 に区切る。それ以外は、そのまま
+const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.slice(3, 7)}-${p.slice(7)}` : p);
 
 /** 要素を作る。文字は必ず textContent で入れる（入力された文字を HTML として解釈させない） */
 function el(tag, props = {}, ...children) {
