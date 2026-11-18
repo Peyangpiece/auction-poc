@@ -65,13 +65,13 @@
     <span class="err" role="alert"></span>
   </fieldset>
   <div class="form" id="corp" hidden>
-    <label class="field"><span class="field__label">会社名<span class="req">必須</span></span><input class="input" name="company" autocomplete="organization" placeholder="株式会社○○"><span class="err" role="alert"></span></label>
+    <label class="field"><span class="field__label">会社名<span class="req">必須</span></span><input class="input" name="company" autocomplete="organization"><span class="err" role="alert"></span></label>
     <label class="field"><span class="field__label">担当者名<span class="req">必須</span></span><input class="input" name="contactName" autocomplete="off"><span class="err" role="alert"></span></label>
     <label class="field"><span class="field__label">請求先<span class="req">必須</span></span><small>請求書の宛名と送り先</small><textarea class="input" name="billing" rows="2" autocomplete="off"></textarea><span class="err" role="alert"></span></label>
   </div>
   <label class="field" id="phoneRow" hidden><span class="field__label">携帯電話の番号<span class="req">必須</span></span><small>当日のご連絡と、配送に使います</small><input class="input" name="phone" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="090-1234-5678" disabled required><span class="err" role="alert"></span></label>
   <p class="verified" id="verifiedEmail" hidden></p>
-  <label class="field" id="emailRow"><span class="field__label">メールアドレス<span class="req">必須</span></span><small>請求書やお知らせをお送りします</small><input class="input" name="email" type="email" inputmode="email" autocomplete="email" spellcheck="false" placeholder="taro@example.com" required><span class="err" role="alert"></span></label>
+  <label class="field" id="emailRow"><span class="field__label">メールアドレス<span class="req">必須</span></span><small>請求書やお知らせをお送りします</small><input class="input" name="email" type="email" inputmode="email" autocomplete="email" spellcheck="false" required><span class="err" role="alert"></span></label>
   <div class="form" id="person"></div>
   <label class="check"><input type="checkbox" id="shipSame" checked><span>配送先は、上の住所と同じ</span></label>
   <label class="field" id="shipRow" hidden><span class="field__label">配送先<span class="opt">任意</span></span><small>郵便番号から、建物名まで</small><textarea class="input" name="shipTo" rows="3" autocomplete="off"></textarea><span class="err" role="alert"></span></label>

@@ -41,7 +41,7 @@ textarea.input { min-height: 96px; resize: vertical; line-height: 1.6; }
 select.input { appearance: auto; background-color: var(--ground); color: var(--ink); }
 .code { font-family: var(--digits); font-size: 28px; letter-spacing: 0; text-align: center; font-variant-numeric: tabular-nums; }
 .choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; border: 0; padding: 0; margin: 0; }
-.choice legend { font-size: 13px; font-weight: 700; padding: 0; margin-bottom: 4px; }
+.choice legend { font-size: 15px; font-weight: 600; color: var(--ink); padding: 0; margin-bottom: 4px; }
 .choice label { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: var(--r); cursor: pointer; font-weight: 700; }
 .choice label:has(input:checked) { border-color: var(--action); border-width: 2px; padding: 7px 11px; color: var(--action); }
 .check { display: flex; align-items: flex-start; gap: 10px; font-weight: 700; cursor: pointer; min-height: 44px; padding: 8px 0; }
@@ -356,3 +356,13 @@ th { font-size: 12px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; 
   .datechip, .install__close, .card .verified, .card .secret { background: var(--ground-3); }
   .card .input, .card textarea.input, .card select.input { background: var(--ground-3); }
 }
+
+/* 会員登録・ログイン（Apple の入力の画面に合わせる） */
+/* 「必須」の札は出さない（ほとんどの欄が必須なので、札が並ぶとうるさい）。任意の欄にだけ「任意」と出す */
+.req { display: none; }
+/* 文字のリンクは、下線ではなく、色の付いた文字のボタン */
+.aside a, .text a { text-decoration: none; font-weight: 600; }
+.aside a:hover, .text a:hover { text-decoration: underline; }
+.aside .textbtn, .form .textbtn { text-decoration: none; color: var(--action); font-weight: 600; }
+/* ログインの画面の上に、アプリのアイコン（ホーム画面のアイコンと同じ） */
+.appicon { display: block; width: 72px; height: 72px; border-radius: 16px; margin: 8px 0 16px; box-shadow: var(--shadow-1); }

@@ -21,6 +21,7 @@
   --ground: #ffffff;
   --ground-alt: #f3f4f7;
   --ground-3: #e9ebf0;
+  --placeholder: #767676;  /* 入力欄の見本の文字。白地で 4.5:1（入れた文字 #15181e とは、はっきり違う） */
   --ink: #15181e;
   --ink-2: #596170;        /* 補助の文字。白地で 6.0:1 */
   --ink-3: #596170;
@@ -67,6 +68,7 @@
     --ground: #000000;
     --ground-alt: #1c1c1e;
     --ground-3: #2c2c2e;
+    --placeholder: #98989d;  /* #1C1C1E の上で 5.6:1、#2C2C2E の上で 4.7:1 */
     --ink: #ffffff;
     --ink-2: #a1a1a8;        /* #1C1C1E の上で 6.6:1 */
     --ink-3: #a1a1a8;
@@ -143,13 +145,13 @@ main:focus { outline: none; }
 .btn-lg { min-height: 56px; font-size: 17px; font-weight: 700; border-radius: 14px; }
 
 /* ---- 入力 */
-.field { display: grid; gap: 6px; font-size: 13px; font-weight: 500; color: var(--ink-2); min-width: 0; }
+.field { display: grid; gap: 6px; font-size: 15px; font-weight: 600; color: var(--ink); min-width: 0; } /* 欄の名前は、ふつうの文字の色で読めるように */
 .input {
   font: 400 16px/1.5 var(--font); color: var(--ink); min-height: 48px; padding: 8px 14px; width: 100%;
   border: 1px solid var(--edge); border-radius: var(--r); background: var(--field);
   transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
 }
-.input::placeholder { color: var(--ink-3); opacity: 1; } /* 薄くしすぎない（明るい配色・暗い配色とも 4.5:1 以上） */
+.input::placeholder { color: var(--placeholder); opacity: 1; } /* 入れた文字（濃い色）とはっきり分かる薄さ。それでも 4.5:1 以上 */
 .input:hover { border-color: var(--ink-2); }
 /* 入力中の欄: 紺の縁と、まわりのうすい輪 */
 .input:focus-visible, .input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 4px var(--ring); }

@@ -94,13 +94,13 @@ function personFields(m = {}) {
   const [last = '', first = ''] = String(m.name ?? '').split(/[\s　]+/);
   const [lastKana = '', firstKana = ''] = String(m.nameKana ?? '').split(/[\s　]+/);
   const input = (name, props) => el('input', { class: 'input', name, ...props });
-  const zip = input('postalCode', { value: m.postalCode ?? '', inputMode: 'numeric', autocomplete: 'postal-code', placeholder: '1000001', maxLength: 8, required: true });
+  const zip = input('postalCode', { value: m.postalCode ?? '', inputMode: 'numeric', autocomplete: 'postal-code', maxLength: 8, required: true });
   const pref = el('select', { class: 'input', name: 'prefecture', autocomplete: 'address-level1', required: true },
     el('option', { value: '', text: '選んでください' }), PREFECTURES.map((p) => el('option', { value: p, text: p })));
   pref.value = m.prefecture ?? '';
   const a1 = input('address1', { value: m.address1 ?? (m.postalCode ? '' : m.address ?? ''), // 前の版で登録した人は、まとめて書いた住所をここに出す
-    autocomplete: 'address-line1', placeholder: '千代田区千代田1-1', required: true });
-  const a2 = input('address2', { value: m.address2 ?? '', autocomplete: 'address-line2', placeholder: '○○マンション 101号室' });
+    autocomplete: 'address-line1', required: true });
+  const a2 = input('address2', { value: m.address2 ?? '', autocomplete: 'address-line2' });
   const zipNote = el('p', { class: 'note', role: 'status' });
   const picks = el('div', { class: 'picks' });
   let filled = ''; // 自動で入れた文字（利用者が書き足した分を、消さないため）
@@ -127,11 +127,11 @@ function personFields(m = {}) {
   });
   return [
     el('div', { class: 'pair' },
-      labeled('姓', true, input('lastName', { value: last, autocomplete: 'family-name', placeholder: '山田', required: true })),
-      labeled('名', true, input('firstName', { value: first, autocomplete: 'given-name', placeholder: '太郎', required: true }))),
+      labeled('姓', true, input('lastName', { value: last, autocomplete: 'family-name', required: true })),
+      labeled('名', true, input('firstName', { value: first, autocomplete: 'given-name', required: true }))),
     el('div', { class: 'pair' },
-      labeled('セイ', true, input('lastKana', { value: lastKana, autocomplete: 'off', placeholder: 'ヤマダ', required: true })),
-      labeled('メイ', true, input('firstKana', { value: firstKana, autocomplete: 'off', placeholder: 'タロウ', required: true }))),
+      labeled('セイ', true, input('lastKana', { value: lastKana, autocomplete: 'off', required: true })),
+      labeled('メイ', true, input('firstKana', { value: firstKana, autocomplete: 'off', required: true }))),
     el('h2', { class: 'formhead', text: 'ご住所' }),
     labeled('郵便番号', true, zip, '7桁の数字。入れると、住所を自動で入れます'),
     zipNote, picks,
