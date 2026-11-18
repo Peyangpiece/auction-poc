@@ -427,3 +427,6 @@ dialog .actions > :is(.btn-primary, .btn-danger) { order: 2; }
 /* 表の行ごとの操作は、紺の塗りにしない（行が並ぶと、紺の面が画面に散らばる）。塗りの主のボタンは、ダイアログと画面の主な操作だけ */
 table .btn-primary { background: var(--tint); color: var(--action); }
 table .btn-primary:hover:not(:disabled) { background: var(--tint-2); color: var(--action); }
+/* 原本の値で固定している欄: 灰色の面にして、変えられないことが分かるように */
+.input[readonly] { background: var(--ground-alt); color: var(--ink-2); border-color: var(--line); cursor: default; }
+.input[readonly]:hover { border-color: var(--line); }

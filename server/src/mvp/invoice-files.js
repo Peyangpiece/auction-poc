@@ -112,7 +112,8 @@ function writePdf(file, c) {
     for (const line of c.issuer.address) { T(line, rx, ry, 9); ry += 11.5; }
     ry += 10.8; // 住所と連絡先のあいだを、1行あける
     for (const line of c.issuer.contact) { T(line, rx, ry, 9); ry += 11.4; }
-    if (c.seal) doc.image(c.seal, 500.5, 194, { width: 59 });
+    // 印鑑: 原本と同じ枠（左上 500.2・193.0、幅 58.25・高さ 60pt）に、縦横の比を保って収める（原本の PDF を 600dpi で測った値）
+    if (c.seal) doc.image(c.seal, 500.2, 193.0, { fit: [58.25, 60] });
 
     // 表: 品番・品名｜数量｜単価｜金額
     const col = [L, 350, 417, 482, R], H = 25;

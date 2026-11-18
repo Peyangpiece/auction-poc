@@ -98,6 +98,38 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   // 印影は、悪用されると困るものなので、ソースコードには入れない。データの置き場（data/brand）にだけ置く
   const brandDir = path.join(config.dataDir, 'brand');
   const sealFile = () => ['seal.png', 'seal.jpg'].map((f) => path.join(brandDir, f)).find((f) => fs.existsSync(f)) ?? null;
+  // ---- 原本の発行者の情報（発注者の指示: 請求書の会社情報を、原本と全く同じにする。報告書 72 章）
+  // 値は、公開のリポジトリには入れない。GitHub の秘密の値（INVOICE_ORIGINAL）を、配るときにデータの保存先の brand/original.json に置き、
+  // 起動のたびに、ここで設定と印鑑に反映する。この値がある項目は、管理画面からは変えられない（変えても、原本の値に戻る）
+  const ORIGINAL_KEYS = ['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'];
+  const originalFile = path.join(brandDir, 'original.json');
+  function readOriginal() {
+    if (!fs.existsSync(originalFile)) return null;
+    try {
+      const o = JSON.parse(fs.readFileSync(originalFile, 'utf8'));
+      return o && typeof o === 'object' ? o : null;
+    } catch (e) { console.error('[original] brand/original.json を読めません:', e.message); return null; }
+  }
+  const original = readOriginal();
+  /** 原本の値で固定している設定の名前 */
+  const fixedKeys = () => (original ? ORIGINAL_KEYS.filter((k) => typeof original[k] === 'string' && original[k] !== '') : []);
+  // 原本の印鑑の画像は、別のファイル（brand/original-seal.jpg か .png）。配るときに、秘密の値から作って置く（画像はそのまま。変換しない）
+  const originalSeal = ['original-seal.png', 'original-seal.jpg'].map((f) => path.join(brandDir, f)).find((f) => fs.existsSync(f)) ?? null;
+  const sealFixed = () => !!originalSeal;
+  if (original) {
+    for (const k of fixedKeys()) db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, original[k].replace(/\r\n/g, '\n'));
+  }
+  if (originalSeal) {
+    const buf = fs.readFileSync(originalSeal);
+    const png = buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), jpg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+    if (png || jpg) {
+      const name = png ? 'seal.png' : 'seal.jpg';
+      for (const f of ['seal.png', 'seal.jpg']) if (f !== name) fs.rmSync(path.join(brandDir, f), { force: true });
+      const target = path.join(brandDir, name);
+      if (!fs.existsSync(target) || !fs.readFileSync(target).equals(buf)) fs.writeFileSync(target, buf, { mode: 0o600 });
+    } else console.error('[original] 原本の印鑑の画像が、PNG でも JPEG でもありません');
+  }
+
   route('GET', '/api/settings/seal', (ctx) => {
     needStaff(ctx, 'admin');
     const file = sealFile();
@@ -106,6 +138,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   });
   route('POST', '/api/settings/seal', (ctx, body) => {
     needStaff(ctx, 'admin');
+    if (sealFixed()) throw new HttpError(409, '印鑑は、原本の画像で固定しています（配るときの設定で変えます）');
     fs.mkdirSync(brandDir, { recursive: true });
     for (const f of ['seal.png', 'seal.jpg']) fs.rmSync(path.join(brandDir, f), { force: true });
     if (!body.image) { audit(ctx, 'settings.seal', { target: 'seal', after: { registered: false } }); return { ok: true, registered: false }; }
@@ -834,5 +867,5 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     return { overdue: overdue.length, pickup };
   }
 
-  return { syncLines, onEventEnd, suspension, sweep, feeSummary, premiumRate };
+  return { syncLines, onEventEnd, suspension, sweep, feeSummary, premiumRate, fixedKeys, sealFixed };
 }

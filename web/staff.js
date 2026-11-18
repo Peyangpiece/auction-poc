@@ -390,7 +390,7 @@ function passwordDialog() {
 
 // ------------------------------------------------------------ 設定
 // 印鑑の画像の登録。画像は、サーバーのデータの置き場にだけ保存する
-function sealBox() {
+function sealBox(fixed = false) {
   const preview = el('img', { class: 'seal', alt: '登録してある印鑑', width: 96, height: 96, hidden: true });
   const note = el('p', { class: 'note', text: '登録されていません。' });
   const refresh = () => { preview.onload = () => { preview.hidden = false; note.textContent = '登録済みです。'; }; preview.onerror = () => { preview.hidden = true; note.textContent = '登録されていません。'; }; preview.src = `/api/settings/seal?${Date.now()}`; };
@@ -405,6 +405,8 @@ function sealBox() {
     if (res.ok) refresh(); else note.textContent = res.message;
   });
   refresh();
+  // 原本の印鑑で固定しているときは、ここでは変えられない（配るときの設定で変える）
+  if (fixed) { preview.onload = () => { preview.hidden = false; note.textContent = '原本の印鑑を押します（配るときの設定で固定しています）。'; }; return el('div', { class: 'sealbox' }, preview, el('div', {}, note)); }
   return el('div', { class: 'sealbox' }, preview, el('div', {}, note, input, el('label', { class: 'btn', htmlFor: 'sealInput', text: '画像を選ぶ' }), ' ',
     el('button', { class: 'btn', type: 'button', text: '登録を消す', onclick: async () => { await api('POST', '/api/settings/seal', { image: null }); refresh(); } })));
 }
@@ -432,12 +434,13 @@ async function settingsPanel() {
     field('返品特約の表示', 'returnPolicy', { value: s.returnPolicy, rows: 4, required: true }, 'トップページに表示します。弁護士の確認が済むまでは仮の文言です'),
     field('送料の表示', 'shippingNotice', { value: s.shippingNotice, rows: 3, required: true }, 'トップページに表示します'),
     el('h2', { class: 'subhead', text: '請求書に載せる内容' }),
+    s.fixed?.length ? el('p', { class: 'note', text: '原本の請求書と同じ値で固定しています（配るときの設定で変えます）。ここでは変えられません。' }) : null,
     field('住所', 'orgAddress', { value: s.orgAddress, rows: 2 }, '郵便番号から。改行できます'),
     el('div', { class: 'grid2' }, field('電話番号', 'orgTel', { value: s.orgTel }), field('メールアドレス', 'orgEmail', { value: s.orgEmail })),
     field('適格請求書発行事業者の登録番号', 'invoiceRegNo', { value: s.invoiceRegNo }, 'T から始まる番号'),
     field('振込先の口座', 'bankAccount', { value: s.bankAccount }),
     el('h2', { class: 'subhead', text: '印鑑（請求書に押す）' }),
-    sealBox(),
+    sealBox(!!s.sealFixed),
     el('h2', { class: 'subhead', text: '買歩銭' }),
     field('買歩銭の割合（%）', 'buyerPremiumRate', { value: s.buyerPremiumRate, inputMode: 'numeric' }, '落札者が、落札額に上乗せして払う手数料。変えても、すでに落札した品の金額は変わりません'),
     el('h2', { class: 'subhead', text: '違約金・遅延損害金' }),
@@ -453,6 +456,7 @@ async function settingsPanel() {
       field('最低保証額（円）', 'feeMinimum', { value: s.feeMinimum, inputMode: 'numeric' }, '未定なら空のまま')),
     el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '保存する' })));
+  for (const name of s.fixed ?? []) { const input = form.elements[name]; if (input) { input.readOnly = true; input.setAttribute('aria-readonly', 'true'); } }
   onSubmit(form, async (data) => {
     const res = await api('POST', '/api/settings', data);
     if (res.ok) { const m = $('.msg', form); m.classList.add('ok'); m.textContent = '保存しました'; return null; }

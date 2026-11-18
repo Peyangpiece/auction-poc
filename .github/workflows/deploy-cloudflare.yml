@@ -30,6 +30,10 @@ jobs:
       # 公開しているサイトの URL（例: https://<名前>.<アカウント>.workers.dev）。入れておくと、競りの最中には配らない
       SITE_URL: ${{ secrets.SITE_URL }}
       FORCE: ${{ inputs.force }}
+      # 請求書の発行者の情報と印鑑（原本の値。JSON）。公開のリポジトリに入れないため、秘密の値で渡す
+      INVOICE_ORIGINAL: ${{ secrets.INVOICE_ORIGINAL }}
+      INVOICE_SEAL_1: ${{ secrets.INVOICE_SEAL_1 }}
+      INVOICE_SEAL_2: ${{ secrets.INVOICE_SEAL_2 }}
       # 映像（Amazon IVS）。5つとも入っているときだけ、つなぐ
       IVS_CHANNEL_ARN: ${{ secrets.IVS_CHANNEL_ARN }}
       IVS_PLAYBACK_URL: ${{ secrets.IVS_PLAYBACK_URL }}
@@ -70,6 +74,26 @@ jobs:
             value="$(printenv "$name" || true)"
             if [ -n "$value" ]; then printf '%s' "$value" | $WRANGLER secret put "$name"; fi
           done
+      - name: 請求書の発行者の情報と印鑑を、原本の値で置く（INVOICE_ORIGINAL があるときだけ。値は公開のリポジトリには入れない）
+        # INVOICE_ORIGINAL は JSON: org_name・org_address（改行は \n）・org_tel・org_email・invoice_reg_no・bank_account
+        # 印鑑の画像（JPEG か PNG）は、base64 にして2つに分けて INVOICE_SEAL_1・INVOICE_SEAL_2 に入れる（秘密の値は1つ 48KB まで）。つないで、そのまま置く
+        if: env.INVOICE_ORIGINAL != ''
+        run: |
+          f="$RUNNER_TEMP/original.json"
+          printf '%s' "$INVOICE_ORIGINAL" > "$f"
+          node -e 'const o=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const k=["org_name","org_address","org_tel","org_email","invoice_reg_no","bank_account"];const miss=k.filter(x=>typeof o[x]!=="string"||!o[x]);if(miss.length){console.error("INVOICE_ORIGINAL に、次の項目がありません: "+miss.join(", "));process.exit(1)}console.log("原本の項目: "+k.join(", "))' "$f"
+          $WRANGLER r2 object put reiwa-no-seri-data/data/brand/original.json --file "$f" --content-type application/json --remote
+          rm -f "$f"
+          if [ -n "$INVOICE_SEAL_1" ]; then
+            s="$RUNNER_TEMP/seal"
+            printf '%s%s' "$INVOICE_SEAL_1" "$INVOICE_SEAL_2" | tr -d ' \n\r' | base64 -d > "$s"
+            if head -c 3 "$s" | od -An -tx1 | grep -q 'ff d8 ff'; then name=original-seal.jpg; type=image/jpeg
+            elif head -c 8 "$s" | od -An -tx1 | grep -q '89 50 4e 47'; then name=original-seal.png; type=image/png
+            else echo "INVOICE_SEAL_1・2 が、JPEG でも PNG でもありません"; exit 1; fi
+            echo "印鑑: $name（$(wc -c < "$s") バイト）"
+            $WRANGLER r2 object put "reiwa-no-seri-data/data/brand/$name" --file "$s" --content-type "$type" --remote
+            rm -f "$s"
+          fi
       - name: コンテナを組み立てて、配る
         # BUILD（この版の印）が変わると、入口の Worker が、動いているコンテナを新しい版に入れ替える
         run: |

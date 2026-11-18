@@ -1118,7 +1118,10 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     penaltyRateB2b: ['penalty_rate_b2b', 6], penaltyRateB2c: ['penalty_rate_b2c', 6], lateRateB2b: ['late_rate_b2b', 6], lateRateB2c: ['late_rate_b2c', 6] };
   route('GET', '/api/settings', (ctx) => {
     needStaff(ctx, 'admin');
-    return { orgName: setting('org_name'), returnPolicy: setting('return_policy'), shippingNotice: setting('shipping_notice'), ...Object.fromEntries(Object.entries(BILLING_KEYS).map(([k, [key]]) => [k, setting(key)])) };
+    // fixed: 原本の値で固定している項目（画面では変えられないようにする）。sealFixed: 印鑑も原本で固定
+    const FIXED_NAME = { org_name: 'orgName', ...Object.fromEntries(Object.entries(BILLING_KEYS).map(([k, [key]]) => [key, k])) };
+    return { orgName: setting('org_name'), returnPolicy: setting('return_policy'), shippingNotice: setting('shipping_notice'), ...Object.fromEntries(Object.entries(BILLING_KEYS).map(([k, [key]]) => [k, setting(key)])),
+      fixed: billing.fixedKeys().map((k) => FIXED_NAME[k]), sealFixed: billing.sealFixed() };
   });
   route('POST', '/api/settings', (ctx, body) => {
     needStaff(ctx, 'admin');
@@ -1128,6 +1131,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       shipping_notice: String(body.shippingNotice ?? '').trim().slice(0, 1000),
       ...Object.fromEntries(Object.entries(BILLING_KEYS).filter(([k]) => body[k] !== undefined).map(([k, [key, max]]) => [key, String(body[k] ?? '').trim().slice(0, max)])),
     };
+    for (const k of billing.fixedKeys()) next[k] = setting(k); // 原本の値で固定している項目は、変えない
     if (!next.org_name || !next.return_policy || !next.shipping_notice) throw bad('名称・返品特約・送料の表示は、空にできません');
     const before = Object.fromEntries(Object.keys(next).map((k) => [k, setting(k)]));
     for (const [k, v] of Object.entries(next)) db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, v);
