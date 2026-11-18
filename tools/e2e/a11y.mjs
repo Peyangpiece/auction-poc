@@ -69,6 +69,20 @@ for (const scheme of ['light', 'dark']) {
   if (await con.isVisible('#b_close') && await con.isEnabled('#b_close')) { await con.click('#b_close'); await con.waitForTimeout(600); if (await con.isVisible('dialog[open]')) await con.click('#dlgOk'); }
   // 落札の知らせの札は、出入りの途中（半透明）だと、文字の色の検査が正しく測れない。札が消えてから、板を検査する
   await p.waitForTimeout(700); await p.waitForFunction(() => document.getElementById('winFx').hidden, null, { timeout: 5000 }).catch(() => {}); await scan(p, 'bidder-won', scheme);
+  // 品名だけの品を登録すると、オークショニアの画面に、開始値の入力のシートが出る
+  await con.evaluate(() => document.querySelectorAll('dialog[open]').forEach((d) => d.close())); // 開いたままのダイアログがあると、ほかの所が押せない
+  await con.fill('#newTitle', '名前だけの品'); await con.click('#create'); await con.waitForTimeout(600);
+  const cs = await sc.newPage(); await cs.goto(B + '/caller.html');
+  if (await cs.waitForSelector('#startSheet[open]', { timeout: 5000 }).catch(() => null)) {
+    await cs.waitForTimeout(400); await scan(cs, 'caller-start-sheet', scheme);
+    // 次の配色の回のために、この品を始めて流札にしておく（待機のまま残すと、次の回の品が始められない）
+    await cs.fill('#sheetInput', '1000'); await cs.click('#sheetGo');
+    await cs.waitForFunction(() => ['open', 'preparing', 'preparing_warn'].includes(document.getElementById('status').dataset.st), null, { timeout: 15000 }).catch(() => {});
+    await cs.waitForFunction(() => document.getElementById('status').dataset.st === 'open', null, { timeout: 15000 }).catch(() => {});
+    if (await cs.isEnabled('#pass')) { await cs.click('#pass'); await cs.click('#dlgOk'); await cs.waitForTimeout(500); }
+  }
+  else out.push({ id: 'caller-start-sheet-missing', impact: 'test', n: 1, ex: ['開始値のシートが出ませんでした'], page: 'caller', scheme });
+  await cs.close();
   await c.close(); await sc.close();
 }
 const by = {};

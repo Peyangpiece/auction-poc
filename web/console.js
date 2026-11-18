@@ -52,7 +52,8 @@ function render() {
   const show = (id, on) => { $(id).hidden = !on; };
   // 締めた後・最初は、次にやることが1つだけ（次の品を開始）。板から目を離さずに進められる
   show('b_next', (!lot || ended) && !!next);
-  if (next) { $('b_next').textContent = `No.${next.lotNo} を開始`; $('b_next').onclick = () => lotCmd('start', next.id); }
+  // 開始値が未定の品（品名だけで登録した品）は、オークショニアの画面で開始値を入れて始める
+  if (next) { $('b_next').textContent = next.startPending ? `No.${next.lotNo} は、オークショニアの開始値の入力待ち` : `No.${next.lotNo} を開始`; $('b_next').disabled = !!next.startPending; $('b_next').onclick = () => lotCmd('start', next.id); }
   show('b_close', st === 'open');
   show('b_suspend', st === 'open'); show('b_resume', st === 'suspended'); show('b_cancel', st === 'suspended');
   show('b_nv', st === 'preparing_warn'); show('b_back', st === 'preparing' || st === 'preparing_warn');
@@ -92,11 +93,11 @@ function render() {
     const name = document.createElement('b'); name.className = 'dyn'; name.textContent = l.title;
     const sub = document.createElement('span'); sub.className = 'lotlist__sub num';
     const result = l.status === 'sold' ? `${l.highestPaddle}番 ${yen(l.currentPrice)} で落札` : l.status === 'unsold' && l.currentPrice !== null ? '最低落札額に届かず流札' : '';
-    sub.textContent = [`開始 ${yen(l.startPrice)}`, l.reservePrice === null ? '' : `最低落札額 ${yen(l.reservePrice)}`, result].filter(Boolean).join('・');
+    sub.textContent = [l.startPending ? '開始値 未定（オークショニアが決める）' : `開始 ${yen(l.startPrice)}`, l.reservePrice === null ? '' : `最低落札額 ${yen(l.reservePrice)}`, result].filter(Boolean).join('・');
     main.append(name, sub);
     const tag = document.createElement('span'); tag.className = 'pill'; tag.dataset.st = l.status; tag.textContent = STATE_LABEL[l.status];
     li.append(no, main, tag);
-    if (l.status === 'waiting' && !busy) {
+    if (l.status === 'waiting' && !busy && !l.startPending) { // 開始値が未定の品は、オークショニアの画面から始める
       const b1 = document.createElement('button'); b1.type = 'button'; b1.textContent = '開始'; b1.className = 'btn';
       b1.setAttribute('aria-label', `No.${l.lotNo} の競りを開始`);
       b1.onclick = () => lotCmd('start', l.id);
@@ -190,7 +191,7 @@ document.querySelectorAll('[data-crash]').forEach((b) => b.addEventListener('cli
 }));
 document.querySelectorAll('[data-mark]').forEach((b) => b.addEventListener('click', () => cmd('mark', { label: $('markLabel').value || 'unnamed', phase: b.dataset.mark })));
 $('markForm').addEventListener('submit', (ev) => ev.preventDefault());
-$('addLot').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('create_lot', { title: $('newTitle').value, startPrice: Number($('newPrice').value), reservePrice: $('newReserve').value === '' ? null : Number($('newReserve').value) }); for (const id of ['newTitle', 'newPrice', 'newReserve']) $(id).value = ''; $('newTitle').focus(); }); // 追加したら、欄を空にして、次の品を書けるようにする
+$('addLot').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('create_lot', { title: $('newTitle').value, startPrice: $('newPrice').value === '' ? null : Number($('newPrice').value), reservePrice: $('newReserve').value === '' ? null : Number($('newReserve').value) }); for (const id of ['newTitle', 'newPrice', 'newReserve']) $(id).value = ''; $('newTitle').focus(); }); // 追加したら、欄を空にして、次の品を書けるようにする
 
 function onMessage(msg, at) {
   switch (msg.type) {

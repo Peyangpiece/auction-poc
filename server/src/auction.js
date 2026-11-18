@@ -185,7 +185,7 @@ export class Auction {
   // ---------------------------------------------------------------- 進行役の操作（8.6 の状態遷移表）
   #processCommand(item) {
     const { q } = this.store;
-    const lot = q.lot.get(item.lotId);
+    let lot = q.lot.get(item.lotId); // 開始値をいっしょに決めて始めるときは、読み直す
     const fail = (message) => {
       item.reply({ type: 'cmd_result', reqId: item.reqId, ok: false, action: item.action, lotId: item.lotId, message });
       this.metrics.write('cmd', { seq: item.seq, lotId: item.lotId, action: item.action, ok: false, message, receivedAt: item.receivedAt });
@@ -200,6 +200,17 @@ export class Auction {
       case 'start': {
         if (s !== 'waiting') return fail(`「${stateName}」の品は競りを開始できません`);
         if (q.busyLot.get(lot.id)) return fail('進行中の品がほかにあります（同時に1つまで）');
+        // 開始値をいっしょに送ってきたら、先に開始値を決めてから始める（1つの操作で。オークショニアの「開始値を入力 → 競りを開始」）
+        if (item.amount !== undefined && item.amount !== null && item.amount !== '') {
+          const amount = Number(item.amount);
+          if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1e10) return fail('開始値を、1円以上の整数で入れてください');
+          const reserve = lot.reserve_price !== null && lot.reserve_price > amount ? lot.reserve_price : null;
+          this.store.tx(() => {
+            q.setStartPrice.run(amount, reserve, item.receivedAt, lot.id);
+            q.insertEvent.run(this.nextSeq(), lot.id, 'set_start', item.receivedAt, item.actor.name, JSON.stringify({ from: lot.start_pending ? null : lot.start_price, to: amount, withStart: true }));
+          });
+          lot = q.lot.get(lot.id);
+        } else if (lot.start_pending) return fail('開始値が決まっていません。開始値を入れてから始めてください');
         this.#beginOrPrepare(lot, 'waiting', item.actor.name);
         break;
       }
@@ -220,12 +231,12 @@ export class Auction {
         if (lot.current_bid_seq) return fail('入札があるので、開始値は変えられません');
         const amount = Number(item.amount);
         if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1e10) return fail('開始値を、1円以上の整数で入れてください');
-        if (amount === lot.start_price) return fail('いまの開始値と同じです');
+        if (amount === lot.start_price && !lot.start_pending) return fail('いまの開始値と同じです');
         // 最低落札額が新しい開始値以下になるなら、最低落札額はなくなる（最初の入札で必ず届くため）
         const reserve = lot.reserve_price !== null && lot.reserve_price > amount ? lot.reserve_price : null;
         this.store.tx(() => {
           q.setStartPrice.run(amount, reserve, item.receivedAt, lot.id);
-          q.insertEvent.run(item.seq, lot.id, 'set_start', item.receivedAt, item.actor.name, JSON.stringify({ from: lot.start_price, to: amount, reserveCleared: lot.reserve_price !== null && reserve === null }));
+          q.insertEvent.run(item.seq, lot.id, 'set_start', item.receivedAt, item.actor.name, JSON.stringify({ from: lot.start_pending ? null : lot.start_price, to: amount, reserveCleared: lot.reserve_price !== null && reserve === null }));
         });
         this.broadcast({ type: 'lot', lot: this.lotView(lot.id), reason: null });
         extra = { startPrice: amount };
@@ -412,11 +423,12 @@ export class Auction {
   #view(lot) {
     return {
       id: lot.id, lotNo: lot.lot_no, title: lot.title, status: lot.status, noVideo: !!lot.no_video,
-      startPrice: lot.start_price,
+      startPrice: lot.start_pending ? null : lot.start_price, // まだ決まっていなければ null（品名だけ登録した品）
+      startPending: !!lot.start_pending,
       unit: lot.unit_override ?? null, // この品だけの入札単位（なければ、共通の表を使う）。端末が、入力された金額を確かめるのに使う
       currentPrice: lot.current_price ?? null, // 入札がなければ null（画面には開始価格を出す）
-      minBid: minimumBid(lot.start_price, lot.current_price, this.config.incrementTable, lot.unit_override), // 次の入札額の目安（価格の段）
-      minAllowed: minimumAllowed(lot.start_price, lot.current_price),                                       // 入札できる最も低い額（1円単位）
+      minBid: lot.start_pending ? null : minimumBid(lot.start_price, lot.current_price, this.config.incrementTable, lot.unit_override), // 次の入札額の目安（価格の段）
+      minAllowed: lot.start_pending ? null : minimumAllowed(lot.start_price, lot.current_price),                                       // 入札できる最も低い額（1円単位）
       highestPaddle: lot.highest_paddle ?? null,
       // 最低落札額。進行役だけに送る。会員の端末には金額を送らない（index.js の forMember で必ず落とす）
       reservePrice: lot.reserve_price ?? null,
@@ -453,14 +465,17 @@ export class Auction {
   }
 
   createLot({ title, startPrice, unitOverride = null, reservePrice = null }) {
-    const start = Number(startPrice);
+    // 開始価格は、空でもよい（品名だけ登録し、オークショニアが開始のときに決める。発注者の指示。報告書 76 章）。そのあいだは仮に 1 を入れておく
+    const pending = startPrice === null || startPrice === undefined || startPrice === '' || startPrice === 0;
+    const start = pending ? 1 : Number(startPrice);
     if (!Number.isSafeInteger(start) || start <= 0) throw new Error('開始価格は1円以上の整数にしてください');
     let reserve = reservePrice === null || reservePrice === undefined || reservePrice === '' ? null : Number(reservePrice);
     if (reserve !== null) {
       if (!Number.isSafeInteger(reserve) || reserve < start) throw new Error('最低落札額は、開始価格以上の整数にしてください');
       if (reserve === start) reserve = null; // 開始価格と同じなら、最初の入札で必ず届くので、設定なしと同じ
     }
-    const info = this.store.q.insertLot.run({ event: this.eventId(), title: String(title), start, unit: unitOverride, reserve, at: nowMs() });
+    if (!String(title ?? '').trim()) throw new Error('品名を入力してください');
+    const info = this.store.q.insertLot.run({ event: this.eventId(), title: String(title).trim(), start, unit: unitOverride, reserve, at: nowMs(), pending: pending ? 1 : 0 });
     const lot = this.lotView(Number(info.lastInsertRowid));
     this.broadcast({ type: 'lot', lot });
     return lot;

@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS lots (
   current_bid_seq INTEGER,        -- 現在の最高入札（受理された有効な入札）の受付連番。なければ NULL
   close_seq INTEGER,              -- 「締め」の受付連番
   winner_bid_seq INTEGER,
-  updated_at REAL NOT NULL
+  updated_at REAL NOT NULL,
+  start_pending INTEGER NOT NULL DEFAULT 0   -- 1: 開始値がまだ決まっていない（品名だけ登録。オークショニアが開始のときに決める）。start_price は仮の 1
 );
 -- すべての入札（受理も拒否も）。受付連番 seq が順番の唯一の根拠（FR-BID-004）。
 CREATE TABLE IF NOT EXISTS bids (
@@ -110,6 +111,7 @@ function migrate(db) {
   if (!has('lots', 'event_id')) todo.push(['lots', 'id, lot_no, title, start_price, unit_override, reserve_price, status, prep_from, no_video, current_bid_seq, close_seq, winner_bid_seq, updated_at']);
   if (has('members', 'account_id') && !has('members', 'checked_in_at')) db.exec('ALTER TABLE members ADD COLUMN checked_in_at REAL');
   if (!has('bids', 'proxy_by')) db.exec('ALTER TABLE bids ADD COLUMN proxy_by TEXT');
+  if (!has('lots', 'start_pending')) db.exec('ALTER TABLE lots ADD COLUMN start_pending INTEGER NOT NULL DEFAULT 0');
   if (!todo.length) return;
   db.pragma('foreign_keys = OFF');
   db.pragma('legacy_alter_table = ON'); // 名前を戻すときに、ほかの表からの参照を書き換えさせない
@@ -156,7 +158,7 @@ export function openDb(dbPath) {
     voidBids: db.prepare(`UPDATE bids SET valid = 0, void_reason = ? WHERE lot_id = ? AND valid = 1`),
     clearCurrentBid: db.prepare(`UPDATE lots SET current_bid_seq = NULL WHERE id = ?`),
     // オークショニアの操作: 開始値を変える（入札の前だけ）、うりきり（最低落札額をなくす）
-    setStartPrice: db.prepare(`UPDATE lots SET start_price = ?, reserve_price = ?, updated_at = ? WHERE id = ?`),
+    setStartPrice: db.prepare(`UPDATE lots SET start_price = ?, reserve_price = ?, start_pending = 0, updated_at = ? WHERE id = ?`),
     clearReserve: db.prepare(`UPDATE lots SET reserve_price = NULL, updated_at = ? WHERE id = ?`),
     // 画面に出す履歴は、受理された入札の全件（無効になったものは取り消し線用に valid=0 で返す）。受付連番の順。
     history: db.prepare(`
@@ -173,8 +175,8 @@ export function openDb(dbPath) {
     memberByToken: db.prepare(`SELECT id, paddle_no, name, account_id FROM members WHERE token_hash = ? AND account_id IS NULL`),
     staffByToken: db.prepare(`SELECT id, role, name FROM staff WHERE token_hash = ?`),
     insertLot: db.prepare(
-      `INSERT INTO lots (lot_no, event_id, title, start_price, unit_override, reserve_price, updated_at)
-       VALUES ((SELECT COALESCE(MAX(lot_no), 0) + 1 FROM lots WHERE event_id IS @event), @event, @title, @start, @unit, @reserve, @at)`),
+      `INSERT INTO lots (lot_no, event_id, title, start_price, unit_override, reserve_price, updated_at, start_pending)
+       VALUES ((SELECT COALESCE(MAX(lot_no), 0) + 1 FROM lots WHERE event_id IS @event), @event, @title, @start, @unit, @reserve, @at, @pending)`),
     bid: db.prepare(`SELECT * FROM bids WHERE seq = ?`),
     // 代理入札の取り消し（FR-CON-006）: その入札だけを無効にし、1つ前の有効な入札に戻す
     voidBid: db.prepare(`UPDATE bids SET valid = 0, void_reason = ? WHERE seq = ?`),

@@ -67,6 +67,18 @@
   </main>
 </div>
 
+<!-- 開始値の入力（進行役がパソコンで品名だけを登録すると、自動で開く。発注者の指示。報告書 76 章） -->
+<dialog id="startSheet" class="sheet" aria-labelledby="sheetTitle">
+  <form id="sheetForm" novalidate>
+    <p class="sheet__lot" id="sheetLot"></p>
+    <h2 id="sheetTitle">開始値を入力</h2>
+    <label class="amount amount--lg"><span class="yen" aria-hidden="true">¥</span><input id="sheetInput" inputmode="numeric" autocomplete="off" aria-label="開始値（円）" placeholder="0"></label>
+    <p class="sheet__err" id="sheetMsg" role="alert"></p>
+    <button class="act act--close sheet__go" type="submit" id="sheetGo"><b>競りを開始</b><span id="sheetSub">この金額から、入札を受け付けます</span></button>
+    <button class="textbtn" type="button" id="sheetLater">あとで</button>
+  </form>
+</dialog>
+
 <!-- 確かめ（取り消せない操作だけ） -->
 <dialog id="dlg" aria-labelledby="dlgTitle">
   <form method="dialog" id="dlgForm">

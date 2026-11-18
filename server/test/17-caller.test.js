@@ -62,3 +62,32 @@ test('流札: 入札がない品・最低落札額に届かない品を、売ら
   r = await A.cmd('pass', { lotId: lot2.id });
   assert.deepEqual([r.ok, r.status], [true, 'unsold'], '最低落札額に届いていない入札があっても、流札にできる');
 });
+
+test('品名だけで登録した品は、開始値が決まるまで始められない。開始値をいっしょに送ると、決めてから始まる', async () => {
+  const r0 = await A.cmd('create_lot', { title: '名前だけの品', startPrice: null });
+  assert.equal(r0.ok, true);
+  const lot = r0.lot;
+  assert.deepEqual([lot.startPrice, lot.startPending, lot.minBid], [null, true, null], '開始値は未定');
+  assert.match((await A.cmd('start', { lotId: lot.id })).message, /開始値が決まっていません/);
+  assert.match((await A.cmd('start', { lotId: lot.id, amount: 0 })).message, /1円以上/);
+  const r = await A.cmd('start', { lotId: lot.id, amount: 7000 });
+  assert.equal(r.ok, true, '開始値を決めて、そのまま始まる');
+  await sleep(100);
+  const seen = m[0].lots.get(lot.id);
+  assert.deepEqual([seen.startPrice, seen.startPending, seen.status === 'open' || seen.status === 'preparing'], [7000, false, true]);
+  if (seen.status === 'open') {
+    assert.equal((await m[0].bid(lot.id, 6999)).code, 'BELOW_MINIMUM');
+    assert.equal((await m[0].bid(lot.id, 7000)).accepted, true);
+  }
+  await A.cmd('pass', { lotId: lot.id }).catch(() => {});
+  await A.cmd('close', { lotId: lot.id }).catch(() => {});
+  assert.match((await A.cmd('create_lot', { title: ' ', startPrice: 100 })).message, /品名/);
+});
+
+test('品名だけの品も、開始値の設定（set_start）で決められる', async () => {
+  const lot = (await A.cmd('create_lot', { title: '名前だけの品2' })).lot;
+  const r = await A.cmd('set_start', { lotId: lot.id, amount: 1 });
+  assert.equal(r.ok, true, '仮の値と同じ 1円でも、未定のときは決められる');
+  await sleep(50);
+  assert.deepEqual([A.lots.get(lot.id).startPrice, A.lots.get(lot.id).startPending], [1, false]);
+});

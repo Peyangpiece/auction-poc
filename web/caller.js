@@ -33,7 +33,7 @@ function render() {
   $('status').textContent = !lot ? '待機中' : st === 'waiting' ? '次の品' : STATE_LABEL[st];
   $('status').dataset.st = st;
   $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札価格' : hasBid ? '現在価格' : '開始価格';
-  $('price').textContent = lot ? yen(lot.currentPrice ?? lot.startPrice) : '—';
+  $('price').textContent = !lot ? '—' : lot.startPending ? '未定' : yen(lot.currentPrice ?? lot.startPrice);
   $('leader').textContent = lot?.highestPaddle ? `${lot.highestPaddle}番` : 'なし';
   $('bids').textContent = `${bids}件`;
   const urikiri = !!lot && (lot.reservePrice === null || lot.urikiri);
@@ -45,7 +45,7 @@ function render() {
   const canStart = !!lot && ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(st) && !hasBid && !S.busy;
   for (const id of ['stepDown', 'stepUp', 'setStart', 'startInput']) $(id).disabled = !canStart;
   $('startBox').classList.toggle('locked', !canStart && !S.busy);
-  $('startNote').textContent = !lot ? '' : ended ? '終わった品です' : hasBid ? '入札があるので、変えられません' : `いまの開始値 ${yen(lot.startPrice)}`;
+  $('startNote').textContent = !lot ? '' : ended ? '終わった品です' : hasBid ? '入札があるので、変えられません' : lot.startPending ? '開始値は、まだ決まっていません' : `いまの開始値 ${yen(lot.startPrice)}`;
   if (!S.editing) setInput(canStart ? lot.startPrice : null);
 
   // うりきり: 最低落札額があり、まだ届いていないとき
@@ -65,6 +65,11 @@ function render() {
     $('closeLabel').textContent = '再開';
     $('closeSub').textContent = `中断しています。押すと、${yen(lot.currentPrice ?? lot.startPrice)} から入札の受付を再開します`;
     $('close').disabled = S.busy;
+  } else if (S.mode === 'start' && lot.startPending) {
+    // 品名だけの品: 押すと、開始値の入力のシートを開く
+    $('closeLabel').textContent = '開始値を入れて始める';
+    $('closeSub').textContent = `No.${lot.lotNo} の開始値は、まだ決まっていません`;
+    $('close').disabled = S.busy;
   } else if (S.mode === 'start') {
     $('closeLabel').textContent = `No.${lot.lotNo} を開始`;
     $('closeSub').textContent = `${yen(lot.startPrice)} から入札を受け付けます${lot.reservePrice === null ? '（うりきり）' : ''}`;
@@ -81,6 +86,7 @@ function render() {
   const canPass = live && !willSell && !S.busy;
   $('pass').disabled = !canPass;
   $('passSub').textContent = !live ? '' : willSell ? 'うりきりの入札があるので不可' : '売らずに、この品を終える';
+  syncSheet();
 }
 
 async function cmd(action, extra = {}) {
@@ -149,6 +155,7 @@ $('close').addEventListener('click', async () => {
     if (res?.ok) say(`No.${lot.lotNo} を再開しました`, 'ok');
     return;
   }
+  if (S.mode === 'start' && lot.startPending) { openSheet(lot, true); return; }
   if (S.mode === 'start') {
     const res = await cmd('start');
     if (res?.ok) say(`No.${lot.lotNo} を開始しました`, 'ok');
@@ -172,6 +179,40 @@ $('suspend').addEventListener('click', async () => {
   if (!lot) return;
   const res = await cmd('suspend');
   if (res?.ok) say(`No.${lot.lotNo} を中断しました。入札は受け付けません`, 'ok');
+});
+
+// ---- 開始値の入力のシート: 品名だけの品が次の品になったら、自動で開く（1つの品につき1回。「あとで」で閉じたら、下のボタンから開き直す）
+S.sheetShownFor = new Set();
+function openSheet(lot, byUser = false) {
+  const dlg = $('startSheet');
+  $('sheetLot').textContent = `No.${lot.lotNo} ${lot.title}`;
+  $('sheetMsg').textContent = '';
+  $('sheetInput').value = '';
+  dlg.dataset.lot = String(lot.id);
+  if (!dlg.open) dlg.showModal();
+  $('sheetInput').focus();
+  if (!byUser && 'vibrate' in navigator) navigator.vibrate([15, 80, 15]); // 新しい品が来たことを、手に伝える
+}
+function syncSheet() {
+  const lot = current();
+  const dlg = $('startSheet');
+  const pending = !!lot && lot.status === 'waiting' && lot.startPending;
+  if (dlg.open && (!pending || dlg.dataset.lot !== String(lot.id))) dlg.close(); // ほかの所で始まった・決まったら閉じる
+  if (pending && !S.sheetShownFor.has(lot.id) && !$('dlg').open) { S.sheetShownFor.add(lot.id); openSheet(lot); }
+}
+$('sheetInput').addEventListener('input', () => { const n = parseAmount($('sheetInput').value); $('sheetInput').value = n === null ? '' : n.toLocaleString('ja-JP'); $('sheetMsg').textContent = ''; });
+$('sheetLater').addEventListener('click', () => $('startSheet').close());
+$('sheetForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const lot = current();
+  const amount = parseAmount($('sheetInput').value);
+  if (!lot) return $('startSheet').close();
+  if (!amount) { $('sheetMsg').textContent = '開始値を入れてください'; $('sheetInput').focus(); return; }
+  $('sheetGo').disabled = true;
+  const res = await cmd('start', { amount });
+  $('sheetGo').disabled = false;
+  if (res?.ok) { $('startSheet').close(); say(`No.${lot.lotNo} を ${yen(amount)} から開始しました`, 'ok'); }
+  else $('sheetMsg').textContent = res?.message ?? '応答がありません。もう一度押してください';
 });
 
 // ---- 接続
