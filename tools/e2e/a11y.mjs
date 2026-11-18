@@ -60,6 +60,10 @@ for (const scheme of ['light', 'dark']) {
   await scan(con, 'console-open', scheme);
   await p.waitForTimeout(500); await scan(p, 'bidder-open-bidmode', scheme);
   await p.click('#bid'); await p.waitForTimeout(600); await scan(p, 'bidder-leading', scheme);
+  // オークショニアの画面（主催者管理者も開ける）。入札がある受付中の品で、確かめのダイアログも
+  const cl = await sc.newPage(); await cl.goto(B + '/caller.html'); await cl.waitForTimeout(1000); await scan(cl, 'caller-open', scheme);
+  if (await cl.isEnabled('#pass')) { await cl.click('#pass'); await cl.waitForTimeout(300); await scan(cl, 'caller-dialog', scheme); await cl.click('#dlgCancel'); }
+  await cl.close();
   const mon = await sc.newPage(); await mon.goto(B + '/monitor.html'); await mon.waitForTimeout(1200); await scan(mon, 'monitor', scheme);
   await con.click('#b_close'); await con.waitForTimeout(800); if (await con.isVisible('dialog[open]')) { await scan(con, 'console-dialog', scheme); await con.click('#dlgOk'); } await con.waitForTimeout(800);
   if (await con.isVisible('#b_close') && await con.isEnabled('#b_close')) { await con.click('#b_close'); await con.waitForTimeout(600); if (await con.isVisible('dialog[open]')) await con.click('#dlgOk'); }

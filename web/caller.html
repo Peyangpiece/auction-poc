@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<title>オークショニア｜令和の競り</title>
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-title" content="令和の競り">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="caller.css">
+</head>
+<body>
+<!-- オークショニアの画面（発注者の指示。報告書 73 章）: 競りの最中に、開始値・うりきり・締め・流札の4つだけを操作する。
+     すべてのボタンを、スクロールなしで1画面に収める（タブレットの縦・横、スマホ、パソコン） -->
+<div class="overlay" id="overlay" role="alert"><div><span id="overlayText">接続しています…</span></div></div>
+<div class="app">
+  <header class="bar">
+    <span class="bar__role">オークショニア</span>
+    <span class="bar__meta"><span id="presence">参加者 0人</span><span class="num" id="clock"></span></span>
+  </header>
+
+  <main class="stage" id="main" tabindex="-1">
+    <h1 class="sr-only">オークショニア</h1>
+    <!-- 品と価格 -->
+    <section class="lot" aria-live="polite">
+      <div class="lot__head">
+        <p class="lot__name"><span class="num" id="lotNo"></span><span class="dyn" id="title">品を待っています</span></p>
+        <span class="state" id="status" data-st="idle">待機中</span>
+      </div>
+      <p class="lot__label" id="priceLabel">現在価格</p>
+      <p class="lot__price digits" id="price">—</p>
+      <ul class="facts" id="facts">
+        <li><span>最高入札者</span><b class="num" id="leader">—</b></li>
+        <li><span>入札</span><b class="num" id="bids">0件</b></li>
+        <li><span>うりきりまで</span><b id="urikiriState">—</b></li>
+      </ul>
+    </section>
+
+    <div class="controls">
+    <!-- 開始値 -->
+    <section class="start" id="startBox" aria-labelledby="startTitle">
+      <div class="start__head">
+        <h2 id="startTitle">開始値</h2>
+        <p class="start__note" id="startNote"></p>
+      </div>
+      <form class="start__row" id="startForm" novalidate>
+        <button class="btn step" type="button" id="stepDown" aria-label="1段下げる">−</button>
+        <label class="amount"><span class="yen" aria-hidden="true">¥</span><input id="startInput" inputmode="numeric" autocomplete="off" aria-label="新しい開始値（円）"></label>
+        <button class="btn step" type="button" id="stepUp" aria-label="1段上げる">＋</button>
+        <button class="btn btn-primary" type="submit" id="setStart">変更</button>
+      </form>
+    </section>
+
+    <!-- 操作 -->
+    <section class="acts" aria-label="操作">
+      <button class="act act--urikiri" type="button" id="urikiri"><b>うりきり</b><span id="urikiriSub"></span></button>
+      <button class="act act--pass" type="button" id="pass"><b>流札</b><span id="passSub"></span></button>
+      <button class="act act--close" type="button" id="close"><b>締め</b><span id="closeSub"></span></button>
+    </section>
+    <p class="msg" id="msg" role="status"></p>
+    </div>
+  </main>
+</div>
+
+<!-- 確かめ（取り消せない操作だけ） -->
+<dialog id="dlg" aria-labelledby="dlgTitle">
+  <form method="dialog" id="dlgForm">
+    <h2 id="dlgTitle"></h2>
+    <p id="dlgBody"></p>
+    <div class="actions"><button class="btn" type="button" id="dlgCancel" value="cancel">やめる</button><button class="btn btn-primary" type="submit" id="dlgOk">実行する</button></div>
+  </form>
+</dialog>
+<script src="common.js"></script>
+<script src="caller.js"></script>
+</body>
+</html>

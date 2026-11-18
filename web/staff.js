@@ -3,6 +3,7 @@
 'use strict';
 
 const toConsole = new URLSearchParams(location.search).get('next') === 'console';
+const toCaller = new URLSearchParams(location.search).get('next') === 'caller';
 const toMonitor = new URLSearchParams(location.search).get('next') === 'monitor';
 const dlg = $('#dlg');
 const panel = $('#panel');
@@ -360,7 +361,7 @@ function staffDialog() {
   const form = el('form', { class: 'form', novalidate: true },
     field('メールアドレス', 'email', { type: 'email', inputMode: 'email', required: true, autocapitalize: 'none', spellcheck: false }, 'このメールアドレスで、ログインします。パスワードは、本人が最初のログインで決めます'),
     field('名前', 'name', { required: true }),
-    field('役割', 'role', { options: [['auctioneer', '進行役'], ['reception', '受付係'], ['admin', '主催者管理者'], ['operator', '開発・運営者（手数料と記録を見るだけ）']] }),
+    field('役割', 'role', { options: [['auctioneer', '進行役'], ['caller', 'オークショニア（競りの最中の開始値・うりきり・締め・流札だけ）'], ['reception', '受付係'], ['admin', '主催者管理者'], ['operator', '開発・運営者（手数料と記録を見るだけ）']] }),
     field('電話番号', 'phone', { type: 'tel', inputMode: 'tel' }, '任意。この番号では会員登録できなくなります'),
     msgLine(),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '作る' }), closeBtn()));
@@ -524,7 +525,8 @@ async function show(key) {
 }
 
 // ログインのあとの行き先（進行コンソール・会場モニターから来た人は、そこへ戻す）
-const afterLogin = (role) => { location.href = toMonitor ? '/monitor.html' : toConsole && ['admin', 'auctioneer'].includes(role) ? '/console.html' : '/staff.html'; };
+// オークショニアは、オークショニアの画面だけを使う
+const afterLogin = (role) => { location.href = role === 'caller' || (toCaller && role === 'admin') ? '/caller.html' : toMonitor ? '/monitor.html' : toConsole && ['admin', 'auctioneer'].includes(role) ? '/console.html' : '/staff.html'; };
 onSubmit($('#loginForm'), async (data) => {
   const res = await api('POST', '/api/staff/login', { email: data.email, password: data.password });
   if (res.ok) afterLogin(res.staff.role);
@@ -544,10 +546,12 @@ $('#backToLogin').addEventListener('click', () => { $('#setupForm').hidden = tru
   const state = await setupNav();
   me = state.staff;
   if (!me) { $('#login').hidden = false; $('#loginForm').elements.email.focus(); return; }
+  if (me.role === 'caller') { location.replace('/caller.html'); return; }
   $('#app').hidden = false;
   $('#who').textContent = `${me.name}（${me.roleLabel}）`;
   // 競りの進行は、主催者管理者と進行役（8.14）
   $('#toConsole').hidden = !['admin', 'auctioneer'].includes(me.role);
+  $('#toCaller').hidden = me.role !== 'admin';
   $('#toMonitor').hidden = me.role === 'operator'; // 会場の大型モニターは、会場にいるスタッフが開く
   // SMS を使わない設定（本番）のときは、「SMS の制限」を出さない
   const terms = await api('GET', '/api/terms');

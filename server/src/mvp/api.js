@@ -43,7 +43,7 @@ const STAFF_LIFETIME = 12 * HOUR;   // スタッフ: 12時間（FR-AUTH-012）
 const REGISTER_LIFETIME = 15 * MIN; // SMS 認証から登録の完了まで
 const LOCK_AFTER = 5;               // パスワードの誤り5回で
 const LOCK_FOR = 15 * MIN;          // 15分ロック
-const ROLE_LABEL = { admin: '主催者管理者', auctioneer: '進行役', reception: '受付係', operator: '開発・運営者' };
+const ROLE_LABEL = { admin: '主催者管理者', auctioneer: '進行役', caller: 'オークショニア', reception: '受付係', operator: '開発・運営者' };
 
 class HttpError extends Error {
   constructor(status, message, extra = {}) { super(message); this.status = status; this.extra = extra; }
@@ -52,13 +52,18 @@ const bad = (message, extra) => new HttpError(400, message, extra);
 
 export function createApi({ store, config, nowMs, persistStatus = () => null }) {
   const db = store.db;
-  // 以前の版のデータベース: スタッフの役割に「開発・運営者」を足すには、表を作り直すしかない（SQLite の制約）。行の id は変えない
+  // 以前の版のデータベース: スタッフの役割に「開発・運営者」「オークショニア」を足すには、表を作り直すしかない（SQLite の制約）。行の id は変えない
   const oldStaff = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'staff_accounts'").get();
-  if (oldStaff && !oldStaff.sql.includes("'operator'")) {
+  if (oldStaff && !oldStaff.sql.includes("'caller'")) {
     db.transaction(() => {
-      const cols = db.prepare("SELECT name FROM pragma_table_info('staff_accounts')").all().map((c) => c.name).join(', ');
+      const old = db.prepare("SELECT name, type, dflt_value, \"notnull\" AS nn FROM pragma_table_info('staff_accounts')").all();
       db.exec('ALTER TABLE staff_accounts RENAME TO staff_accounts_old;');
       db.exec(MVP_SCHEMA);
+      // あとから足した列（メールアドレスなど）は、新しい表にも足してから写す
+      for (const c of old) {
+        if (!db.prepare("SELECT 1 FROM pragma_table_info('staff_accounts') WHERE name = ?").get(c.name)) db.exec(`ALTER TABLE staff_accounts ADD COLUMN ${c.name} ${c.type}${c.nn ? ` NOT NULL DEFAULT ${c.dflt_value ?? 0}` : ''}`);
+      }
+      const cols = old.map((c) => c.name).join(', ');
       db.exec(`INSERT INTO staff_accounts (${cols}) SELECT ${cols} FROM staff_accounts_old; DROP TABLE staff_accounts_old;`);
     })();
   }
@@ -1227,7 +1232,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const ctx = { req };
     loadSession(ctx);
     if (!ctx.staff) return { code: 'LOGIN', message: 'スタッフのログインが必要です' };
-    if (ctx.staff.role !== 'admin' && ctx.staff.role !== 'auctioneer') return { code: 'FORBIDDEN', message: '競りの進行は、主催者管理者と進行役だけができます' };
+    if (!['admin', 'auctioneer', 'caller'].includes(ctx.staff.role)) return { code: 'FORBIDDEN', message: '競りの進行は、主催者管理者・進行役・オークショニアだけができます' };
     return { staff: { id: ctx.staff.id, name: ctx.staff.name, role: ctx.staff.role, account: true } };
   }
   /** ログインしているか（会員かスタッフ）。トップページを開いた人を、ログインの画面へ送るかどうかに使う */

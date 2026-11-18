@@ -462,14 +462,17 @@ const PROXY_REJECT = {
   LOT_NOT_OPEN: 'この品は入札を受け付けていません', AFTER_CLOSE: '締めに間に合いませんでした', BELOW_MINIMUM: '最低入札額より低い金額です',
   OFF_LADDER: '入札できる金額ではありません', ALREADY_HIGHEST: 'この参加者が、すでに最高入札者です', NOT_CHECKED_IN: '受付で、来場の確認を受けてください', SUSPENDED: 'この参加者は、参加が停止されています', NOT_JOINED: 'この参加者は、いまの開催の参加者ではありません',
 };
+const CALLER_ACTIONS = new Set(['set_start', 'urikiri', 'close', 'pass', 'sold_list']);
 function onAuctioneer(conn, msg, send) {
   const sendSold = () => send({ type: 'sold', sold: auction.soldList() });
   const ok = (extra = {}) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: true, action: msg.action, ...extra });
   const ng = (message) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: false, action: msg.action, message });
+  // オークショニアは、競りの最中の4つの操作（開始値・うりきり・締め・流札）だけができる（発注者の指示）
+  if (conn.staff?.role === 'caller' && !CALLER_ACTIONS.has(msg.action)) return ng('この操作は、オークショニアにはできません');
   try {
     switch (msg.action) {
       case 'start': case 'close': case 'suspend': case 'resume': case 'cancel': case 'exclude':
-      case 'start_without_video': case 'back_to_waiting':
+      case 'start_without_video': case 'back_to_waiting': case 'set_start': case 'urikiri': case 'pass':
         return auction.receiveCommand(conn.staff, msg, (res) => {
           send(res);
           if (!res.ok) return;
@@ -477,7 +480,7 @@ function onAuctioneer(conn, msg, send) {
           if (msg.action === 'start' && api.eventState() && api.eventState().phase !== 'running') broadcast({ type: 'event', event: api.setPhase(staffRef(conn), 'running') });
           // 落札の一覧を、進行役に送り直す（受け取り方法・支払方法つき。FR-CON-002）
           // 落札したら、明細を作って、落札者にメールで知らせる（FR-INV-001）
-          if (msg.action === 'close') { api.billing.syncLines(); sendSold(); }
+          if (msg.action === 'close' || msg.action === 'pass') { api.billing.syncLines(); sendSold(); }
         });
       case 'sold_list': return ok({ sold: auction.soldList() });
       case 'event_break': { // 休憩（FR-CON-003）: 進行中の品がないときだけ。次の開始予定時刻が要る

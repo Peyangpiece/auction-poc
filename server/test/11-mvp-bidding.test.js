@@ -311,6 +311,36 @@ test('進行コンソールは、スタッフのログインでつなぐ。受�
   } finally { await t.end(); }
 });
 
+test('オークショニア: 主催者管理者が登録し、競りの最中の4つの操作（開始値・うりきり・締め・流札）だけができる', async () => {
+  const t = await setup();
+  try {
+    const { online, con } = await venueSetup(t);
+    const made = (await t.staff.post('/api/staff/accounts', { loginId: 'hammer', name: '競り 太郎', role: 'caller' })).json;
+    assert.equal(made.role, 'caller');
+    const caller = browser(t.srv.httpUrl);
+    await caller.post('/api/staff/login', { loginId: 'hammer', password: made.initialPassword, code: totp(made.totpSecret) });
+    assert.equal((await caller.get('/api/me')).json.staff.roleLabel, 'オークショニア');
+    assert.equal((await caller.get('/api/settings')).status, 403, '管理の画面の操作はできない');
+    const c = new Client(t.srv.url, undefined, { ack: false, headers: { cookie: caller.cookie } });
+    c.hello = { as: 'console' };
+    await c.connect();
+    const lot = await createLot(con, 10000, null, '時計', 20000);
+    assert.match((await c.cmd('start', { lotId: lot.id })).message, /オークショニアにはできません/, '競りの開始は、進行役が行う');
+    assert.match((await c.cmd('create_lot', { title: 'x', startPrice: 1000 })).message, /オークショニアにはできません/);
+    assert.equal((await c.cmd('set_start', { lotId: lot.id, amount: 9000 })).ok, true);
+    await con.cmd('start', { lotId: lot.id });
+    const w1 = await t.ws(online);
+    await until(() => w1.lots.get(lot.id)?.status === 'open');
+    assert.equal((await w1.bid(lot.id, 9000)).accepted, true);
+    assert.equal((await c.cmd('urikiri', { lotId: lot.id })).ok, true);
+    assert.equal((await c.cmd('close', { lotId: lot.id })).status, 'sold');
+    const lot2 = await createLot(con, 5000);
+    await con.cmd('start', { lotId: lot2.id });
+    assert.equal((await c.cmd('pass', { lotId: lot2.id })).status, 'unsold');
+    c.close(); con.close();
+  } finally { await t.end(); }
+});
+
 test('代理入札（FR-CON-005）と取り消し（AC-FR-CON-006-1）', async () => {
   const t = await setup();
   try {

@@ -101,7 +101,7 @@ export class Auction {
     const lotId = Number(msg.lotId);
     this.#enqueue(lotId, {
       kind: 'cmd', seq, receivedAt, lotId, actor, reply,
-      action: msg.action, reason: msg.reason ?? '', reqId: msg.reqId ?? null, bidSeq: Number(msg.bidSeq),
+      action: msg.action, reason: msg.reason ?? '', reqId: msg.reqId ?? null, bidSeq: Number(msg.bidSeq), amount: msg.amount,
       clientSentAt: msg.clientSentAt ?? null, clientSentAtCorrected: msg.clientSentAtCorrected ?? null,
     });
   }
@@ -211,6 +211,43 @@ export class Auction {
         this.crashPoint('after_close_record');
         // ② 記録済みの入札で、落札か流札を確定する
         extra = this.#finalize(lot, item.seq, item.actor.name, {}, item);
+        break;
+      }
+      // ---- オークショニアの操作（発注者の指示。報告書 73 章）
+      case 'set_start': {
+        // 開始値の設定: まだ入札のない品だけ（入札があると、価格の基準が変わってしまう）
+        if (!['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(s)) return fail(`「${stateName}」の品は、開始値を変えられません`);
+        if (lot.current_bid_seq) return fail('入札があるので、開始値は変えられません');
+        const amount = Number(item.amount);
+        if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1e10) return fail('開始値を、1円以上の整数で入れてください');
+        if (amount === lot.start_price) return fail('いまの開始値と同じです');
+        // 最低落札額が新しい開始値以下になるなら、最低落札額はなくなる（最初の入札で必ず届くため）
+        const reserve = lot.reserve_price !== null && lot.reserve_price > amount ? lot.reserve_price : null;
+        this.store.tx(() => {
+          q.setStartPrice.run(amount, reserve, item.receivedAt, lot.id);
+          q.insertEvent.run(item.seq, lot.id, 'set_start', item.receivedAt, item.actor.name, JSON.stringify({ from: lot.start_price, to: amount, reserveCleared: lot.reserve_price !== null && reserve === null }));
+        });
+        this.broadcast({ type: 'lot', lot: this.lotView(lot.id), reason: null });
+        extra = { startPrice: amount };
+        break;
+      }
+      case 'urikiri': {
+        // うりきり: 最低落札額をなくし、いまの最高入札者（これからの最高入札者）に必ず売ると宣言する。取り消せない
+        if (!['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(s)) return fail(`「${stateName}」の品は、うりきりにできません`);
+        if (lot.reserve_price === null || reserveMet(lot.reserve_price, lot.current_price)) return fail('すでに、うりきりです');
+        this.store.tx(() => {
+          q.clearReserve.run(item.receivedAt, lot.id);
+          q.insertEvent.run(item.seq, lot.id, 'urikiri', item.receivedAt, item.actor.name, JSON.stringify({ reservePrice: lot.reserve_price, currentPrice: lot.current_price }));
+        });
+        this.broadcast({ type: 'lot', lot: this.lotView(lot.id), reason: null });
+        break;
+      }
+      case 'pass': {
+        // 流札: 売らずに、この品を終える。うりきり（最低落札額に届いた）で入札がある品は、最高入札者に権利があるので、流札にできない（締めで落札にする）
+        if (s !== 'open' && s !== 'suspended') return fail(`「${stateName}」の品は、流札にできません`);
+        if (lot.current_bid_seq && reserveMet(lot.reserve_price, lot.current_price)) return fail('うりきりで入札があるため、流札にできません（締めると落札になります）');
+        q.insertEvent.run(item.seq, lot.id, 'close', item.receivedAt, item.actor.name, JSON.stringify({ pass: true }));
+        extra = this.#finalize(lot, item.seq, item.actor.name, { passed: true }, item);
         break;
       }
       case 'suspend': {

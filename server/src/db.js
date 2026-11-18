@@ -155,6 +155,9 @@ export function openDb(dbPath) {
       `UPDATE lots SET status = ?, close_seq = ?, winner_bid_seq = ?, updated_at = ? WHERE id = ?`),
     voidBids: db.prepare(`UPDATE bids SET valid = 0, void_reason = ? WHERE lot_id = ? AND valid = 1`),
     clearCurrentBid: db.prepare(`UPDATE lots SET current_bid_seq = NULL WHERE id = ?`),
+    // オークショニアの操作: 開始値を変える（入札の前だけ）、うりきり（最低落札額をなくす）
+    setStartPrice: db.prepare(`UPDATE lots SET start_price = ?, reserve_price = ?, updated_at = ? WHERE id = ?`),
+    clearReserve: db.prepare(`UPDATE lots SET reserve_price = NULL, updated_at = ? WHERE id = ?`),
     // 画面に出す履歴は、受理された入札の全件（無効になったものは取り消し線用に valid=0 で返す）。受付連番の順。
     history: db.prepare(`
       SELECT b.seq, b.amount, b.received_at, b.valid, m.paddle_no AS paddle, b.proxy_by IS NOT NULL AS proxy

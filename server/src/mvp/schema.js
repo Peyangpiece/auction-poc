@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS staff_accounts (
   id INTEGER PRIMARY KEY,
   login_id TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin','auctioneer','reception','operator')),  -- 主催者管理者・進行役・受付係・開発運営者
+  role TEXT NOT NULL CHECK (role IN ('admin','auctioneer','caller','reception','operator')),  -- 主催者管理者・進行役・オークショニア・受付係・開発運営者
   phone TEXT,                             -- この番号では会員登録できない（FR-AUTH-013）
   password_hash TEXT NOT NULL,
   totp_secret TEXT NOT NULL,
