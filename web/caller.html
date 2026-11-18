@@ -15,7 +15,7 @@
 <link rel="stylesheet" href="caller.css">
 </head>
 <body>
-<!-- オークショニアの画面（発注者の指示。報告書 73 章）: 競りの最中に、開始値・うりきり・締め・流札の4つだけを操作する。
+<!-- オークショニアの画面（発注者の指示。報告書 73・74 章）: 次の品の開始と、競りの最中の開始値・うりきり・締め・流札を操作する。
      すべてのボタンを、スクロールなしで1画面に収める（タブレットの縦・横、スマホ、パソコン） -->
 <div class="overlay" id="overlay" role="alert"><div><span id="overlayText">接続しています…</span></div></div>
 <div class="app">
@@ -60,7 +60,7 @@
     <section class="acts" aria-label="操作">
       <button class="act act--urikiri" type="button" id="urikiri"><b>うりきり</b><span id="urikiriSub"></span></button>
       <button class="act act--pass" type="button" id="pass"><b>流札</b><span id="passSub"></span></button>
-      <button class="act act--close" type="button" id="close"><b>締め</b><span id="closeSub"></span></button>
+      <button class="act act--close" type="button" id="close"><b id="closeLabel">締め</b><span id="closeSub"></span></button>
     </section>
     <p class="msg" id="msg" role="status"></p>
     </div>

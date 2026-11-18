@@ -1,5 +1,5 @@
 // オークショニアの画面の動き（発注者の指示。報告書 73 章）。接続と時刻合わせは common.js
-// できること: 開始値の設定（入札の前だけ）・うりきり・締め・流札。どのボタンも、押せないときは理由を、押したらどうなるかを、ボタンの中に書く
+// できること: 次の品の開始・開始値の設定（入札の前だけ）・うりきり・締め・流札。どのボタンも、押せないときは理由を、押したらどうなるかを、ボタンの中に書く
 'use strict';
 const $ = (id) => document.getElementById(id);
 const S = { lots: new Map(), focus: null, history: [], ladder: null, busy: false, editing: false };
@@ -55,9 +55,20 @@ function render() {
 
   // 締め: 受付中のとき。押したらどうなるかを書く
   const willSell = hasBid && urikiri;
-  $('close').disabled = !(st === 'open') || S.busy;
-  $('closeSub').textContent = st === 'open' ? (willSell ? `${lot.highestPaddle}番が ${yen(lot.currentPrice)} で落札` : `${hasBid ? '最低落札額に届かないので' : '入札がないので'}、流札になります`)
-    : st === 'suspended' ? '中断中は締められません' : ended ? (st === 'sold' ? `${lot.highestPaddle}番 落札 済み` : '流札 済み') : '競りが始まると押せます';
+  // いちばん下の大きなボタン: 進行中の品がなければ「次の品を開始」、受付中なら「締め」（同じ場所で、次にやることが1つだけ出る）
+  S.mode = st === 'waiting' ? 'start' : 'close';
+  $('close').dataset.mode = S.mode;
+  if (S.mode === 'start') {
+    $('closeLabel').textContent = `No.${lot.lotNo} を開始`;
+    $('closeSub').textContent = `${yen(lot.startPrice)} から入札を受け付けます${lot.reservePrice === null ? '（うりきり）' : ''}`;
+    $('close').disabled = S.busy;
+  } else {
+    $('closeLabel').textContent = '締め';
+    $('close').disabled = !(st === 'open') || S.busy;
+    $('closeSub').textContent = st === 'open' ? (willSell ? `${lot.highestPaddle}番が ${yen(lot.currentPrice)} で落札` : `${hasBid ? '最低落札額に届かないので' : '入札がないので'}、流札になります`)
+      : st === 'preparing' || st === 'preparing_warn' ? '映像の準備ができると、受付が始まります'
+      : st === 'suspended' ? '中断中は締められません' : ended ? (st === 'sold' ? `${lot.highestPaddle}番 落札 済み` : '流札 済み') : '次の品がありません';
+  }
 
   // 流札: 受付中・中断中で、うりきりの入札がないとき
   const canPass = live && !willSell && !S.busy;
@@ -125,6 +136,12 @@ $('urikiri').addEventListener('click', async () => {
 $('close').addEventListener('click', async () => {
   const lot = current();
   if (!lot) return;
+  // 次の品を開始: 確かめは出さない（すぐ始めたいことが多く、始めたあとも中断・取りやめができるため）
+  if (S.mode === 'start') {
+    const res = await cmd('start');
+    if (res?.ok) say(`No.${lot.lotNo} を開始しました`, 'ok');
+    return;
+  }
   const willSell = lot.currentPrice !== null && (lot.reservePrice === null || lot.urikiri);
   if (!(await ask({ title: '締めますか？', body: willSell ? `No.${lot.lotNo} を、${lot.highestPaddle}番が ${yen(lot.currentPrice)} で落札します。` : `No.${lot.lotNo} は、${lot.currentPrice === null ? '入札がないので' : '最低落札額に届かないので'}、流札になります。`, okLabel: '締める' }))) return;
   const res = await cmd('close');

@@ -462,12 +462,12 @@ const PROXY_REJECT = {
   LOT_NOT_OPEN: 'この品は入札を受け付けていません', AFTER_CLOSE: '締めに間に合いませんでした', BELOW_MINIMUM: '最低入札額より低い金額です',
   OFF_LADDER: '入札できる金額ではありません', ALREADY_HIGHEST: 'この参加者が、すでに最高入札者です', NOT_CHECKED_IN: '受付で、来場の確認を受けてください', SUSPENDED: 'この参加者は、参加が停止されています', NOT_JOINED: 'この参加者は、いまの開催の参加者ではありません',
 };
-const CALLER_ACTIONS = new Set(['set_start', 'urikiri', 'close', 'pass', 'sold_list']);
+const CALLER_ACTIONS = new Set(['start', 'set_start', 'urikiri', 'close', 'pass', 'sold_list']);
 function onAuctioneer(conn, msg, send) {
   const sendSold = () => send({ type: 'sold', sold: auction.soldList() });
   const ok = (extra = {}) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: true, action: msg.action, ...extra });
   const ng = (message) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: false, action: msg.action, message });
-  // オークショニアは、競りの最中の4つの操作（開始値・うりきり・締め・流札）だけができる（発注者の指示）
+  // オークショニアは、次の品の開始と、競りの最中の4つの操作（開始値・うりきり・締め・流札）だけができる（発注者の指示）
   if (conn.staff?.role === 'caller' && !CALLER_ACTIONS.has(msg.action)) return ng('この操作は、オークショニアにはできません');
   try {
     switch (msg.action) {
