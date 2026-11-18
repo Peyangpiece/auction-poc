@@ -194,20 +194,24 @@ async function setupNav() {
 }
 
 // ---- 下のタブバー（スマートフォン）。会員の行き先は4つだけなので、いつも画面の下に出しておく
+// 下のタブバーのアイコン。b は形（選んでいるタブでは塗りつぶす）、d は中の線（塗ったときは地の色で抜く）
 const ICONS = {
-  home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
-  bid: 'M14.5 3.5l6 6-2 2-6-6zM11 7l6 6-7.5 7.5a2 2 0 0 1-3 0l-3-3a2 2 0 0 1 0-3zM3 21h9',
-  bill: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6',
-  me: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
+  home: { b: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
+  // 木槌（頭・柄・台）。小さくても「競り」と分かる形
+  bid: { b: 'M13.6 2.4l6 6-3.6 3.6-6-6zM12.4 8.4l1.7 1.7-8.3 8.3a1.2 1.2 0 0 1-1.7-1.7zM11 19h10v2.5H11z' },
+  bill: { b: 'M6 3h12v18l-3-2-3 2-3-2-3 2z', d: 'M9 8h6M9 12h6' },
+  me: { b: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0z' },
 };
 const TABS = [['/', 'ホーム', 'home'], ['/bidder.html', '競り', 'bid'], ['/mypage.html#bills', '請求書', 'bill'], ['/mypage.html#profile', 'マイページ', 'me']];
 function icon(name) {
   const NS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
-  const path = document.createElementNS(NS, 'path');
-  path.setAttribute('d', ICONS[name]);
-  svg.append(path);
+  for (const [cls, d] of Object.entries(ICONS[name])) {
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', d); path.setAttribute('class', cls);
+    svg.append(path);
+  }
   return svg;
 }
 function markTab() {
@@ -222,6 +226,7 @@ function tabBar() {
   if ($('.tabbar')) return;
   document.body.append(el('nav', { class: 'tabbar', 'aria-label': 'おもなページ' }, TABS.map(([href, text, name]) => el('a', { href }, icon(name), el('span', { text })))));
   document.body.classList.add('has-tabbar');
+  if (location.pathname === '/' || location.pathname === '/index.html') document.body.classList.add('is-home');
   markTab();
 }
 
@@ -229,12 +234,17 @@ function tabBar() {
 function revealable(input) {
   if (input.dataset.reveal) return;
   input.dataset.reveal = '1';
-  const btn = el('button', { class: 'reveal', type: 'button', text: '表示', 'aria-pressed': 'false', 'aria-label': 'パスワードを表示する' });
+  // 文字ではなく、目のアイコン（見せている間は、斜線のない目）。名前は読み上げ用に付ける
+  const EYE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const EYE_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg>';
+  const btn = el('button', { class: 'reveal', type: 'button', 'aria-pressed': 'false', 'aria-label': 'パスワードを表示する' });
+  btn.innerHTML = EYE_OFF;
   btn.addEventListener('click', () => {
     const show = input.type === 'password';
     input.type = show ? 'text' : 'password';
-    btn.textContent = show ? '隠す' : '表示';
+    btn.innerHTML = show ? EYE : EYE_OFF;
     btn.setAttribute('aria-pressed', String(show));
+    btn.setAttribute('aria-label', show ? 'パスワードを隠す' : 'パスワードを表示する');
   });
   const wrap = el('span', { class: 'revealwrap' });
   input.replaceWith(wrap);
@@ -245,7 +255,7 @@ revealAll();
 // あとから出る入力欄（ダイアログの中）にも付ける
 new MutationObserver((list) => { for (const m of list) for (const n of m.addedNodes) if (n.nodeType === 1) revealAll(n); }).observe(document.body, { childList: true, subtree: true });
 
-// ---- ホーム画面に追加の案内（発注者の指示）。#installSlot のあるページ（トップ・マイページ）にだけ出す。
+// ---- ホーム画面に追加の案内（発注者の指示）。#installSlot のあるページ（トップの下のほう）にだけ出す。
 // Android の Chrome などは、ブラウザが出す「インストール」の画面を、ボタンから呼ぶ。iPhone・iPad には、その仕組みが無いので、手順を出す。
 // ホーム画面から開いている間と、「閉じる」を押したあとは出さない（閉じたことは、この端末のブラウザにだけ覚える）。
 let installEvent = null;
@@ -266,21 +276,22 @@ function showInstall() {
   const steps = how === 'ios'
     ? ['「共有」ボタン（四角に上向きの矢印）を押す。無ければ「…」の中', '「ホーム画面に追加」を選ぶ（一覧の下のほう）', '「追加」を押す']
     : how === 'android' ? ['ブラウザのメニュー（右上の「︙」）を押す', '「ホーム画面に追加」か「アプリをインストール」を選ぶ'] : [];
-  const card = el('section', { class: 'install card', id: 'installCard', 'aria-labelledby': 'installTitle' },
+  const close = el('button', { class: 'install__close', type: 'button', 'aria-label': '閉じる', onclick: () => hideInstall(true) });
+  close.innerHTML = '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2l10 10M12 2 2 12"/></svg>';
+  const card = el('section', { class: 'install card', id: 'installCard', 'aria-labelledby': 'installTitle' }, close,
     el('img', { class: 'install__icon', src: 'icon-192.png', width: 56, height: 56, alt: '' }),
     el('div', { class: 'install__body' },
       el('h2', { id: 'installTitle', text: 'ホーム画面に追加' }),
       el('p', { text: 'アプリのように、ホーム画面からすぐに開けます。' }),
       steps.length ? el('ol', { class: 'install__steps' }, steps.map((text) => el('li', { text }))) : null,
-      el('div', { class: 'actions' },
-        how === 'prompt' ? el('button', { class: 'btn btn-primary', type: 'button', text: '追加する', onclick: async () => {
+      how === 'prompt' ? el('div', { class: 'actions' },
+        el('button', { class: 'btn btn-primary', type: 'button', text: '追加する', onclick: async () => {
           const ev = installEvent; installEvent = null;
           if (!ev) return;
           ev.prompt();
           const { outcome } = await ev.userChoice.catch(() => ({ outcome: 'dismissed' }));
           hideInstall(outcome === 'accepted');
-        } }) : null,
-        el('button', { class: 'btn', type: 'button', text: '閉じる', onclick: () => hideInstall(true) }))));
+        } })) : null));
   $('#installCard')?.remove();
   slot.append(card);
 }

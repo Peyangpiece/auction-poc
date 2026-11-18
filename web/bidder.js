@@ -97,10 +97,10 @@ function render() {
   // 「うりきり」: 最低落札額（公開）に届いていて、この価格で締めれば売れる。「権利」: 最高入札者。両方が点いた人が落札する
   const urikiri = !!lot.urikiri;
   // 最低落札額の金額は表示しない（端末にも届かない）。分かるのは、届いたかどうか（ランプ）だけ
-  setLamp('urikiri', urikiri ? 'on' : '', 'うりきり', '');
+  setLamp('urikiri', urikiri ? 'on' : '', 'うりきり', urikiri ? '達しています' : 'まだです');
   const holds = mine && st !== 'unsold';
   setLamp('right', holds ? (st === 'sold' ? 'won' : 'on') : '', holds && st === 'sold' ? '落札' : '権利',
-    lot.highestPaddle === null ? '' : mine ? 'あなた' : `${lot.highestPaddle}番`);
+    lot.highestPaddle === null ? '入札なし' : mine ? 'あなた' : `${lot.highestPaddle}番`);
 
   $('result').textContent = st === 'sold' ? (mine ? 'あなたが落札しました' : `${lot.highestPaddle}番 落札`) : st === 'unsold' ? '流札' : '';
   // 良い知らせも、目で分かるようにする: 最高入札者のあいだは金の枠、落札したら金の帯と、お支払いへの入口
@@ -361,8 +361,9 @@ function onMessage(msg, at) {
 }
 function notifyOutbid(msg) {
   // 上回られたら: 画面の色を変え、音を鳴らし、振動させる（FR-UI-004）
+  $('outbidText').textContent = `${msg.paddle}番が ${yen(msg.amount)}。次の入札額は ${yen(msg.minBid)}`;
   document.body.classList.add('outbid');
-  setTimeout(() => document.body.classList.remove('outbid'), 1500);
+  clearTimeout(notifyOutbid.timer); notifyOutbid.timer = setTimeout(() => document.body.classList.remove('outbid'), 4000);
   const audio = beep();
   const vibrated = 'vibrate' in navigator ? navigator.vibrate([200, 100, 200]) : null;
   $('audio').textContent = audio; $('vib').textContent = vibrated === null ? '非対応' : String(vibrated);

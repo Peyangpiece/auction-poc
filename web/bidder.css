@@ -2,22 +2,35 @@
 /* スマホ: 上から 品名 → 映像(4:3) → 履歴 → コメント。表示板は画面の下に固定する（価格・ランプ・入札が常に見える） */
 body { padding-bottom: calc(var(--board-h, 256px) + 24px + env(safe-area-inset-bottom)); transition: background-color .2s var(--ease); }
 .brandbar { padding-top: env(safe-area-inset-top); position: static; }
+/* スマホでは、上の帯はロゴではなく「‹ ホーム」の戻るリンク（品名が、このページの見出し）。広い画面では、ロゴ */
+.backlink { display: none; align-items: center; gap: 4px; font-size: 17px; font-weight: 500; color: var(--action); }
+.backlink svg { width: 12px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 640px) {
+  .brandbar .brand picture { display: none; }
+  .backlink { display: inline-flex; min-height: 44px; }
+  .brandbar > div { min-height: 44px; }
+}
 .brandbar > div, .top, main { max-width: 560px; margin: 0 auto; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
 .top { padding-top: 12px; padding-bottom: 10px; }
-.top h1 { font-size: 18px; min-width: 0; overflow-wrap: anywhere; letter-spacing: .02em; }
+.top h1 { font-size: 18px; min-width: 0; overflow-wrap: anywhere; letter-spacing: 0; }
 #lotNo { font-size: 18px; margin-right: 8px; color: var(--action); }
 #lotNo:empty { display: none; }
 main { display: grid; gap: 24px; }
 .side { display: contents; }
 #videoBox { order: 1; } .board { order: 2; } .hist { order: 3; } .cmt { order: 4; } .fine { order: 5; }
 
-/* 上回られたら、画面全体の色を変える（FR-UI-004） */
-body.outbid { background: var(--alarm); }
-body.outbid .top h1, body.outbid #lotNo, body.outbid h2, body.outbid main h2, body.outbid .fine, body.outbid .fine summary, body.outbid .hist .count,
-body.outbid #history .who, body.outbid #history .amt, body.outbid #history .at, body.outbid #comments, body.outbid #comments .who, body.outbid .switch,
-body.outbid .note, body.outbid .fine a, body.outbid .fine .textbtn, body.outbid details summary, body.outbid details dt, body.outbid details dd, body.outbid #cmtCount, body.outbid #cmtMsg, body.outbid .check { color: #fff; }
-body.outbid #history li { border-color: rgba(255, 255, 255, .45); }
-body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #fff; }
+/* 上回られたら（FR-UI-004）: 画面の上から赤い帯の知らせが下りてきて、表示板の縁と価格が赤くなる。振動と音も。
+   画面全体は塗らない（全面の赤は警報のように見え、ほかの情報も読みにくくなる。Apple のアプリは、知らせの帯と、該当する所だけの色で伝える） */
+.outbidbar { position: fixed; z-index: 35; left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); top: calc(8px + env(safe-area-inset-top));
+  max-width: 520px; margin: 0 auto; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: var(--r-lg);
+  background: var(--alarm); color: #fff; box-shadow: var(--shadow-2); pointer-events: none; opacity: 0; transform: translateY(-120%); transition: transform .38s var(--ease), opacity .2s; }
+.outbidbar b { display: block; font-size: 16px; font-weight: 700; line-height: 1.3; }
+.outbidbar span { display: block; font-size: 14px; line-height: 1.35; opacity: .92; }
+.outbidbar svg { flex: none; width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+body.outbid .outbidbar { opacity: 1; transform: none; }
+body.outbid .board { box-shadow: inset 0 0 0 3px var(--board-ng); }
+body.outbid .price { color: var(--board-ng); }
+@media (prefers-reduced-motion: reduce) { .outbidbar { transition: opacity .2s; transform: none; } }
 
 /* 応札／観戦 */
 
@@ -51,7 +64,10 @@ body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #
 /* 最高入札者のあいだは、金の枠。落札したら、金の帯と、お支払いへの入口 */
 .board { transition: box-shadow .2s var(--ease); }
 .board.lead { box-shadow: inset 0 0 0 3px var(--gold); }
-.board.lead #bid:disabled { border-color: var(--gold); color: #fff; }
+.board.lead #bid:disabled { color: #fff; gap: 8px; }
+/* 最高入札者のあいだは、文字の前に金の丸とチェック */
+.board.lead #bid:disabled::after { content: ''; order: -1; flex: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--gold) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 10.5l3 3 6-7' fill='none' stroke='%2300013a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 20px no-repeat; }
 .board.won { box-shadow: inset 0 0 0 3px var(--gold); }
 .board.won .board-result { font-size: 22px; padding: 10px 12px; background: var(--gold); color: var(--navy); border-radius: var(--r); text-align: center; }
 .board.won:has(#msg:not(:empty)) #result { display: block; }
@@ -68,7 +84,8 @@ body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #
 /* 板の上の入札ボタンは、板の文字色で塗る（暗い板の上でいちばん明るい面＝押すところ） */
 #bid { width: 100%; background: #fff; border-color: #fff; color: var(--navy); white-space: normal; min-width: 0; }
 #bid:hover:not(:disabled) { background: #e9edf3; border-color: #e9edf3; color: var(--navy); }
-#bid:disabled { opacity: 1; background: transparent; border-color: var(--board-line); color: var(--board-ink-2); font-size: 16px; font-weight: 600; }
+/* 押せないあいだ（最高入札者・待機・中断・送信中）は、ボタンの形をやめて、状態の文字として出す */
+#bid:disabled { opacity: 1; background: transparent; border-color: transparent; box-shadow: none; color: var(--board-ink-2); font-size: 16px; font-weight: 600; }
 #bid:focus-visible { outline-color: var(--board-ng); }
 
 /* 入札の履歴・コメント: 面で囲まず、細い線の行だけ */
@@ -119,7 +136,7 @@ details dd { overflow-wrap: anywhere; }
 #gate > div { width: min(400px, 100%); display: grid; gap: 20px; margin: auto; }
 @media (max-height: 520px) { #gate .mark { width: 56px; height: 56px; } #gate > div { gap: 12px; } }
 #gate .mark { width: 96px; height: 96px; }
-#gate .co { font-weight: 700; letter-spacing: .04em; }
+#gate .co { font-weight: 700; letter-spacing: 0; }
 #gate h1 { margin: 0; }
 #gate .gatelogo { display: block; width: 100%; height: auto; }
 @media (max-height: 520px) { #gate .gatelogo { width: 240px; } }
@@ -166,8 +183,8 @@ details dd { overflow-wrap: anywhere; }
 @media (max-width: 359px) {
   .brandbar > div, .top, main { padding-left: 16px; padding-right: 16px; }
   .brand { gap: 8px; }
-  .brand__name { font-size: 15px; letter-spacing: .02em; }
-  .brand__service { letter-spacing: .04em; }
+  .brand__name { font-size: 15px; letter-spacing: 0; }
+  .brand__service { letter-spacing: 0; }
 }
 #cmtCount { font-size: 12px; color: var(--ink-3); justify-self: end; }
 #bid.locked { opacity: .6; }
@@ -179,10 +196,10 @@ details dd { overflow-wrap: anywhere; }
 #join { display: grid; gap: 16px; text-align: left; }
 #join[hidden], #enter[hidden] { display: none; }
 /* 参加のしかた（オンライン・会場）を選ぶ、大きな2つのボタン */
-.pickhead { font-size: 16px; letter-spacing: .02em; color: var(--ink); margin: 0 0 12px; }
+.pickhead { font-size: 16px; letter-spacing: 0; color: var(--ink); margin: 0 0 12px; }
 .modes { display: grid; gap: 12px; }
 .mode { display: grid; gap: 6px; text-align: left; padding: 18px 20px; min-height: 96px; border: 1px solid var(--edge); border-radius: var(--r-lg); background: var(--ground); color: var(--ink); font: inherit; cursor: pointer; }
-.mode b { font-size: 20px; color: var(--action); letter-spacing: .04em; }
+.mode b { font-size: 20px; color: var(--action); letter-spacing: 0; }
 .mode span { font-size: 14px; color: var(--ink-2); line-height: 1.6; }
 .mode:hover { border-color: var(--action); background: var(--ground-alt); }
 .mode:active { border-width: 2px; padding: 17px 19px; }
@@ -195,7 +212,7 @@ details dd { overflow-wrap: anywhere; }
 .pick label:has(input:checked) { border-color: var(--action); border-width: 2px; padding: 7px 11px; color: var(--action); }
 .pick label.off { color: var(--ink-2); cursor: not-allowed; border-style: dashed; }
 .pick small { font-size: 12px; font-weight: 400; flex-basis: 100%; padding-left: 24px; }
-#joinTerms { white-space: pre-line; }
+#joinTerms { white-space: pre-line; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
 #gateWait { font-weight: 700; color: var(--action); }
 #gateWait:empty { display: none; }
 .pick small[hidden] { display: none; }
@@ -219,10 +236,10 @@ details dd { overflow-wrap: anywhere; }
 .bidrow #bid { width: auto; min-width: 112px; }
 .bidrow #amountBox[hidden] { display: none; }
 .bidrow #amountBox[hidden] + #bid { grid-column: 1 / -1; width: 100%; }
-.amount { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 14px; background: #fff; border: 2px solid #fff; border-radius: var(--r); color: var(--navy); cursor: text; }
-.amount:focus-within { border-color: var(--gold); }
+.amount { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 14px; background: rgba(255, 255, 255, .08); border: 1.5px solid rgba(255, 255, 255, .42); border-radius: var(--r); color: #fff; cursor: text; }
+.amount:focus-within { border-color: var(--gold); background: rgba(255, 255, 255, .12); }
 .amount .yen { font-family: var(--digits); font-size: 20px; font-weight: 600; }
-.amount input { flex: 1; min-width: 0; width: 100%; border: 0; outline: 0; background: none; padding: 0; color: var(--navy); font-size: 24px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; min-height: 48px; }
+.amount input { flex: 1; min-width: 0; width: 100%; border: 0; outline: 0; background: none; padding: 0; color: #fff; caret-color: var(--gold); font-size: 24px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; min-height: 48px; }
 @media (min-width: 960px) { .amount input { font-size: 28px; min-height: 56px; } }
 
 /* ---- 映像のない間（準備中・停止中・休憩中）の、待機のアニメーション（発注者の指示）
@@ -294,7 +311,6 @@ details dd { overflow-wrap: anywhere; }
    スマホ: 画面の上の行（No. と品名）を、スクロールしても上に残す。
    パソコン・横向き: 表示板の中、価格の上に、品番と品名を大きく出す（上の行は、読み上げ用にだけ残す） */
 .top { position: sticky; top: 0; z-index: 5; background: var(--ground); }
-body.outbid .top { background: var(--alarm); }
 .lotline { display: none; }
 @media (min-width: 960px), (min-width: 700px) and (orientation: landscape) {
   .top { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -302,7 +318,7 @@ body.outbid .top { background: var(--alarm); }
   .lotline #boardNo { font-size: 20px; font-weight: 600; color: var(--board-ink-2); }
   .lotline #boardNo:empty { display: none; }
   .lotname { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 22px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
-  .lotlabel { font-size: 13px; font-weight: 600; color: var(--board-ink-2); letter-spacing: .3em; }
+  .lotlabel { font-size: 13px; font-weight: 600; color: var(--board-ink-2); letter-spacing: 0; }
   .board:not(.haslot) .lotlabel { display: none; }
   .board.idle .lotline { border-bottom: 0; padding-bottom: 0; }
 }

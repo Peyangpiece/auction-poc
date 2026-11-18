@@ -65,9 +65,8 @@ try {
   // トップページは、ログインした人にだけ出る（ログインしていない人は、ログインの画面へ送られる）。ここでは、主催者管理者として開く
   const quiet = await admin.context().newPage();
   await quiet.goto(sys.base + '/');
-  await quiet.waitForSelector('#calBody td');
-  check((await quiet.isHidden('#today')) && (await quiet.locator('#calBody td.is-event').count()) === 0, '開催のない日は、カレンダーだけを出す');
-  check((await quiet.locator('#calBody td.is-today').count()) === 1, 'カレンダーに、今日の印が出る');
+  await quiet.waitForSelector('#nextList li');
+  check((await quiet.isHidden('#today')) && (await quiet.textContent('#nextList')).includes('次の開催は、まだ決まっていません'), '開催のない日は、次の開催の一覧だけを出す（決まっていなければ、そう知らせる）');
   await shot(quiet, 'mvp-05-top-no-event');
 
   // 開催
@@ -132,12 +131,10 @@ try {
   check(hero.includes('本日の目玉商品') && hero.includes('防水シート') && hero.includes('寝袋'), '本日の目玉商品を出す');
   const go = await top.locator('.today__go').boundingBox();
   check(go.height >= 72 && go.width >= 300, `「参加する」ボタンが大きい（${Math.round(go.width)}×${Math.round(go.height)}px）`);
-  const order = await top.evaluate(() => document.querySelector('#today').compareDocumentPosition(document.querySelector('.cal')) & Node.DOCUMENT_POSITION_FOLLOWING);
-  check(!!order, 'カレンダーは、当日の案内の下に出る');
-  check((await top.locator('#calBody td.is-event.is-today').count()) === 1, 'カレンダーの今日に、開催日の印が付く');
-  if (later.slice(0, 7) !== today.slice(0, 7)) await top.click('#calNext');
-  await top.waitForFunction(() => document.querySelector('#calList').textContent.includes('次回の競り（検証）'));
-  check(true, '2週間後の開催も、カレンダーに出る');
+  const order = await top.evaluate(() => document.querySelector('#today').compareDocumentPosition(document.querySelector('.next')) & Node.DOCUMENT_POSITION_FOLLOWING);
+  check(!!order, '次の開催の一覧は、当日の案内の下に出る');
+  await top.waitForFunction(() => document.querySelector('#nextList').textContent.includes('次回の競り（検証）'));
+  check(!(await top.textContent('#nextList')).includes('12月の競り（検証）'), '2週間後の開催が、次の開催の一覧に出る（今日の開催は、上の案内にだけ出す）');
   await shot(top, 'mvp-06-top-event-day', { fullPage: true });
   await top.setViewportSize({ width: 390, height: 844 });
   await top.waitForSelector('#terms:not([hidden])');
@@ -216,7 +213,7 @@ try {
   await phone.fill('#pwForm [name=password]', 'kensho-pass-01');
   await phone.click('#pwForm button[type=submit]');
   await phone.waitForURL(sys.base + '/');
-  check(await phone.isVisible('#calBody'), 'ログイン ID とパスワードでログインでき、トップページが開く');
+  check(await phone.isVisible('#nextList'), 'ログイン ID とパスワードでログインでき、トップページが開く');
   await phone.goto(sys.base + '/mypage.html');
 
   console.log('参加手続きと入札');
@@ -409,7 +406,7 @@ try {
   check(true, '開催を終了すると、参加者の画面に終了の知らせが出る');
   const after = await admin.context().newPage();
   await after.goto(sys.base + '/');
-  await after.waitForSelector('#calBody td');
+  await after.waitForSelector('#nextList li');
   check(await after.isHidden('#today'), '終了した開催は、トップページの「本日開催」に出ない');
   check(await after.isHidden('#wins'), '落札していない人（スタッフ）には、落札の結果を出さない');
   await guest.goto(sys.base + '/');

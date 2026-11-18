@@ -4,15 +4,11 @@
  *   紺 #000156 … 要所（ボタン・表示板・見出し）
  *   金 #d4aa00 … 細い線と、表示板の上のしるし
  *   赤 #ff0000 … 警告と、選んでいる場所の輪郭だけ。地は白
- *   書体 … 日本語は Noto Sans JP（400 本文・500 ラベルとボタン・700 見出し）、数字と英字は Inter
+ *   書体 … 端末の書体（iPhone・Mac はヒラギノ角ゴシックと San Francisco、Android は Noto Sans CJK、Windows は 游ゴシック）。
+ *          書体を読み込まないので、表示の途中で文字が切り替わらない（Apple の純正アプリと同じ考え方）。数字は等幅にそろえる
  *   角丸 … 6px、ボタンは高さ 48px・太字
  * この画面だけのしるしは1つ: 競り場の「表示板」（紺の板・金の細線・大きな数字・2つのランプ）。それ以外は静かにする。
  */
-@font-face { font-family: "Noto Sans JP"; src: url("notosansjp-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "Noto Sans JP"; src: url("notosansjp-500.woff2") format("woff2"); font-weight: 500 600; font-display: swap; }
-@font-face { font-family: "Noto Sans JP"; src: url("notosansjp-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-/* impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 */
-@font-face { font-family: "Inter"; src: url("inter.woff2") format("woff2"); font-weight: 400 700; font-display: swap; unicode-range: U+0020-007E, U+00A5; }
 
 :root {
   color-scheme: light dark;
@@ -24,6 +20,7 @@
 
   --ground: #ffffff;
   --ground-alt: #f3f4f7;
+  --ground-3: #e9ebf0;
   --ink: #15181e;
   --ink-2: #596170;        /* 補助の文字。白地で 6.0:1 */
   --ink-3: #596170;
@@ -35,7 +32,7 @@
   --action-ink: #ffffff;
   --danger: var(--red-text);
   --danger-ink: #ffffff;
-  --alarm: var(--red-text); /* 上回られたときに、画面全体に敷く色 */
+  --alarm: var(--red-text); /* 上回られたときの知らせの帯の色 */
   --ok: #1f6b3a;
 
   /* 表示板。エンブレムと同じ、紺の地に赤い線 */
@@ -60,27 +57,29 @@
   --tint: color-mix(in srgb, var(--action) 6%, var(--ground));       /* 押せるものの、うすい塗り */
   --tint-2: color-mix(in srgb, var(--action) 11%, var(--ground));
   --ring: color-mix(in srgb, var(--action) 18%, transparent);        /* 入力中の欄のまわりの、うすい輪 */
-  --font: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
-  --digits: "Inter", "Helvetica Neue", Arial, var(--font);
+  --font: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic UI", "Yu Gothic", Meiryo, system-ui, sans-serif;
+  --digits: var(--font);
   --ease: cubic-bezier(.16, 1, .3, 1);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: #04052a;
-    --ground-alt: #0c0e3c;
-    --ink: #eef0f6;
-    --ink-2: #bcc0ee;
-    --ink-3: #bcc0ee;
-    --line: rgba(255, 255, 255, .16);
-    --edge: #7d84a6;
-    --field: #0c0e3c;
+    /* 暗い配色は、Apple の暗い配色の灰色にそろえる（地は黒、カードは #1C1C1E）。紺は、表示板とブランドの色にだけ残す */
+    --ground: #000000;
+    --ground-alt: #1c1c1e;
+    --ground-3: #2c2c2e;
+    --ink: #ffffff;
+    --ink-2: #a1a1a8;        /* #1C1C1E の上で 6.6:1 */
+    --ink-3: #a1a1a8;
+    --line: rgba(84, 84, 88, .65);
+    --edge: #7c7c82;         /* 入力欄の縁。#1C1C1E の上で 3.9:1 */
+    --field: #1c1c1e;
     --action: #c3c9ff;
     --action-hover: #dfe2ff;
     --action-ink: #00013a;
     --danger: #f08a8a;
     --danger-ink: #00013a;   /* 明るい赤の上の文字。6.6:1 */
     --alarm: #9c0000;
-    --ok: #86d994;
+    --ok: #30d158;           /* Apple の暗い配色の緑（スイッチのオン） */
     --board: #0a0c6e;
     --shadow-btn: none;
     --shadow-1: 0 0 0 1px rgba(255, 255, 255, .08);
@@ -94,8 +93,9 @@ body {
   margin: 0;
   background: var(--ground);
   color: var(--ink);
-  font: 400 16px/1.75 var(--font);
-  letter-spacing: .02em;
+  /* Apple の文字の決まり（本文 17pt・字間なし）に合わせる */
+  font: 400 17px/1.6 var(--font);
+  letter-spacing: 0;
   font-kerning: normal;
   text-rendering: optimizeLegibility;
   -moz-osx-font-smoothing: grayscale;
@@ -107,9 +107,9 @@ body {
 }
 ::selection { background: var(--action); color: var(--action-ink); }
 h1, h2, h3, p, dl, dd, ul { margin: 0; }
-/* 見出し・ボタン・ラベルは、かなと約物を詰めて組む（palt）。本文は、読みやすさを優先して、詰めない */
-h1, h2, h3, .btn, .field, .tabs, .tabbar, .menu, th, .state, .board-top, .lamp { font-feature-settings: "palt" 1; }
-h1, h2, h3 { font-weight: 700; line-height: 1.35; text-wrap: balance; letter-spacing: .01em; }
+/* 字を詰める組み方（palt）と、字間の足し算はしない（Apple の純正アプリの日本語は、詰めずに、字間 0 で組む） */
+h1, h2, h3 { font-weight: 700; line-height: 1.35; text-wrap: balance; letter-spacing: 0; }
+h2, h3 { font-weight: 600; }
 h2 { font-size: 15px; color: var(--action); }
 p { text-wrap: pretty; }
 .num { font-variant-numeric: tabular-nums; }
@@ -126,7 +126,7 @@ main:focus { outline: none; }
 
 /* ---- ボタン: 形は1種類。主・従・取り消せない操作は、塗りと色だけで分ける */
 .btn {
-  appearance: none; font: 500 15px/1.4 var(--font); letter-spacing: .02em; color: var(--action); white-space: nowrap; text-decoration: none;
+  appearance: none; font: 600 17px/1.35 var(--font); letter-spacing: 0; color: var(--action); white-space: nowrap; text-decoration: none;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: 48px; padding: 8px 20px; border: 1px solid transparent; border-radius: var(--r);
   background: var(--tint); cursor: pointer; touch-action: manipulation; user-select: none;
@@ -149,7 +149,7 @@ main:focus { outline: none; }
   border: 1px solid var(--edge); border-radius: var(--r); background: var(--field);
   transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
 }
-.input::placeholder { color: color-mix(in srgb, var(--ink-3) 70%, transparent); }
+.input::placeholder { color: var(--ink-3); opacity: 1; } /* 薄くしすぎない（明るい配色・暗い配色とも 4.5:1 以上） */
 .input:hover { border-color: var(--ink-2); }
 /* 入力中の欄: 紺の縁と、まわりのうすい輪 */
 .input:focus-visible, .input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 4px var(--ring); }
@@ -171,16 +171,16 @@ main:focus { outline: none; }
 .lamp + .lamp { border-left: 1px solid var(--board-line); padding-left: 12px; }
 /* ランプは、点灯＝塗りつぶし、消灯＝輪郭。色に頼らず形でも分かる */
 /* ランプは、押せる丸（選択ボタン）に見えないよう、縦長の灯りの形にする */
-.bulb { width: 10px; height: 24px; border-radius: 4px; border: 2px solid var(--lamp-off); grid-row: span 2; transition: background-color .2s var(--ease), border-color .2s var(--ease); }
+/* ランプ: 消えているときは細い輪、点いたら金の丸にチェック（形だけでなく、印と、横の言葉でも伝える） */
+.bulb { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--lamp-off); grid-row: span 2; background: transparent center / 22px no-repeat; transition: background-color .2s var(--ease), border-color .2s var(--ease); }
+.lamp.on .bulb, .lamp.won .bulb { background-color: var(--gold); border-color: var(--gold);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Cpath d='M6 11.5l3.2 3.2L16 7.8' fill='none' stroke='%2300013a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 .lamp b { font-size: 16px; font-weight: 700; color: var(--board-ink-2); line-height: 1.3; }
 /* 補足がないランプは、印と名前を1行でそろえる */
 .lamp small:empty { display: none; }
 .lamp:has(small:empty) .bulb { grid-row: auto; }
 .lamp small { font-size: 13px; color: var(--board-ink-2); line-height: 1.3; overflow-wrap: anywhere; }
 .lamp.on b, .lamp.won b { color: var(--board-ink); }
-#urikiri.on .bulb { background: var(--lamp-green); border-color: var(--lamp-green); }
-#right.on .bulb { background: var(--lamp-amber); border-color: var(--lamp-amber); }
-#right.won .bulb { background: var(--lamp-green); border-color: var(--lamp-green); }
 
 /* ---- 状態の文字（点＋言葉。枠で囲まない） */
 .state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; white-space: nowrap; }
@@ -208,7 +208,7 @@ dialog {
 }
 @starting-style { dialog[open] { opacity: 0; transform: translateY(12px) scale(.98); } }
 dialog::backdrop { background: rgba(0, 1, 40, .45); backdrop-filter: blur(6px); }
-dialog h2 { font-size: 19px; margin-bottom: 8px; letter-spacing: .02em; color: var(--ink); }
+dialog h2 { font-size: 19px; margin-bottom: 8px; letter-spacing: 0; color: var(--ink); }
 dialog p { color: var(--ink-2); font-size: 15px; }
 dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 dialog .error { color: var(--danger); font-size: 13px; min-height: 20px; }
@@ -232,10 +232,10 @@ details[open] > summary::before { transform: rotate(45deg); }
 .brand__logo { display: block; height: 42px; width: auto; }
 .brand picture { display: block; }
 .brand__text { display: grid; line-height: 1.3; min-width: 0; }
-.brand__name { font-weight: 700; font-size: 17px; letter-spacing: .04em; white-space: nowrap; }
-.brand__service { font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--action); white-space: nowrap; }
+.brand__name { font-weight: 700; font-size: 17px; letter-spacing: 0; white-space: nowrap; }
+.brand__service { font-size: 12px; font-weight: 700; letter-spacing: 0; color: var(--action); white-space: nowrap; }
 /* 後から入る文字（商品名・コメント）は、切り出した書体に無い字が混ざらないよう、端末の書体で通して表示する */
-.dyn { font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", "Noto Sans JP", sans-serif; letter-spacing: .02em; }
+.dyn { letter-spacing: 0; }
 
 /* なめらかに続く角（Apple の角と同じ、連続した曲線）。対応しているブラウザでだけ効く。丸（50%）の部品には付けない */
 @supports (corner-shape: squircle) {

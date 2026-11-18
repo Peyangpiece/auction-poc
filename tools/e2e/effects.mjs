@@ -74,7 +74,7 @@ try {
   const calm = await openAs(c1, `${sys.base}/`, { ...devices['iPhone 13'], reducedMotion: 'reduce' });
   await calm.waitForSelector('#installCard'); check(true, 'iPhone のトップページに「ホーム画面に追加」の手順が出る');
   await calm.locator('#installCard').scrollIntoViewIfNeeded(); await snap(calm, 'install-ios');
-  await calm.click('#installCard .btn'); await calm.reload(); await calm.waitForTimeout(300);
+  await calm.click('#installCard .install__close'); await calm.reload(); await calm.waitForTimeout(300);
   check(!(await calm.$('#installCard')), '「閉じる」を押すと、次からは出ない');
   const android = await openAs(c1, `${sys.base}/`, { ...devices['Pixel 7'] });
   await android.waitForSelector('#installCard'); check((await android.textContent('#installCard')).includes('︙'), 'Android には、メニューからの手順が出る');

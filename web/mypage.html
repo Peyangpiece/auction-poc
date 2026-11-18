@@ -11,8 +11,6 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-title" content="令和の競り">
-<!-- impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 -->
-<link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="site.css">
 </head>
@@ -43,7 +41,7 @@
   <button type="button" role="tab" id="tab-profile" data-tab="profile" aria-controls="panel-profile" aria-selected="false">個人情報の設定</button>
 </div>
 <section id="panel-bills" role="tabpanel" aria-labelledby="tab-bills">
-  <div class="card" id="invoices"><p class="empty">請求書は、まだありません。</p></div>
+  <div class="card" id="invoices"><div class="emptystate"><span class="emptystate__icon" aria-hidden="true"></span><b>請求書は、まだありません</b><span>落札すると、開催の終わったあとに、ここに届きます。</span></div></div>
   <section class="card" id="billing" hidden>
     <h2 class="subhead">落札した品</h2>
     <div id="offers"></div>
@@ -61,7 +59,6 @@
     <li><label class="menu__switch" for="eventMail"><span>開催のお知らせメール<small>開催の前日に、日時と会場をお送りします</small></span><input type="checkbox" role="switch" id="eventMail"></label></li>
   </ul>
   <p class="msg" id="accountMsg" role="alert"></p>
-  <div id="installSlot"></div>
   <ul class="menu card">
     <li><a href="/legal.html#terms">利用規約</a></li>
     <li><a href="/legal.html#privacy">プライバシーポリシー</a></li>
