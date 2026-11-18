@@ -59,7 +59,7 @@ async function setup() {
     await b.post('/api/register/start', { phone });
     const sms = outbox().filter((m) => m.channel === 'sms' && m.to === phone).at(-1).body;
     await b.post('/api/register/verify', { phone, code: /(\d{6})/.exec(sms)[1] });
-    assert.equal((await b.post('/api/register/complete', { kind: 'b2c', name: `検証 ${n}郎`, email: `m${n}@example.com`, address: `東京都千代田区${n}`, adult: true })).status, 200);
+    assert.equal((await b.post('/api/register/complete', { kind: 'b2c', name: `検証 ${n}郎`, email: `m${n}@example.com`, address: `東京都千代田区${n}`, adult: true, agreed: true })).status, 200);
     const joined = (await b.post('/api/join', { receive, payment, ...(venue ? { venueCode: code } : {}) })).json;
     const pid = store.db.prepare('SELECT id FROM members WHERE event_id = ? AND paddle_no = ?').get(eventId, joined.paddle).id;
     if (venue) await admin.post(`/api/reception/${pid}/checkin`);
@@ -495,7 +495,7 @@ test('規約類: 主催者管理者が文面を入れると、だれでも読め
     const b = t.browser();
     await b.post('/api/register/start', { phone: '09088880001' });
     await b.post('/api/register/verify', { phone: '09088880001', code: /(\d{6})/.exec(t.outbox().filter((m) => m.channel === 'sms' && m.to === '09088880001').at(-1).body)[1] });
-    const person = { kind: 'b2c', name: '検証 花子', email: 'h@example.com', address: '東京都千代田区1', adult: true };
+    const person = { kind: 'b2c', name: '検証 花子', email: 'h@example.com', address: '東京都千代田区1', adult: true };  // 同意なし
     assert.ok((await b.post('/api/register/complete', person)).json.errors.agreed);
     assert.equal((await b.post('/api/register/complete', { ...person, agreed: true })).status, 200);
   } finally { await t.close(); }
@@ -509,7 +509,7 @@ test('受付で、参加手続きを代わりに行う（会場参加・来場�
     const b = t.browser();
     await b.post('/api/register/start', { phone: '09088880002' });
     await b.post('/api/register/verify', { phone: '09088880002', code: /(\d{6})/.exec(t.outbox().filter((m) => m.channel === 'sms' && m.to === '09088880002').at(-1).body)[1] });
-    await b.post('/api/register/complete', { kind: 'b2c', name: '検証 三郎', email: 's@example.com', address: '東京都千代田区3', adult: true });
+    await b.post('/api/register/complete', { kind: 'b2c', name: '検証 三郎', email: 's@example.com', address: '東京都千代田区3', adult: true, agreed: true });
     assert.equal((await reception.post('/api/reception/join', { phone: '09099999999', receive: 'pickup', payment: 'cash' })).status, 404);
     assert.equal((await reception.post('/api/reception/join', { phone: '09088880002', receive: 'pickup' })).status, 400, '受け取り方法と支払方法の両方が要る');
     const joined = await reception.post('/api/reception/join', { phone: '090-8888-0002', receive: 'pickup', payment: 'cash' });

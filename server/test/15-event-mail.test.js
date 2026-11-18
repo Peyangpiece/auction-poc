@@ -39,7 +39,7 @@ async function setup(env = {}) {
     await b.post('/api/register/start', { phone });
     const sms = outbox().filter((m) => m.channel === 'sms' && m.to === phone).at(-1).body;
     await b.post('/api/register/verify', { phone, code: /(\d{6})/.exec(sms)[1] });
-    assert.equal((await b.post('/api/register/complete', { kind: 'b2c', name: `検証 ${n}郎`, email: `ev${n}@example.com`, address: `東京都千代田区${n}`, adult: true })).status, 200);
+    assert.equal((await b.post('/api/register/complete', { kind: 'b2c', name: `検証 ${n}郎`, email: `ev${n}@example.com`, address: `東京都千代田区${n}`, adult: true, agreed: true })).status, 200);
     return Object.assign(b, { email: `ev${n}@example.com` });
   };
   const event = async (date, publish = true) => {

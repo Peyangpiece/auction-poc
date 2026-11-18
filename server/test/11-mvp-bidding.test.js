@@ -52,7 +52,7 @@ async function setup() {
     const b = browser(srv.httpUrl);
     await b.post('/api/register/start', { phone });
     await b.post('/api/register/verify', { phone, code: lastCode(phone) });
-    assert.equal((await b.post('/api/register/complete', { kind: 'b2c', name, email: 'a@example.com', address: '東京都千代田区1-1', adult: true })).status, 200);
+    assert.equal((await b.post('/api/register/complete', { kind: 'b2c', name, email: 'a@example.com', address: '東京都千代田区1-1', adult: true, agreed: true })).status, 200);
     return b;
   };
   // 参加できるのは開催の当日だけなので、開催日は今日（日本時間）にする
@@ -427,6 +427,11 @@ test('休憩と開催終了（FR-CON-003、FR-EVT-003）', async () => {
     assert.equal((await online.get('/api/participation')).json.event, null, '終了した開催には、参加できない');
     assert.match((await con.cmd('event_end')).message, /本日の開催はありません/, '開催終了は、やり直せない');
     assert.equal((await w1.bid(a.id, 2000)).accepted, false);
+    // 終わったあとにつなぎ直したスタッフの画面（会場モニターなど）には、「本日は終了」を最初の状態で送る（報告書 80 章）
+    const con2 = new Client(t.srv.url, undefined, { ack: false, headers: { cookie: t.staff.cookie } });
+    con2.hello = { as: 'console' };
+    assert.equal((await con2.connect()).ended, true, 'つなぎ直しても、終了の表示を続けられる');
+    con2.close();
     w1.close(); con.close();
   } finally { await t.end(); }
 });

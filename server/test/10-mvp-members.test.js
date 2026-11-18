@@ -59,7 +59,7 @@ async function setup(env = {}) {
   };
 }
 const MIN = 60000;
-const person = { kind: 'b2c', name: '検証 太郎', email: 'taro@example.com', address: '東京都千代田区1-1', adult: true };
+const person = { kind: 'b2c', name: '検証 太郎', email: 'taro@example.com', address: '東京都千代田区1-1', adult: true, agreed: true };
 async function register(t, b, phone, input = person) {
   assert.equal((await b.post('/api/register/start', { phone })).status, 200);
   assert.equal((await b.post('/api/register/verify', { phone, code: t.lastCode(normalizePhone(phone)) })).status, 200);
@@ -198,6 +198,11 @@ test('スタッフ（前からのログイン ID の形）: パスワード。�
     const other = await t.staffLogin('auctioneer', 'shinko');
     assert.equal((await b.post(`/api/staff/accounts/${other.account.id}/stop`)).status, 200);
     assert.equal((await other.get('/api/me')).json.staff, null);
+    // 停止を解く（報告書 80 章）。停止の前のパスワードで、またログインできる
+    assert.equal((await t.browser().post(`/api/staff/accounts/${other.account.id}/reactivate`)).status, 401, 'ログインしていない人は、解けない');
+    assert.equal((await b.post(`/api/staff/accounts/${other.account.id}/reactivate`)).status, 200);
+    assert.equal((await b.post(`/api/staff/accounts/${other.account.id}/reactivate`)).status, 409, '停止していないスタッフは、解けない');
+    assert.equal((await b.get('/api/staff/accounts')).json.staff.find((x) => x.id === other.account.id).active, true);
     // 秘密は一覧に出ない
     const list = JSON.stringify((await b.get('/api/staff/accounts')).json);
     assert.equal(/password|totp|secret/i.test(list), false);
@@ -350,7 +355,7 @@ test('会員登録: 姓名・フリガナ・郵便番号つきの住所を分け
     assert.equal((await b.get('/api/postal?code=123')).status, 400);
     assert.deepEqual((await b.get('/api/postal?code=9999999')).json.results, []);
     const input = { kind: 'b2c', lastName: '山田', firstName: '太郎', lastKana: 'やまだ', firstKana: 'タロウ', email: 'y@example.com',
-      postalCode: '１００-0001', prefecture: '東京都', address1: '千代田区千代田1-1', address2: '○○ビル 3階', adult: true };
+      postalCode: '１００-0001', prefecture: '東京都', address1: '千代田区千代田1-1', address2: '○○ビル 3階', adult: true, agreed: true };
     const bad = await register(t, b, '09011114444', { ...input, lastKana: '山田', postalCode: '123', prefecture: '江戸', address1: '千代田区' });
     assert.deepEqual(Object.keys(bad.json.errors).sort(), ['address1', 'lastKana', 'postalCode', 'prefecture']);
     const done = await b.post('/api/register/complete', input);

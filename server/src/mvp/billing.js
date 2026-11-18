@@ -768,7 +768,8 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     return {
       suspension: suspension(me.id),
       lines: db.prepare('SELECT * FROM bill_lines WHERE account_id = ? ORDER BY id DESC').all(me.id).map(lineView),
-      offers,
+      // 繰り上げのご案内: 払う金額（買歩銭込み）も返す。承諾の前に、画面で確かめてもらうため
+      offers: offers.map((o) => ({ ...o, premium: premiumOf(o.amount), payable: o.amount + premiumOf(o.amount) })),
       // 請求書の一覧（マイページの「請求書」）。状態: paid（すべて消し込み済み）/ overdue（期限を過ぎている）/ billed（お支払い前）
       invoices: db.prepare('SELECT * FROM invoices WHERE account_id = ? ORDER BY id DESC').all(me.id).map((i) => {
         const open = db.prepare('SELECT COUNT(*) AS n FROM bill_lines WHERE invoice_id = ? AND cleared_at IS NULL AND cancelled_at IS NULL').get(i.id).n;

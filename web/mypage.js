@@ -75,16 +75,40 @@ function showInvoices(list) {
     el('span', { class: i.state === 'overdue' ? 'warn' : 'invlist__state', text: INVOICE_STATE[i.state] }),
     el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: '請求書を開く（PDF）' })))));
 }
+// 繰り上げ落札の回答: どちらも取り消せないので、金額と結果を書いて確かめる。最初のフォーカスは「やめる」（報告書 80 章）
+function answerOffer(o, answer) {
+  const accept = answer === 'accept';
+  const msg = el('p', { class: 'msg', role: 'alert', tabIndex: -1 });
+  const cancel = el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() });
+  const ok = el('button', { class: accept ? 'btn btn-primary' : 'btn btn-danger', type: 'button', text: accept ? '承諾する' : '辞退する', onclick: async () => {
+    ok.disabled = true;
+    const res = await api('POST', `/api/my/offers/${o.id}`, { answer });
+    ok.disabled = false;
+    if (!res.ok) { msg.textContent = res.message; msg.focus(); return; }
+    dlg.close();
+    $('#notice').textContent = accept ? `${o.label} を承諾しました。請求書をお送りします。` : `${o.label} を辞退しました。`;
+    loadBilling();
+  } });
+  dlg.replaceChildren(el('h2', { id: 'dlgTitle', text: accept ? '繰り上げ落札を承諾しますか？' : '繰り上げ落札を辞退しますか？' }),
+    el('p', { text: o.label }),
+    accept
+      ? el('p', { text: `お支払い ${yen(o.payable)}（落札額 ${yen(o.amount)}＋買歩銭 ${yen(o.premium)}）。承諾すると、請求書をお送りします。取り消しはできません。` })
+      : el('p', { text: '辞退すると、この品は落札できません。取り消しはできません。' }),
+    msg, el('div', { class: 'actions' }, cancel, ok));
+  dlg.setAttribute('aria-labelledby', 'dlgTitle');
+  dlg.showModal();
+  cancel.focus();
+}
 async function loadBilling() {
   const res = await api('GET', '/api/my/billing');
   if (res.ok) showInvoices(res.invoices ?? []);
   if (!res.ok || (!res.lines.length && !res.offers.length)) return;
   $('#billing').hidden = false;
   $('#offers').replaceChildren(...res.offers.filter((o) => o.state === 'open').map((o) => el('div', { class: 'banner' },
-    el('span', { text: `繰り上げ落札のご案内: ${o.label} を ${yen(o.amount)}（税込）で。回答期限 ${o.deadline}` }),
+    el('span', { text: `繰り上げ落札のご案内: ${o.label}　お支払い ${yen(o.payable)}（落札額 ${yen(o.amount)}＋買歩銭 ${yen(o.premium)}）　回答期限 ${jpDay(o.deadline)}` }),
     el('span', {},
-      el('button', { class: 'btn btn-primary', type: 'button', text: '承諾する', onclick: async () => { await api('POST', `/api/my/offers/${o.id}`, { answer: 'accept' }); loadBilling(); } }), ' ',
-      el('button', { class: 'btn', type: 'button', text: '辞退する', onclick: async () => { await api('POST', `/api/my/offers/${o.id}`, { answer: 'decline' }); loadBilling(); } })))));
+      el('button', { class: 'btn btn-primary', type: 'button', text: '承諾する', onclick: () => answerOffer(o, 'accept') }), ' ',
+      el('button', { class: 'btn', type: 'button', text: '辞退する', onclick: () => answerOffer(o, 'decline') })))));
   $('#myLines').replaceChildren(...res.lines.map((l) => el('li', {},
     el('b', { text: l.label }), el('span', { class: 'digits', text: yen(l.payable) }),
     el('span', { class: 'tag', 'data-state': l.state, text: STATE_TEXT[l.state] }),

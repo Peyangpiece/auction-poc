@@ -37,6 +37,28 @@ const CLOSE_REASON = {
   4429: '送信が多すぎるため、接続を切りました',
 };
 
+// 切られたときに、次に行く先（報告書 80 章）。サーバーが切る直前に送った理由（code）で決める
+// page: 'bidder' | 'console' | 'caller' | 'monitor'
+function overlayAction(code, page) {
+  const staffPage = page !== 'bidder';
+  if (code === 'LOGIN' || code === 'SIGNED_OUT') return staffPage ? { href: `/staff.html?next=${page}`, text: 'ログインし直す' } : { href: '/login.html?next=bidder', text: 'ログインし直す' };
+  if (code === 'FORBIDDEN') return { href: '/staff.html', text: '管理の画面に戻る' };
+  if (code === 'NOT_JOINED' || code === 'NOT_CHECKED_IN') return { href: '/bidder.html', text: '開き直す' };
+  if (code === 'NO_EVENT') return { href: '/mypage.html', text: 'マイページへ' };
+  return null;
+}
+/** 接続の状態を、画面いっぱいの帯で出す。行き先があれば、ボタンを付ける */
+function showOverlay(up, why, code, page) {
+  document.getElementById('overlay').style.display = up ? 'none' : 'flex';
+  const text = document.getElementById('overlayText');
+  text.textContent = why ?? '再接続中…';
+  let a = document.getElementById('overlayAction');
+  const act = up ? null : overlayAction(code, page);
+  if (!act) { a?.remove(); return; }
+  if (!a) { a = document.createElement('a'); a.id = 'overlayAction'; a.className = 'btn btn-primary overlay__action'; text.after(a); }
+  a.href = act.href; a.textContent = act.text;
+}
+
 const STATE_LABEL = {
   waiting: '待機', preparing: '配信準備中', preparing_warn: '配信準備中（警告）', open: '受付中',
   suspended: '中断', sold: '落札', unsold: '流札', not_held: '未実施',
@@ -84,6 +106,7 @@ class Link {
       const at = localNow();
       this.lastHeardAt = at;
       const msg = JSON.parse(ev.data);
+      if (msg.type === 'error' && msg.code) this.closeInfo = { code: msg.code, message: msg.message }; // 切られる直前に届く理由
       if (msg.type === 'time' || msg.type === 'bid_result' || msg.type === 'cmd_result' || msg.type === 'comment_result') {
         const key = msg.type === 'time' ? 't' + msg.t0 : msg.reqId;
         const w = this.waiters.get(key);
@@ -110,7 +133,11 @@ class Link {
     };
     ws.onclose = (ev) => {
       if (ws !== this.ws) return; // すでに見切りをつけて、つなぎ直しに入っている
-      if (CLOSE_REASON[ev.code]) { this.ws = { readyState: 3, send() {}, close() {} }; return this.onStatus(false, CLOSE_REASON[ev.code]); } // つなぎ直さない
+      if (CLOSE_REASON[ev.code]) { // つなぎ直さない。サーバーが理由を送っていれば、その文を出す（固定の文では、何が起きたか分からないため）
+        this.ws = { readyState: 3, send() {}, close() {} };
+        const info = ev.code === 4403 ? this.closeInfo : null;
+        return this.onStatus(false, info?.message ?? CLOSE_REASON[ev.code], false, info?.code ?? null);
+      }
       this.dropped('close');
     };
     ws.onerror = () => {};

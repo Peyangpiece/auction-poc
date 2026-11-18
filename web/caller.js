@@ -256,10 +256,10 @@ document.addEventListener('visibilitychange', keepAwake);
 keepAwake();
 
 let link = null;
-const onStatus = (up, why) => { $('overlay').style.display = up ? 'none' : 'flex'; $('overlayText').textContent = why ?? '再接続中…'; };
+const onStatus = (up, why, _r, code) => showOverlay(up, why, code, 'caller');
 fetch('/api/me', { credentials: 'same-origin' }).then((r) => r.json()).then((me) => {
   if (!me.staff) return location.replace('/staff.html?next=caller');
-  if (!['admin', 'auctioneer', 'caller'].includes(me.staff.role)) { onStatus(false, 'この画面は、オークショニアと主催者管理者が使います'); return; }
+  if (!['admin', 'auctioneer', 'caller'].includes(me.staff.role)) { onStatus(false, 'この画面は、オークショニア・進行役・主催者管理者が使います', false, 'FORBIDDEN'); return; }
   link = new Link({ token: null, as: 'console', label: 'caller', onMessage, onStatus });
 }).catch(() => onStatus(false, 'サーバーにつながりません'));
 render();

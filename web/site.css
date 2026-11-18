@@ -398,7 +398,7 @@ dialog .actions > :is(.btn-primary, .btn-danger) { order: 2; }
 #tabs button[aria-selected="true"] { background: var(--action); color: var(--action-ink); box-shadow: none; }
 @media (min-width: 900px) {
   #app:not([hidden]) { display: grid; grid-template-columns: 200px minmax(0, 1fr); column-gap: 36px; align-items: start; }
-  #app > .toolbar { grid-column: 1 / -1; }
+  #app > .toolbar, #app > #releaseWarn { grid-column: 1 / -1; }
   #tabs { grid-column: 1; flex-direction: column; position: sticky; top: 84px; gap: 2px; overflow: visible; margin: 0; }
   #tabs button { width: 100%; text-align: left; min-height: 40px; padding: 8px 12px; border-radius: 8px; background: none; font-size: 15px; font-weight: 500; }
   #tabs button:hover { background: var(--ground-alt); }

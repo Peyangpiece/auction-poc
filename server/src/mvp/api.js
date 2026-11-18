@@ -378,7 +378,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     // 個人は、18歳以上であることの申告が必須（FR-AUTH-003）
     if (kind === 'b2c' && body.adult !== true) errors.adult = '18歳以上であることを確認してください';
     // 利用規約が登録されていれば、同意が必須（文面は、主催者設定で入れる）
-    if (setting('legal_terms') && body.agreed !== true) errors.agreed = '利用規約とプライバシーポリシーをお読みのうえ、同意してください';
+    // 規約への同意は、いつも必須（発注者の決定。報告書 80 章）
+    if (body.agreed !== true) errors.agreed = '利用規約とプライバシーポリシーをお読みのうえ、同意してください';
     if (Object.keys(errors).length) throw bad('入力を確かめてください', { errors });
     if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone) || db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) {
       throw new HttpError(409, 'この電話番号では登録できません');
@@ -660,6 +661,16 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     db.prepare('UPDATE staff_accounts SET active = 0 WHERE id = ?').run(id);
     db.prepare("DELETE FROM sessions WHERE kind = 'staff' AND subject_id = ?").run(id);
     audit(ctx, 'staff.stop', { target: `staff:${id}`, before: { active: true }, after: { active: false } });
+    return { ok: true };
+  });
+  // 停止を解く（発注者の指示。報告書 80 章）。パスワードと認証アプリは、停止の前のまま
+  route('POST', '/api/staff/accounts/:id/reactivate', (ctx, body, id) => {
+    needStaff(ctx, 'admin');
+    const target = db.prepare('SELECT * FROM staff_accounts WHERE id = ?').get(id);
+    if (!target) throw new HttpError(404, 'スタッフが見つかりません');
+    if (target.active) throw new HttpError(409, 'このスタッフは、停止されていません');
+    db.prepare('UPDATE staff_accounts SET active = 1, failed_count = 0, locked_until = 0 WHERE id = ?').run(id);
+    audit(ctx, 'staff.reactivate', { target: `staff:${id}`, before: { active: false }, after: { active: true } });
     return { ok: true };
   });
   /** スタッフを作る。最初の主催者管理者は、tools/create-admin.js から呼ぶ */
@@ -1254,6 +1265,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return ctx.staff ? { staff: { id: ctx.staff.id, name: ctx.staff.name, role: ctx.staff.role, account: true } } : { code: 'LOGIN', message: 'スタッフのログインが必要です' };
   }
   /** 開催の進み具合（参加者の画面と進行コンソールに送る）。phase: null（開始前）/ running（進行中）/ break（休憩）*/
+  /** 今日の開催が、もう終わっているか（再接続した会場モニターが、終了の表示を続けるため。報告書 80 章） */
+  const endedToday = () => !activeEvent() && !!db.prepare("SELECT 1 FROM events WHERE status = 'published' AND substr(starts_at, 1, 10) = ? AND phase = 'ended'").get(todayJst());
   const eventState = () => {
     const e = activeEvent();
     return e ? { title: e.title, phase: e.phase ?? null, resumeAt: e.phase === 'break' ? e.resume_at : null, endsAt: e.ends_at.slice(11) } : null;
@@ -1277,6 +1290,6 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   }
   return {
     handle, createStaff, inviteStaff, audit, participantFromCookie, bidGate, sendEventMails, eventId: () => activeEvent()?.id ?? null,
-    staffFromCookie, viewerFromCookie, signedIn, memberIdFromCookie, eventState, setPhase, proxyTarget, billing,
+    staffFromCookie, viewerFromCookie, signedIn, memberIdFromCookie, eventState, endedToday, setPhase, proxyTarget, billing,
   };
 }

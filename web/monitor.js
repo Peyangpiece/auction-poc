@@ -46,7 +46,7 @@ function showEvent(event, ended = false) {
 function onMessage(msg) {
   switch (msg.type) {
     case 'welcome': case 'snapshot':
-      S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history; showEvent(msg.event ?? null); break;
+      S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history; showEvent(msg.event ?? null, !msg.event && !!msg.ended); render(); break;
     case 'lot': {
       const prev = S.lots.get(msg.lot.id);
       S.lots.set(msg.lot.id, msg.lot);
@@ -69,5 +69,5 @@ function onMessage(msg) {
 }
 fetch('/api/me', { credentials: 'same-origin' }).then((r) => r.json()).then((me) => {
   if (!me.staff) return location.replace('/staff.html?next=monitor');
-  new Link({ token: null, as: 'monitor', label: 'monitor', onMessage, onStatus: (up, why) => { $('overlay').style.display = up ? 'none' : 'flex'; $('overlayText').textContent = why ?? '再接続中…'; } });
+  new Link({ token: null, as: 'monitor', label: 'monitor', onMessage, onStatus: (up, why, _r, code) => showOverlay(up, why, code, 'monitor') });
 }).catch(() => { $('overlayText').textContent = 'サーバーにつながりません'; });

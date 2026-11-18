@@ -85,7 +85,14 @@ onSubmit(forms.profile, async (data) => {
   }
   if (res.ok && res.devVerifyUrl) sessionStorage.setItem('devVerifyUrl', res.devVerifyUrl); // お試し用: 確認のリンクを、マイページで出す
   if (res.ok) location.href = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/mypage.html?registered=1';
-  else if (res.status === 401) { res.message = '時間が空いたため、連絡先の確認からやり直してください'; show('phone'); }
+  else if (res.status === 401) {
+    // 期限切れ: 見えている最初の手順に、理由を出す（入力した内容は、そのまま残る。報告書 80 章）
+    show('phone');
+    const msg = forms.phone.querySelector('.msg');
+    msg.textContent = '時間が空いたため、連絡先の確認からやり直してください。入力した内容は残っています';
+    msg.focus();
+    return { ok: true };
+  }
   return res;
 });
 
@@ -95,7 +102,4 @@ onSubmit(forms.profile, async (data) => {
   if (me.member) location.replace('/mypage.html');
   else if (me.registering) { setContact(me.registerVia, me.registerId); show('profile'); } // 認証まで済ませて、読み込み直した場合
   syncKind();
-  // 利用規約が登録されていれば、同意の欄を出す
-  const legal = await api('GET', '/api/legal');
-  if (legal.ok && legal.docs.terms.body) $('#agreeRow').hidden = false;
 })();

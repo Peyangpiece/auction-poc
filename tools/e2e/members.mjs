@@ -176,6 +176,10 @@ try {
   await shot(phone, 'mvp-09-register-profile', { fullPage: true });
   await phone.check('[name=adult]');
   await phone.click('#stepProfile button[type=submit]');
+  await phone.waitForSelector('#agreeRow [aria-invalid=true]');
+  check(true, '規約に同意しないと、登録できない');
+  await phone.check('[name=agreed]');
+  await phone.click('#stepProfile button[type=submit]');
   await phone.waitForURL(/mypage\.html/);
   await phone.waitForSelector('#facts dd');
   check((await phone.textContent('#facts')).includes('090-0000-1111'), '登録が済み、マイページに内容が出る');
@@ -275,6 +279,7 @@ try {
   await guest.type('[name=address1]', '4-5-6');
   await guest.fill('[name=email]', 'hanako@example.com');
   await guest.check('[name=adult]');
+  await guest.check('[name=agreed]');
   await guest.click('#stepProfile button[type=submit]');
   await guest.waitForSelector('#join:not([hidden])');
   check(!new URL(guest.url()).search, '登録のあと、入札画面の参加手続きに進む（URL に合言葉を残さない）');
@@ -346,7 +351,7 @@ try {
   await guest.waitForFunction(() => document.querySelector('#right')?.classList.contains('on'));
   check(!(await guest.evaluate(() => document.body.classList.contains('outbid'))) && (await guest.textContent('#msg')).includes('最高入札者に戻りました'), '権利が戻った人の画面から、上回られた警告が消える');
   check(true, '代理入札を取り消すと、現在価格が1つ前に戻り、前の最高入札者に権利表示が戻る');
-  await con.click('#b_close');
+  await con.click('#b_close'); await con.click('#dlgOk'); // 締めは確かめてから
   await con.waitForFunction(() => document.getElementById('sold').textContent.includes('10,000'));
   const soldRow = await con.textContent('#sold');
   check(soldRow.includes('2番') && soldRow.includes('現地受け取り') && soldRow.includes('当日現金'), '落札一覧に、参加番号・落札額・受け取り方法・支払方法が出る');
@@ -443,7 +448,7 @@ try {
   const reg = await open('/register.html', devices['iPhone 13']);
   await reg.waitForSelector('#agreeRow', { state: 'attached' });
   await reg.waitForFunction(() => !document.getElementById('agreeRow').hidden);
-  check(true, '利用規約を入れると、会員登録に同意の欄が出る');
+  check(true, '会員登録には、いつも同意の欄が出る');
   // 退会していない方の会員（会場 花子）が、登録内容を変える
   await guest.goto(sys.base + '/mypage.html');
   await guest.evaluate(() => { location.hash = '#profile'; });
@@ -456,6 +461,10 @@ try {
   await admin.click('#tabs [data-key=staff]');
   await admin.waitForSelector('#panel td.act >> text=再発行');
   await admin.click('#panel tr:has-text("shinko") td.act >> text=再発行');
+  // 再発行は、本人のログインを切るので、確かめてから（報告書 80 章）。最初のフォーカスは「やめる」
+  await admin.waitForSelector('#dlg[open] >> text=再発行しますか');
+  check(await admin.evaluate(() => document.activeElement?.textContent === 'やめる'), 'スタッフの再発行は、何が無効になるかを書いて確かめる（最初のフォーカスは「やめる」）');
+  await admin.click('#dlg >> button:has-text("再発行する")');
   await admin.waitForFunction(() => { const i = document.querySelector('#dlg img.qr'); return i && i.complete && i.naturalWidth > 0; });
   check((await admin.textContent('#dlg')).includes('認証アプリの鍵'), 'スタッフの認証アプリを再発行でき、QR コードが出る');
   await admin.click('#dlg >> text=渡したので閉じる');

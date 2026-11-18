@@ -161,11 +161,16 @@ function ask({ title, body, needReason = false, okLabel = '実行する', danger
     $('dlgCancel').onclick = () => done(null);
     dlg.oncancel = (ev) => { ev.preventDefault(); done(null); };
     dlg.showModal();
-    if (needReason) $('dlgReason').focus();
+    if (needReason) $('dlgReason').focus(); else $('dlgCancel').focus(); // 誤って続けて押しても、実行されないように
   });
 }
 const CONFIRM = {
   cancel: (l) => ({ title: `No.${l.lotNo} を取りやめますか？`, body: 'この品のすべての入札を無効にして、待機に戻します。入札の記録は残ります。', okLabel: '取りやめる', danger: true }),
+  // 締め: 取り消せないので、押した結果（落札か流札か）を書いて確かめる。オークショニアの画面と同じ（発注者の決定。報告書 80 章）
+  close: (l) => {
+    const willSell = l.currentPrice !== null && (l.reservePrice === null || l.urikiri);
+    return { title: '締めますか？', body: willSell ? `No.${l.lotNo}　${l.highestPaddle}番 ${yen(l.currentPrice)} で落札になります。` : `No.${l.lotNo}　流札になります。`, okLabel: '締める' };
+  },
   exclude: (l) => ({ title: `No.${l.lotNo} を除外しますか？`, body: 'この品は「未実施」になり、この開催では競りにかけられなくなります。', okLabel: '除外する', danger: true }),
 };
 async function lotCmd(action, lotId, needReason = false) {
@@ -174,7 +179,7 @@ async function lotCmd(action, lotId, needReason = false) {
     const ans = await ask({ ...CONFIRM[action](S.lots.get(lotId)), needReason: true });
     if (!ans) return;
     reason = ans.reason;
-  }
+  } else if (action === 'close' && !(await ask(CONFIRM.close(S.lots.get(lotId))))) return;
   return cmd(action, { lotId, reason });
 }
 document.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async () => {
@@ -293,11 +298,11 @@ $('proxyForm').addEventListener('submit', async (ev) => {
 
 let link = null;
 const token = takeToken('auction-staff');
-const onStatus = (up, why) => { $('overlay').style.display = up ? 'none' : 'flex'; $('overlayText').textContent = why ?? '再接続中…'; };
+const onStatus = (up, why, _r, code) => showOverlay(up, why, code, 'console');
 // 検証用の合言葉つきの URL で開いたときは、そのまま入る。なければ、スタッフのログイン（主催者管理者・進行役）で入る
 if (token) link = new Link({ token, label: 'console', onMessage, onStatus });
 else fetch('/api/me', { credentials: 'same-origin' }).then((r) => r.json()).then((me) => {
   if (!me.staff) return location.replace('/staff.html?next=console');
-  if (me.staff.role !== 'admin' && me.staff.role !== 'auctioneer') { $('overlay').style.display = 'flex'; $('overlayText').textContent = '競りの進行は、主催者管理者と進行役だけができます'; return; }
+  if (me.staff.role !== 'admin' && me.staff.role !== 'auctioneer') { showOverlay(false, '競りの進行は、主催者管理者と進行役だけができます', 'FORBIDDEN', 'console'); return; }
   link = new Link({ token: null, as: 'console', label: 'console', onMessage, onStatus });
 }).catch(() => { $('overlay').style.display = 'flex'; $('overlayText').textContent = 'サーバーにつながりません'; });

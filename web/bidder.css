@@ -63,8 +63,8 @@ body.outbid .price { color: var(--board-ng); }
 .ptotal:empty { display: none; }
 /* 最高入札者のあいだは、ボタンの場所に、チェックと「あなたが最高入札者です」。落札したら、その言葉と、お支払いへの入口 */
 .board { transition: box-shadow .2s var(--ease); }
-.board.lead #bid:disabled { color: var(--board-ink); gap: 8px; }
-.board.lead #bid:disabled::after { content: ''; order: -1; flex: none; width: 20px; height: 20px; border-radius: 50%;
+.board.lead #bid[aria-disabled="true"] { color: var(--board-ink); gap: 8px; }
+.board.lead #bid[aria-disabled="true"]::after { content: ''; order: -1; flex: none; width: 20px; height: 20px; border-radius: 50%;
   background: var(--action) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 10.5l3 3 6-7' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 20px no-repeat; }
 .board.won .board-result { font-size: 20px; color: var(--board-ink); }
 .board.won:has(#msg:not(:empty)) #result { display: block; }
@@ -82,7 +82,7 @@ body.outbid .price { color: var(--board-ng); }
 #bid { width: 100%; background: var(--action); border-color: var(--action); color: var(--action-ink); font-weight: 600; white-space: normal; min-width: 0; }
 #bid:hover:not(:disabled) { background: var(--action-hover); border-color: var(--action-hover); color: var(--action-ink); }
 /* 押せないあいだ（最高入札者・待機・中断・送信中）は、ボタンの形をやめて、状態の文字として出す */
-#bid:disabled { opacity: 1; background: transparent; border-color: transparent; box-shadow: none; color: var(--board-ink-2); font-size: 16px; font-weight: 600; }
+#bid[aria-disabled="true"] { opacity: 1; cursor: default; transform: none; background: transparent; border-color: transparent; box-shadow: none; color: var(--board-ink-2); font-size: 16px; font-weight: 600; }
 #bid:focus-visible { outline-color: var(--action); }
 
 /* 入札の履歴・コメント: 面で囲まず、細い線の行だけ */
@@ -311,7 +311,7 @@ body.outbid .board { box-shadow: var(--glass-edge), inset 0 0 0 2px var(--board-
 
 /* 映像の上のコメント・音声・知らせ: 暗いガラスの札（映像が、ぼけて透ける） */
 .cmtlayer #comments li, .cmttoast, #sound {
-  background: rgb(20 20 22 / .38); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+  background: rgb(20 20 22 / .72); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .18), inset 0 0 0 1px rgb(255 255 255 / .08); border-color: transparent;
 }
 #sound { border-radius: 999px; }

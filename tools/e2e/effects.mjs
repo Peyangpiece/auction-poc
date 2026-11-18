@@ -30,7 +30,7 @@ try {
   await b2.waitForFunction(() => document.getElementById('board').classList.contains('bidpop'));
   await b2.waitForTimeout(200); await snap(b2, 'bid-pc');
   check(!(await b1.evaluate(() => document.getElementById('board').classList.contains('bidpop'))), 'ほかの人の入札では、自分の入札の演出は出ない');
-  await con.click('#b_close');
+  await con.click('#b_close'); await con.click('#dlgOk'); // 締めは確かめてから
   await b2.waitForFunction(() => !document.getElementById('winFx').hidden);
   check(true, '落札した本人には、落札の演出が出る');
   await b1.waitForFunction(() => document.getElementById('result').textContent === '2番 落札');
@@ -45,7 +45,7 @@ try {
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
   await b1.waitForFunction(() => document.getElementById('bid').textContent === '入札'); await b1.waitForTimeout(700);
   await b1.click('#bid'); await b1.waitForFunction(() => document.getElementById('right').classList.contains('on'));
-  await con.click('#b_close');
+  await con.click('#b_close'); await con.click('#dlgOk'); // 締めは確かめてから
   await b1.waitForFunction(() => !document.getElementById('winFx').hidden);
   await b1.waitForTimeout(650); await snap(b1, 'win-phone');
   // 会員を登録して、そのクッキーで開く
@@ -56,7 +56,7 @@ try {
     await call('/api/register/start', { phone });
     const sms = fs.readFileSync(`${sys.dir}/data/outbox/outbox.ndjson`, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((m) => m.to === phone).at(-1).body;
     await call('/api/register/verify', { phone, code: /(\d{6})/.exec(sms)[1] });
-    await call('/api/register/complete', { kind: 'b2c', name: `検証 ${n}郎`, email: `fx${n}@example.com`, address: `東京都千代田区${n}`, adult: true });
+    await call('/api/register/complete', { kind: 'b2c', name: `検証 ${n}郎`, email: `fx${n}@example.com`, address: `東京都千代田区${n}`, adult: true, agreed: true });
     const [name, value] = cookie.split('=');
     return [{ name, value, url: sys.base }];
   };

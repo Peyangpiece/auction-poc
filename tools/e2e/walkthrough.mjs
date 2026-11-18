@@ -98,6 +98,10 @@ try {
 
   console.log('締め');
   await con.click('#b_close');
+  await con.waitForSelector('#dlg[open]');
+  check((await con.textContent('#dlgBody')).includes('1番') && (await con.textContent('#dlgBody')).includes('落札'), '締めは、結果（だれが・いくらで落札か）を書いて確かめる');
+  check(await con.evaluate(() => document.activeElement?.id === 'dlgCancel'), '締めの確かめは、最初のフォーカスが「やめる」');
+  await con.click('#dlgOk');
   await b1.waitForFunction(() => document.getElementById('result').textContent.includes('あなたが落札'));
   await b2.waitForFunction(() => document.getElementById('result').textContent.includes('1番 落札'));
   check(true, '落札した本人には「あなたが落札しました」、ほかの人には番号が出る');

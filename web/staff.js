@@ -39,7 +39,35 @@ function askReason(title, label, required, run) {
   form.elements.reason.focus();
 }
 
-const alertLine = (text) => { const line = $('#line'); if (line) line.textContent = text; };
+// 知らせは、パネルを描き直したあとも残す（操作のあとに show() で描き直すため、先に出した文が消えていた。報告書 80 章）
+let pendingNotice = null;
+const alertLine = (text) => { pendingNotice = text || null; const line = $('#line'); if (line) line.textContent = text; };
+
+/** 取り消せない・取り消しにくい操作の確かめ。何が起きるかを書き、最初のフォーカスは「やめる」 */
+function confirmDo(title, body, okText, run, { danger = false, then = null } = {}) {
+  const msg = msgLine();
+  const cancel = closeBtn('やめる');
+  const ok = el('button', { class: `btn ${danger ? 'btn-danger' : 'btn-primary'}`, type: 'button', text: okText, onclick: async () => {
+    ok.disabled = true; ok.textContent = '処理中…';
+    const r = await run();
+    ok.disabled = false; ok.textContent = okText;
+    if (!r?.ok) { msg.textContent = r?.message ?? 'うまくいきませんでした。もう一度お試しください'; msg.focus(); return; }
+    dlg.close();
+    if (then) await then(r); else await show(current);
+  } });
+  openDialog(title, el('p', { text: body }), msg, el('div', { class: 'actions' }, cancel, ok));
+  cancel.focus();
+}
+
+// ログインが切れたら（12時間・パスワードの再発行・停止）、ログインの画面に戻す（報告書 80 章）
+{
+  const rawApi = api;
+  api = async (...args) => {
+    const r = await rawApi(...args);
+    if (r.status === 401 && me) { location.reload(); return new Promise(() => {}); }
+    return r;
+  };
+}
 
 // ------------------------------------------------------------ 開催
 async function eventsPanel() {
@@ -124,11 +152,14 @@ async function membersPanel() {
     act(
       !m.approved && !m.withdrawn && smallBtn('承認する', () => issue(`/api/members/${m.id}/approve`, `会員 ${m.id} を承認しました`), 'btn-primary'),
       !m.approved && !m.withdrawn && smallBtn('承認しない', () => askReason(`会員 ${m.id} の登録を承認しない`, '理由', true, (reason) => api('POST', `/api/members/${m.id}/reject`, { reason })), 'btn-danger'),
-      m.approved && !m.withdrawn && smallBtn(m.loginId ? 'パスワードを再発行' : 'ログイン情報を発行', () => issue(`/api/members/${m.id}/credentials`, `会員 ${m.id} のログイン情報を発行しました`)),
+      m.approved && !m.withdrawn && smallBtn(m.loginId ? 'パスワードを再発行' : 'ログイン情報を発行', () => (m.loginId
+        ? confirmDo(`会員 ${m.id} のパスワードを再発行しますか？`, 'いまのパスワードは使えなくなります。新しいパスワードを、本人へメールで送ります。', '再発行する',
+          () => api('POST', `/api/members/${m.id}/credentials`), { danger: true, then: async (r) => { await show('members'); issuedDialog(`会員 ${m.id} のログイン情報を発行しました`, r); } })
+        : issue(`/api/members/${m.id}/credentials`, `会員 ${m.id} のログイン情報を発行しました`))),
       !m.withdrawn && smallBtn('電話番号を変更', () => askForm(`会員 ${m.id} の電話番号を変更`, '',
         [field('新しい電話番号', 'phone', { type: 'tel', inputMode: 'tel', required: true }), field('本人を確かめた方法', 'reason', { required: true, placeholder: '会場で、運転免許証で確かめた' })], (d) => api('POST', `/api/members/${m.id}/phone`, d), '変更する')),
       m.suspendedBy === 'manual'
-      ? smallBtn('停止を解く', async () => { await api('POST', `/api/members/${m.id}/unsuspend`); show('members'); })
+      ? smallBtn('停止を解く', () => post(`/api/members/${m.id}/unsuspend`))
       : !m.withdrawn && m.suspendedBy !== 'unpaid' && smallBtn('停止', () => askReason(`会員 ${m.id} を停止`, '停止の理由', true, (reason) => api('POST', `/api/members/${m.id}/suspend`, { reason })), 'btn-danger'))));
   return [el('p', { class: 'msg', id: 'line', role: 'alert' }),
     waiting ? el('div', { class: 'banner', role: 'status' }, el('span', { text: `承認待ちの会員登録が ${waiting} 件あります。承認すると、ログイン ID とパスワードが、本人へメールで送られます。` })) : null,
@@ -343,8 +374,18 @@ async function staffPanel() {
   const rows = res.staff.map((s) => el('tr', {},
     el('td', { class: 'dyn', text: s.email ?? `${s.loginId}（ログイン ID）` }), el('td', { class: 'dyn', text: s.name }), el('td', { text: s.roleLabel }),
     el('td', { text: !s.active ? '停止' : s.ready ? '利用中' : 'パスワードの登録待ち' }),
-    act(s.active && smallBtn(s.email ? 'パスワードを決め直せるようにする' : '再発行', async () => { const r = await api('POST', `/api/staff/accounts/${s.id}/reset`); if (!r.ok) return alertLine(r.message); await show('staff'); if (r.email) inviteDialog('パスワードを消しました', r); else secretsDialog('パスワードと認証アプリを再発行しました', r); }),
-      s.active && s.loginId !== me.loginId && smallBtn('停止', async () => { const r = await api('POST', `/api/staff/accounts/${s.id}/stop`); if (!r.ok) alertLine(r.message); else show('staff'); }, 'btn-danger'))));
+    act(s.active && smallBtn(s.email ? 'パスワードを決め直せるようにする' : '再発行', () => confirmDo(
+        s.email ? `${s.name}さんのパスワードを消しますか？` : `${s.name}さんのパスワードと認証アプリを再発行しますか？`,
+        s.email ? `いまのパスワードは使えなくなり、ログイン中の画面もすべて切れます。${s.email} に、パスワードを決め直す案内を送ります。` : 'いまのパスワードと認証アプリは使えなくなり、ログイン中の画面もすべて切れます。',
+        s.email ? 'パスワードを消す' : '再発行する',
+        () => api('POST', `/api/staff/accounts/${s.id}/reset`),
+        { danger: true, then: async (r) => { await show('staff'); if (r.email) inviteDialog('パスワードを消しました', r); else secretsDialog('パスワードと認証アプリを再発行しました', r); } })),
+      s.active && s.loginId !== me.loginId && smallBtn('停止', () => confirmDo(`${s.name}さんを停止しますか？`,
+        'ログインできなくなり、ログイン中の画面もすべて切れます。あとから「停止を解く」で戻せます。', '停止する',
+        () => api('POST', `/api/staff/accounts/${s.id}/stop`), { danger: true }), 'btn-danger'),
+      !s.active && smallBtn('停止を解く', () => confirmDo(`${s.name}さんの停止を解きますか？`,
+        '停止の前と同じパスワードで、またログインできるようになります。', '停止を解く',
+        () => api('POST', `/api/staff/accounts/${s.id}/reactivate`)), 'btn-primary'))));
   return [
     el('div', { class: 'toolbar' }, smallBtn('パスワードを変える', passwordDialog), smallBtn('スタッフのメールアドレスを登録', staffDialog, 'btn-primary')),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
@@ -416,6 +457,7 @@ async function legalBox() {
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '規約類を保存する' })));
   onSubmit(form, async (data) => {
     const r = await api('POST', '/api/settings/legal', data);
+    if (r.ok) releaseWarning();
     if (r.ok) { const m = $('.msg', form); m.classList.add('ok'); m.textContent = '保存しました'; return null; }
     return r;
   });
@@ -451,6 +493,7 @@ async function settingsPanel() {
   for (const name of s.fixed ?? []) { const input = form.elements[name]; if (input) { input.readOnly = true; input.setAttribute('aria-readonly', 'true'); } }
   onSubmit(form, async (data) => {
     const res = await api('POST', '/api/settings', data);
+    if (res.ok) releaseWarning();
     if (res.ok) { const m = $('.msg', form); m.classList.add('ok'); m.textContent = '保存しました'; return null; }
     return res;
   });
@@ -460,7 +503,7 @@ async function settingsPanel() {
 // ------------------------------------------------------------ 記録（監査ログ・知らせ）
 // 記録の「操作」を、読める言葉にする（無いものは、そのまま出す）
 const AUDIT_TEXT = {
-  'staff.login': 'スタッフがログイン', 'staff.create': 'スタッフを登録', 'staff.reset': 'スタッフのパスワードを再発行', 'staff.stop': 'スタッフを停止', 'staff.password_change': 'スタッフがパスワードを変更',
+  'staff.login': 'スタッフがログイン', 'staff.create': 'スタッフを登録', 'staff.reset': 'スタッフのパスワードを再発行', 'staff.stop': 'スタッフを停止', 'staff.reactivate': 'スタッフの停止を解除', 'staff.password_change': 'スタッフがパスワードを変更',
   'member.register': '会員登録', 'member.approve': '会員登録を承認', 'member.reject': '会員登録を承認しない', 'member.credentials_issue': 'ログイン情報を発行', 'member.credentials': '会員がパスワードを変更', 'member.update': '会員が登録内容を変更', 'member.withdraw': '会員が退会', 'member.suspend': '会員を停止', 'member.unsuspend': '会員の停止を解除', 'member.phone_change': '会員の電話番号を変更',
   'event.create': '開催を登録', 'event.update': '開催を変更', 'event.publish': '開催を公開', 'event.join': '参加手続き', 'participation.change': '参加の内容を変更',
   'lot.create': '品を登録', 'proxy.bid': '代理で入札', 'proxy.cancel': '代理の入札を取り消し',
@@ -512,7 +555,9 @@ async function show(key) {
   if (location.hash.slice(1) !== key) history.replaceState(null, '', `#${key}`);
   for (const b of $('#tabs').children) b.setAttribute('aria-selected', String(b.dataset.key === key));
   const nodes = await PANELS[key][1]();
-  if (current === key) panel.replaceChildren(...nodes.filter(Boolean));
+  if (current !== key) return;
+  panel.replaceChildren(...nodes.filter(Boolean));
+  if (pendingNotice) { const line = $('#line'); if (line) line.textContent = pendingNotice; pendingNotice = null; }
 }
 
 // ログインのあとの行き先（進行コンソール・会場モニターから来た人は、そこへ戻す）
@@ -547,6 +592,22 @@ $('#backToLogin').addEventListener('click', () => { $('#setupForm').hidden = tru
   // SMS を使わない設定（本番）のときは、「SMS の制限」を出さない
   const terms = await api('GET', '/api/terms');
   const keys = Object.keys(PANELS).filter((k) => PANELS[k][2].includes(me.role) && !(k === 'sms' && terms.sms === false));
-  $('#tabs').replaceChildren(...keys.map((k) => el('button', { type: 'button', role: 'tab', 'data-key': k, text: PANELS[k][0], onclick: () => show(k) })));
+  $('#tabs').replaceChildren(...keys.map((k) => el('button', { type: 'button', role: 'tab', 'data-key': k, text: PANELS[k][0], onclick: () => { pendingNotice = null; show(k); } })));
   show(keys.includes(location.hash.slice(1)) ? location.hash.slice(1) : keys[0]);
+  if (me.role === 'admin') releaseWarning();
 })();
+
+// 正式に公開する前に、埋めておくべきもの（規約類・返品特約の仮の文言・振込先）。主催者管理者に、上に出し続ける（報告書 80 章）
+async function releaseWarning() {
+  const [legal, settings] = await Promise.all([api('GET', '/api/legal'), api('GET', '/api/settings')]);
+  if (!legal.ok || !settings.ok) return;
+  const missing = [
+    !legal.docs.terms.body && '利用規約', !legal.docs.privacy.body && 'プライバシーポリシー', !legal.docs.tokushoho.body && '特定商取引法に基づく表示',
+    /【仮/.test(settings.returnPolicy ?? '') && '返品特約（仮の文言のまま）', !settings.bankAccount && '振込先',
+  ].filter(Boolean);
+  $('#releaseWarn')?.remove();
+  if (!missing.length) return;
+  $('#tabs').before(el('div', { class: 'banner', id: 'releaseWarn', role: 'status' },
+    el('span', { class: 'warn', text: `まだ入っていません: ${missing.join('・')}。会員に見える画面と請求書に出るため、公開の前に入れてください。` }),
+    smallBtn('設定を開く', () => { pendingNotice = null; show('settings'); })));
+}

@@ -26,6 +26,9 @@ const REJECT = {
   NOT_CHECKED_IN: () => '受付で、来場の確認を受けてください',
 };
 function say(text, kind = '') { $('msg').textContent = text; $('msg').dataset.kind = kind; }
+// 入札ボタンの「押せない」は、aria-disabled で表す（disabled にすると、キーボードのフォーカスが外れて、続けて入札できない。報告書 80 章）
+const bidOff = (off) => $('bid').setAttribute('aria-disabled', String(!!off));
+const bidIsOff = () => $('bid').getAttribute('aria-disabled') === 'true';
 
 // ---- 音・振動・画面を消さない機能
 function beep() {
@@ -73,7 +76,7 @@ function render() {
     $('priceLabel').textContent = '現在価格'; $('price').textContent = ''; $('result').textContent = '';
     setLamp('urikiri', '', 'うりきり', ''); setLamp('right', '', '権利', '');
     $('priceTotal').textContent = ''; $('toPay').hidden = true; $('board').classList.remove('lead', 'won');
-    $('bid').disabled = true; $('bid').textContent = '入札は、品が出てから'; S.shownPrice = null; return;
+    bidOff(true); $('bid').textContent = '入札は、品が出てから'; S.shownPrice = null; return;
   }
   const st = lot.status;
   const mine = lot.highestPaddle !== null && lot.highestPaddle === S.paddle;
@@ -118,7 +121,7 @@ function render() {
   // 他の人の入札で金額が変わった直後は、短い間だけ押せなくする（古い金額のつもりで、新しい金額を押してしまうのを防ぐ）
   const locked = canBid && performance.now() < S.lockUntil;
   bid.dataset.action = canJoin ? 'join' : 'bid';
-  bid.disabled = !(canBid || canJoin) || locked;
+  bidOff(!(canBid || canJoin) || locked);
   bid.classList.toggle('locked', locked);
   bid.textContent = st !== 'open' ? (ended ? '次の品をお待ちください' : st === 'suspended' ? '中断しています' : '受付の開始をお待ちください')
     : staff ? 'スタッフは入札できません'
@@ -278,6 +281,7 @@ setInterval(() => {
 // ---- サーバーからのメッセージ
 // 休憩と開催終了の知らせ（FR-CON-003、FR-EVT-003）
 function renderEvent(event, ended = false) {
+  S.ended = ended;
   $('eventNote').textContent = ended ? '本日の競りは終了しました。ご参加ありがとうございました。'
     : event?.phase === 'break' ? `休憩中です。再開の予定は ${event.resumeAt} です。` : '';
 }
@@ -356,6 +360,7 @@ function onMessage(msg, at) {
       S.stream = msg.stream; renderStream();
       break;
     case 'error':
+      if (msg.code === 'NO_EVENT' && (S.ended || S.lots.size)) break; // 終了のあと: 画面の「本日の競りは終了しました」で伝える
       say(msg.message, 'ng');
       break;
   }
@@ -458,7 +463,7 @@ const confirmBid = (amount, lot) => new Promise((resolve) => {
 $('bidForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const lot = focusLot();
-  if (!lot || $('bid').disabled) return;
+  if (!lot || bidIsOff()) return;
   if ($('bid').dataset.action === 'join') { // 観戦中に押したら、まず応札に切り替えるだけ（この1回では入札しない）
     setMode('bid'); link.event('mode', { mode: 'bid', via: 'bid-button' });
     return;
@@ -468,7 +473,7 @@ $('bidForm').addEventListener('submit', async (ev) => {
   if (checked.error) { say(checked.error, 'ng'); $('bidAmount').focus(); return; }
   // 最低入札額より上で、いまの価格の2倍以上になる金額は、確かめてから送る
   if (amount > lot.minBid && amount >= (lot.currentPrice ?? lot.startPrice) * 2 && !(await confirmBid(amount, lot))) return;
-  $('bid').disabled = true;
+  bidOff(true);
   $('bid').textContent = '送信中…';
   const reqId = ++link.reqId, sent = localNow();
   const res = await link.request(reqId, { type: 'bid', reqId, lotId: lot.id, amount, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
@@ -479,10 +484,10 @@ $('bidForm').addEventListener('submit', async (ev) => {
   const shown = localNow();
   // 停止で断られたときは、理由（手動か、未払いか）を取り直してから伝える
   if (res.code === 'SUSPENDED' && !token) { const p = await getJson('/api/participation'); S.unpaid = p.suspendedBy === 'unpaid'; }
-  // 受理されたときは、ボタンが「あなたが最高入札者です」に変わるので、同じことを重ねて言わない（読み上げには伝える）
+  // 受理されたときは、ボタンが「あなたが最高入札者です」に変わるので、画面には重ねて出さない。読み上げには、下で伝える
   say(res.accepted ? '' : (REJECT[res.code]?.(res) ?? res.code), res.accepted ? 'ok' : 'ng');
   Object.assign(lot, { currentPrice: res.currentPrice, minBid: res.minBid, minAllowed: res.minAllowed });
-  if (res.accepted) { lot.highestPaddle = S.paddle; S.amountTouched = false; bidPop(); }
+  if (res.accepted) { lot.highestPaddle = S.paddle; S.amountTouched = false; bidPop(); document.body.classList.remove('outbid'); $('alert').textContent = ''; $('alert').textContent = `${yen(amount)} で入札しました。あなたが最高入札者です`; }
   if (typeof res.urikiri === 'boolean') lot.urikiri = res.urikiri;
   render();
   // ボタンを押してから、受理・拒否が画面に出るまで（P3-7）
@@ -678,9 +683,15 @@ $('enter').addEventListener('click', async () => {
   $('showVideo').checked = !venue; $('showVideo').disabled = venue;
   link = new Link({
     token, label: `bidder:${net}:${venue ? 'venue' : 'online'}`, onMessage,
-    onStatus: (up, why, reconnected) => {
-      $('overlay').style.display = up ? 'none' : 'flex';
-      $('overlayText').textContent = why ?? '再接続中…';
+    onStatus: (up, why, reconnected, code) => {
+      // 開催が終わったあとに切れたら、画面は覆わない（「本日の競りは終了しました」と落札の知らせを、見えるままにする。報告書 80 章）
+      if (!up && code === 'NO_EVENT' && (S.ended || S.lots.size)) {
+        showOverlay(true); say('');
+        renderEvent(null, true);
+        bidOff(true); $('bid').textContent = '本日の競りは終了しました';
+        return;
+      }
+      showOverlay(up, why, code, 'bidder');
       if (up && reconnected) say('つながり直しました');
     },
   });
