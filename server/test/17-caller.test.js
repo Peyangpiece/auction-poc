@@ -43,13 +43,18 @@ test('うりきり: 最低落札額をなくす。締めると、最低落札額
   await sleep(50);
   assert.equal(m[1].lots.get(lot.id).urikiri, true, '会員の画面の「うりきり」が点く');
   assert.equal((await A.cmd('urikiri', { lotId: lot.id })).message, 'すでに、うりきりです');
-  assert.match((await A.cmd('pass', { lotId: lot.id })).message, /うりきりで入札がある/, 'うりきりの入札がある品は、流札にできない');
+  assert.match((await A.cmd('pass', { lotId: lot.id })).message, /うりきりのため、流札にできません（締めると落札/, 'うりきりのランプが点いている品は、流札にできない');
   const r = await A.cmd('close', { lotId: lot.id });
   assert.deepEqual([r.status, r.amount], ['sold', 10000]);
 });
 
-test('流札: 入札がない品・最低落札額に届かない品を、売らずに終える', async () => {
-  const lot = await createLot(A, 10000, null, '掛け軸');
+test('流札: 最低落札額に届かない品を、売らずに終える。うりきりのランプが点いている品は流札にできず、締める', async () => {
+  const lot0 = await createLot(A, 10000, null, '屏風');
+  await A.cmd('start', { lotId: lot0.id });
+  assert.match((await A.cmd('pass', { lotId: lot0.id })).message, /うりきりのため、流札にできません（締めると流札/, '最低落札額がない品は、入札がなくてもランプが点いているので、流札にできない');
+  assert.equal((await A.cmd('close', { lotId: lot0.id })).status, 'unsold', '入札がなければ、締めると流札');
+
+  const lot = await createLot(A, 10000, null, '掛け軸', 20000);
   assert.match((await A.cmd('pass', { lotId: lot.id })).message, /流札にできません/, '始まる前は、流札にできない');
   await A.cmd('start', { lotId: lot.id });
   let r = await A.cmd('pass', { lotId: lot.id });

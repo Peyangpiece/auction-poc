@@ -254,9 +254,10 @@ export class Auction {
         break;
       }
       case 'pass': {
-        // 流札: 売らずに、この品を終える。うりきり（最低落札額に届いた）で入札がある品は、最高入札者に権利があるので、流札にできない（締めで落札にする）
+        // 流札: 売らずに、この品を終える。うりきりのランプが点いている品（最低落札額がない・届いた）は、流札にできない（発注者の指示。報告書 79 章）。
+        // 締めれば、入札があれば落札、なければ流札になる
         if (s !== 'open' && s !== 'suspended') return fail(`「${stateName}」の品は、流札にできません`);
-        if (lot.current_bid_seq && reserveMet(lot.reserve_price, lot.current_price)) return fail('うりきりで入札があるため、流札にできません（締めると落札になります）');
+        if (reserveMet(lot.reserve_price, lot.current_price)) return fail(`うりきりのため、流札にできません（締めると${lot.current_bid_seq ? '落札' : '流札'}になります）`);
         q.insertEvent.run(item.seq, lot.id, 'close', item.receivedAt, item.actor.name, JSON.stringify({ pass: true }));
         extra = this.#finalize(lot, item.seq, item.actor.name, { passed: true }, item);
         break;

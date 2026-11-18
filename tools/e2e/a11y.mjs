@@ -62,7 +62,7 @@ for (const scheme of ['light', 'dark']) {
   await p.click('#bid'); await p.waitForTimeout(600); await scan(p, 'bidder-leading', scheme);
   // オークショニアの画面（主催者管理者も開ける）。入札がある受付中の品で、確かめのダイアログも
   const cl = await sc.newPage(); await cl.goto(B + '/caller.html'); await cl.waitForTimeout(1000); await scan(cl, 'caller-open', scheme);
-  if (await cl.isEnabled('#pass')) { await cl.click('#pass'); await cl.waitForTimeout(300); await scan(cl, 'caller-dialog', scheme); await cl.click('#dlgCancel'); }
+  { const b = (await cl.isEnabled('#pass')) ? '#pass' : '#close'; if (await cl.isEnabled(b)) { await cl.click(b); await cl.waitForTimeout(300); await scan(cl, 'caller-dialog', scheme); await cl.click('#dlgCancel'); } }
   await cl.close();
   const mon = await sc.newPage(); await mon.goto(B + '/monitor.html'); await mon.waitForTimeout(1200); await scan(mon, 'monitor', scheme);
   await con.click('#b_close'); await con.waitForTimeout(800); if (await con.isVisible('dialog[open]')) { await scan(con, 'console-dialog', scheme); await con.click('#dlgOk'); } await con.waitForTimeout(800);
@@ -75,11 +75,11 @@ for (const scheme of ['light', 'dark']) {
   const cs = await sc.newPage(); await cs.goto(B + '/caller.html');
   if (await cs.waitForSelector('#startSheet[open]', { timeout: 5000 }).catch(() => null)) {
     await cs.waitForTimeout(400); await scan(cs, 'caller-start-sheet', scheme);
-    // 次の配色の回のために、この品を始めて流札にしておく（待機のまま残すと、次の回の品が始められない）
+    // 次の配色の回のために、この品を始めて締めておく（待機のまま残すと、次の回の品が始められない。入札がないので流札になる）
     await cs.fill('#sheetInput', '1000'); await cs.click('#sheetGo');
     await cs.waitForFunction(() => ['open', 'preparing', 'preparing_warn'].includes(document.getElementById('status').dataset.st), null, { timeout: 15000 }).catch(() => {});
     await cs.waitForFunction(() => document.getElementById('status').dataset.st === 'open', null, { timeout: 15000 }).catch(() => {});
-    if (await cs.isEnabled('#pass')) { await cs.click('#pass'); await cs.click('#dlgOk'); await cs.waitForTimeout(500); }
+    if (await cs.isEnabled('#close')) { await cs.click('#close'); await cs.click('#dlgOk'); await cs.waitForTimeout(500); }
   }
   else out.push({ id: 'caller-start-sheet-missing', impact: 'test', n: 1, ex: ['開始値のシートが出ませんでした'], page: 'caller', scheme });
   await cs.close();

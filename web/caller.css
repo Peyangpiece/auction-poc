@@ -44,6 +44,9 @@ body { overflow: hidden; background: var(--ground); }
 .amount .yen { font-size: 20px; font-weight: 600; color: var(--ink-2); }
 .amount input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; padding: 0; color: var(--ink); font: 600 24px/1 var(--font); font-variant-numeric: tabular-nums; }
 .start__row .btn { min-height: 52px; }
+/* 始まる前は「変更」を出さない（欄の金額で、そのまま開始する） */
+.start__row #setStart[hidden] { display: none; }
+.start__row:has(#setStart[hidden]) { grid-template-columns: auto minmax(0, 1fr) auto; }
 .start__row:has(:disabled) .amount { background: var(--ground-alt); border-color: var(--line); }
 
 /* 操作の3つのボタン: 締めをいちばん大きく（いちばん使う）、うりきりと流札は、その上に並べる */

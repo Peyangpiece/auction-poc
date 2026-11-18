@@ -340,7 +340,7 @@ test('オークショニア: 主催者管理者が登録し、次の品の開始
     assert.equal((await w1.bid(lot.id, 9000)).accepted, true);
     assert.equal((await c.cmd('urikiri', { lotId: lot.id })).ok, true);
     assert.equal((await c.cmd('close', { lotId: lot.id })).status, 'sold');
-    const lot2 = await createLot(con, 5000);
+    const lot2 = await createLot(con, 5000, null, 'テスト品', 8000); // うりきりのランプが点いていない品だけ、流札にできる
     await c.cmd('start', { lotId: lot2.id });
     assert.equal((await c.cmd('pass', { lotId: lot2.id })).status, 'unsold');
     c.close(); con.close();
