@@ -15,13 +15,13 @@
 <link rel="stylesheet" href="caller.css">
 </head>
 <body>
-<!-- オークショニアの画面（発注者の指示。報告書 73・74 章）: 次の品の開始と、競りの最中の開始値・うりきり・締め・流札を操作する。
+<!-- オークショニアの画面（発注者の指示。報告書 73・74 章）: 次の品の開始と、競りの最中の開始値・うりきり・締め・流札・中断・再開を操作する。
      すべてのボタンを、スクロールなしで1画面に収める（タブレットの縦・横、スマホ、パソコン） -->
 <div class="overlay" id="overlay" role="alert"><div><span id="overlayText">接続しています…</span></div></div>
 <div class="app">
   <header class="bar">
     <span class="bar__role">オークショニア</span>
-    <span class="bar__meta"><span id="presence">参加者 0人</span><span class="num" id="clock"></span></span>
+    <span class="bar__meta"><span id="presence">参加者 0人</span><span class="num" id="clock"></span><button class="btn barbtn" type="button" id="suspend" hidden>中断</button></span>
   </header>
 
   <main class="stage" id="main" tabindex="-1">

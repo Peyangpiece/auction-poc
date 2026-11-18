@@ -1,5 +1,5 @@
 // オークショニアの画面の動き（発注者の指示。報告書 73 章）。接続と時刻合わせは common.js
-// できること: 次の品の開始・開始値の設定（入札の前だけ）・うりきり・締め・流札。どのボタンも、押せないときは理由を、押したらどうなるかを、ボタンの中に書く
+// できること: 次の品の開始・開始値の設定（入札の前だけ）・うりきり・締め・流札・中断・再開。どのボタンも、押せないときは理由を、押したらどうなるかを、ボタンの中に書く
 'use strict';
 const $ = (id) => document.getElementById(id);
 const S = { lots: new Map(), focus: null, history: [], ladder: null, busy: false, editing: false };
@@ -56,9 +56,16 @@ function render() {
   // 締め: 受付中のとき。押したらどうなるかを書く
   const willSell = hasBid && urikiri;
   // いちばん下の大きなボタン: 進行中の品がなければ「次の品を開始」、受付中なら「締め」（同じ場所で、次にやることが1つだけ出る）
-  S.mode = st === 'waiting' ? 'start' : 'close';
+  // 中断（上の帯）: 受付中だけ。中断中は、いちばん下のボタンが「再開」になる
+  $('suspend').hidden = st !== 'open';
+  $('suspend').disabled = S.busy;
+  S.mode = st === 'waiting' ? 'start' : st === 'suspended' ? 'resume' : 'close';
   $('close').dataset.mode = S.mode;
-  if (S.mode === 'start') {
+  if (S.mode === 'resume') {
+    $('closeLabel').textContent = '再開';
+    $('closeSub').textContent = `中断しています。押すと、${yen(lot.currentPrice ?? lot.startPrice)} から入札の受付を再開します`;
+    $('close').disabled = S.busy;
+  } else if (S.mode === 'start') {
     $('closeLabel').textContent = `No.${lot.lotNo} を開始`;
     $('closeSub').textContent = `${yen(lot.startPrice)} から入札を受け付けます${lot.reservePrice === null ? '（うりきり）' : ''}`;
     $('close').disabled = S.busy;
@@ -137,6 +144,11 @@ $('close').addEventListener('click', async () => {
   const lot = current();
   if (!lot) return;
   // 次の品を開始: 確かめは出さない（すぐ始めたいことが多く、始めたあとも中断・取りやめができるため）
+  if (S.mode === 'resume') {
+    const res = await cmd('resume');
+    if (res?.ok) say(`No.${lot.lotNo} を再開しました`, 'ok');
+    return;
+  }
   if (S.mode === 'start') {
     const res = await cmd('start');
     if (res?.ok) say(`No.${lot.lotNo} を開始しました`, 'ok');
@@ -152,6 +164,14 @@ $('pass').addEventListener('click', async () => {
   if (!lot || !(await ask({ title: '流札にしますか？', body: `No.${lot.lotNo} を、売らずに終えます。取り消せません。`, okLabel: '流札にする', danger: true }))) return;
   const res = await cmd('pass');
   if (res?.ok) say('流札にしました', 'ok');
+});
+
+// 中断: 確かめは出さない（すぐ止めたいときに使い、いちばん下の「再開」ですぐ戻せるため）
+$('suspend').addEventListener('click', async () => {
+  const lot = current();
+  if (!lot) return;
+  const res = await cmd('suspend');
+  if (res?.ok) say(`No.${lot.lotNo} を中断しました。入札は受け付けません`, 'ok');
 });
 
 // ---- 接続

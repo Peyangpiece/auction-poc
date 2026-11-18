@@ -5,7 +5,10 @@ body { overflow: hidden; background: var(--ground); }
 .app { height: 100dvh; display: grid; grid-template-rows: auto 1fr; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--line); }
 .bar__role { font-size: 15px; font-weight: 600; color: var(--ink-2); }
-.bar__meta { display: flex; gap: 16px; font-size: 15px; color: var(--ink-2); }
+.bar__meta { display: flex; align-items: center; gap: 16px; font-size: 15px; color: var(--ink-2); }
+/* 中断は、上の帯に小さく置く（親指から遠い所。締め・開始と押しまちがえないように）。中断中は、いちばん下の大きなボタンが「再開」になる */
+.barbtn { min-height: 40px; padding: 4px 16px; font-size: 15px; }
+.barbtn[hidden] { display: none; }
 
 .stage { min-height: 0; display: grid; gap: clamp(10px, 2dvh, 20px); padding: clamp(12px, 2.4dvh, 24px) 20px; grid-template-rows: minmax(0, 1fr) auto; max-width: 1100px; width: 100%; margin: 0 auto; }
 .controls { display: grid; gap: clamp(8px, 1.6dvh, 16px); min-width: 0; }
@@ -94,6 +97,7 @@ dialog p { white-space: pre-line; }
 }
 /* 幅の狭いスマホ（320〜360px）: 開始値の欄に、6桁の金額が収まるように詰める */
 @media (max-width: 360px) {
+  #clock { display: none; }
   .step { min-width: 44px; font-size: 22px; }
   .amount { padding: 0 10px; gap: 4px; }
   .amount .yen { font-size: 17px; }

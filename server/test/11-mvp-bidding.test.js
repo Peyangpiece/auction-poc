@@ -311,7 +311,7 @@ test('進行コンソールは、スタッフのログインでつなぐ。受�
   } finally { await t.end(); }
 });
 
-test('オークショニア: 主催者管理者が登録し、次の品の開始と、競りの最中の4つの操作（開始値・うりきり・締め・流札）だけができる', async () => {
+test('オークショニア: 主催者管理者が登録し、次の品の開始・中断・再開と、競りの最中の4つの操作（開始値・うりきり・締め・流札）だけができる', async () => {
   const t = await setup();
   try {
     const { online, con } = await venueSetup(t);
@@ -327,9 +327,15 @@ test('オークショニア: 主催者管理者が登録し、次の品の開始
     const lot = await createLot(con, 10000, null, '時計', 20000);
     assert.match((await c.cmd('create_lot', { title: 'x', startPrice: 1000 })).message, /オークショニアにはできません/, '品の追加は、進行役が行う');
     assert.match((await c.cmd('exclude', { lotId: lot.id, reason: 'x' })).message, /オークショニアにはできません/);
+    assert.match((await c.cmd('cancel', { lotId: lot.id, reason: 'x' })).message, /オークショニアにはできません/, '取りやめ（入札を無効にする）は、進行役が行う');
     assert.equal((await c.cmd('set_start', { lotId: lot.id, amount: 9000 })).ok, true);
     assert.equal((await c.cmd('start', { lotId: lot.id })).ok, true, '次の品の開始は、オークショニアもできる');
     const w1 = await t.ws(online);
+    await until(() => w1.lots.get(lot.id)?.status === 'open');
+    assert.equal((await c.cmd('suspend', { lotId: lot.id })).ok, true, '中断できる');
+    await until(() => w1.lots.get(lot.id)?.status === 'suspended');
+    assert.equal((await w1.bid(lot.id, 9000)).code, 'LOT_NOT_OPEN', '中断中は、入札を受け付けない');
+    assert.equal((await c.cmd('resume', { lotId: lot.id })).ok, true, '再開できる');
     await until(() => w1.lots.get(lot.id)?.status === 'open');
     assert.equal((await w1.bid(lot.id, 9000)).accepted, true);
     assert.equal((await c.cmd('urikiri', { lotId: lot.id })).ok, true);
