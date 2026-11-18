@@ -96,12 +96,13 @@ jobs:
           fi
       - name: コンテナを組み立てて、配る
         # BUILD（この版の印）が変わると、入口の Worker が、動いているコンテナを新しい版に入れ替える
+        # 印には、実行の番号も入れる（同じ版を配り直したときも入れ替える。秘密の値を足したあと、起動のときに読み直させるため）
         run: |
           if [ "$PRODUCTION" = "1" ]; then
             if [ -z "$RESEND_API_KEY" ] || [ -z "$MAIL_FROM" ]; then echo "本番の設定（PRODUCTION=1）には、RESEND_API_KEY と MAIL_FROM が要ります"; exit 1; fi
-            $WRANGLER deploy --var BUILD:${{ github.sha }} --var DEMO:0
+            $WRANGLER deploy --var BUILD:${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }} --var DEMO:0
           else
-            $WRANGLER deploy --var BUILD:${{ github.sha }}
+            $WRANGLER deploy --var BUILD:${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           fi
       - name: 管理者の最初のパスワードを入れる
         run: printf '%s' "$ADMIN_PASSWORD" | $WRANGLER secret put ADMIN_PASSWORD
