@@ -22,8 +22,7 @@ function drawUpcoming() {
   if (!list.length) {
     $('#nextList').replaceChildren(el('li', { class: 'nextlist__empty' },
       el('span', { class: 'nextlist__icon', 'aria-hidden': 'true' }),
-      el('b', { text: '次の開催は、まだ決まっていません' }),
-      el('span', { text: '決まりしだい、ここに出します。前日には、メールでもお知らせします。' })));
+      el('b', { text: '次の開催は、まだ決まっていません' })));
     return;
   }
   $('#nextList').replaceChildren(...list.map((e) => {

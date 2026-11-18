@@ -81,7 +81,6 @@
     <section aria-labelledby="proxyTitle" id="proxySection">
       <details id="proxyBox">
         <summary><h2 id="proxyTitle">緊急用の代理入札</h2></summary>
-        <p class="note">会場参加で来場確認が済んでいる人に限ります。電池切れ・端末の故障のときに、本人に代わって入札します。</p>
         <form class="proxy" id="proxyForm">
           <label class="field">参加番号<input class="input num" id="pxPaddle" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" required></label>
           <label class="field">入札額（税込）<input class="input num" id="pxAmount" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" required></label>
@@ -107,7 +106,6 @@
     <section aria-labelledby="lotsTitle">
       <div class="sechead"><h2 id="lotsTitle">出品一覧</h2><span class="count num" id="lotsCount"></span></div>
       <ul class="lotlist" id="lots"></ul>
-      <p class="note" id="lotsHint" hidden>進行中の品を締めると、次の品を開始できます。</p>
       <form class="addlot" id="addLot">
         <h3 class="addlot__title">品を追加</h3>
         <label class="field">品名<input class="input" id="newTitle" name="title" autocomplete="off" maxlength="60" placeholder="例: 未使用品／ブーツ 10.5R 1足" required></label>

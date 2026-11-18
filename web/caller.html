@@ -46,7 +46,7 @@
     <section class="start" id="startBox" aria-labelledby="startTitle">
       <div class="start__head">
         <h2 id="startTitle">開始値</h2>
-        <p class="start__note" id="startNote"></p>
+        
       </div>
       <form class="start__row" id="startForm" novalidate>
         <button class="btn step" type="button" id="stepDown" aria-label="1段下げる">−</button>
@@ -74,7 +74,7 @@
     <h2 id="sheetTitle">開始値を入力</h2>
     <label class="amount amount--lg"><span class="yen" aria-hidden="true">¥</span><input id="sheetInput" inputmode="numeric" autocomplete="off" aria-label="開始値（円）" placeholder="0"></label>
     <p class="sheet__err" id="sheetMsg" role="alert"></p>
-    <button class="act act--close sheet__go" type="submit" id="sheetGo"><b>競りを開始</b><span id="sheetSub">この金額から、入札を受け付けます</span></button>
+    <button class="act act--close sheet__go" type="submit" id="sheetGo"><b>競りを開始</b><span id="sheetSub"></span></button>
     <button class="textbtn" type="button" id="sheetLater">あとで</button>
   </form>
 </dialog>

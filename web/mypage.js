@@ -108,7 +108,6 @@ $('#editBtn').addEventListener('click', () => {
     field('メールアドレス', 'email', { value: m.email, type: 'email', required: true, autocomplete: 'email' }, '変えると、新しいアドレスに確認のメールを送ります'),
     ...personFields(m),
     field('配送先', 'shipTo', { value: m.shipTo ?? '', rows: 2, autocomplete: 'off' }, '住所と違う場合だけ'),
-    el('p', { class: 'note', text: '電話番号の変更は、本人の確認が要るため、会場の受付にお申し出ください。' }),
     el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '保存する' }), el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() })));
   onSubmit(form, async (data) => { const res = await api('POST', '/api/my/profile', data); if (res.ok) location.reload(); return res; });

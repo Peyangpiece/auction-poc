@@ -434,12 +434,6 @@ const setAmount = (n) => { $('bidAmount').value = n === null ? '' : n.toLocaleSt
 $('bidAmount').addEventListener('input', () => { S.amountTouched = true; setAmount(parseAmount($('bidAmount').value)); if ($('msg').dataset.kind === 'ng') say(''); });
 $('bidAmount').addEventListener('focus', () => {
   $('bidAmount').select();
-  // 金額を書きかえようとしたときに、いくらから・どの単位で入れられるかを出す（1円単位で入札できることに気づけるように）
-  const lot = focusLot();
-  if (lot && !$('msg').textContent) {
-    const min = lot.minAllowed ?? (lot.currentPrice === null ? lot.startPrice : lot.currentPrice + 1);
-    say(`${yen(min)} 以上、1円単位で入力できます`, 'hint');
-  }
 });
 // 欄から離れても、案内は消さない（消すと板の高さが変わり、押そうとした「入札」ボタンがずれて、押しそこなう）。次の入札・価格の更新で入れ替わる
 // 入札できる金額: 開始価格以上なら、1円単位（発注者の決定）。入札があれば、現在価格より高い額。
@@ -548,7 +542,7 @@ const showPaddle = (title, p) => {
   $('join').hidden = true;
   // 会場参加は、受付係の来場確認が済むまで入れない（FR-MODE-002）。確認されたら、自動で進めるようになる
   if (!p.checkedIn) {
-    $('gateWait').textContent = `受付で、参加番号 ${p.paddle} の札を受け取ってください。来場の確認が済むと、ここから入れます。`;
+    $('gateWait').textContent = `受付で、参加番号 ${p.paddle} の札を受け取ってください`;
     $('enter').hidden = true;
     const timer = setInterval(async () => {
       const now = await getJson('/api/participation');
@@ -582,7 +576,7 @@ if (!token) (async () => {
     // 会場参加で、来場の確認を待っている人は、選び直しの画面ではなく、待つ画面を出す（そこから、オンラインに切り替えられる）
     if (p.mode === 'venue' && !p.checkedIn) return showPaddle(p.event.title, p);
     $('gateEvent').textContent = p.event.title;
-    $('pickNow').textContent = `いまは、${p.mode === 'venue' ? '会場参加' : 'オンライン参加'}（参加番号 ${p.paddle}）です。`;
+    $('pickNow').textContent = `${p.mode === 'venue' ? '会場参加' : 'オンライン参加'}・${p.paddle}番`;
     $('modePick').hidden = false;
     for (const b of document.querySelectorAll('[data-pick]')) b.addEventListener('click', async () => {
       const want = b.dataset.pick;

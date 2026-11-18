@@ -45,13 +45,12 @@ function render() {
   const canStart = !!lot && ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(st) && !hasBid && !S.busy;
   for (const id of ['stepDown', 'stepUp', 'setStart', 'startInput']) $(id).disabled = !canStart;
   $('startBox').classList.toggle('locked', !canStart && !S.busy);
-  $('startNote').textContent = !lot ? '' : ended ? '終わった品です' : hasBid ? '入札があるので、変えられません' : lot.startPending ? '開始値は、まだ決まっていません' : `いまの開始値 ${yen(lot.startPrice)}`;
   if (!S.editing) setInput(canStart ? lot.startPrice : null);
 
   // うりきり: 最低落札額があり、まだ届いていないとき
   const canUrikiri = !!lot && !ended && ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(st) && !urikiri && !S.busy;
   $('urikiri').disabled = !canUrikiri;
-  $('urikiriSub').textContent = !lot || ended ? '' : urikiri ? 'うりきり済み' : `最低落札額 ${yen(lot.reservePrice)} をなくす`;
+  $('urikiriSub').textContent = '';
 
   // 締め: 受付中のとき。押したらどうなるかを書く
   const willSell = hasBid && urikiri;
@@ -63,29 +62,28 @@ function render() {
   $('close').dataset.mode = S.mode;
   if (S.mode === 'resume') {
     $('closeLabel').textContent = '再開';
-    $('closeSub').textContent = `中断しています。押すと、${yen(lot.currentPrice ?? lot.startPrice)} から入札の受付を再開します`;
+    $('closeSub').textContent = '';
     $('close').disabled = S.busy;
   } else if (S.mode === 'start' && lot.startPending) {
     // 品名だけの品: 押すと、開始値の入力のシートを開く
     $('closeLabel').textContent = '開始値を入れて始める';
-    $('closeSub').textContent = `No.${lot.lotNo} の開始値は、まだ決まっていません`;
+    $('closeSub').textContent = '';
     $('close').disabled = S.busy;
   } else if (S.mode === 'start') {
     $('closeLabel').textContent = `No.${lot.lotNo} を開始`;
-    $('closeSub').textContent = `${yen(lot.startPrice)} から入札を受け付けます${lot.reservePrice === null ? '（うりきり）' : ''}`;
+    $('closeSub').textContent = yen(lot.startPrice);
     $('close').disabled = S.busy;
   } else {
     $('closeLabel').textContent = '締め';
     $('close').disabled = !(st === 'open') || S.busy;
-    $('closeSub').textContent = st === 'open' ? (willSell ? `${lot.highestPaddle}番が ${yen(lot.currentPrice)} で落札` : `${hasBid ? '最低落札額に届かないので' : '入札がないので'}、流札になります`)
-      : st === 'preparing' || st === 'preparing_warn' ? '映像の準備ができると、受付が始まります'
-      : st === 'suspended' ? '中断中は締められません' : ended ? (st === 'sold' ? `${lot.highestPaddle}番 落札 済み` : '流札 済み') : '次の品がありません';
+    // 締めは取り消せないので、押したときの結果だけを短く出す（説明の文は出さない）
+    $('closeSub').textContent = st === 'open' ? (willSell ? `→ ${lot.highestPaddle}番 ${yen(lot.currentPrice)} 落札` : '→ 流札') : '';
   }
 
   // 流札: 受付中・中断中で、うりきりの入札がないとき
   const canPass = live && !willSell && !S.busy;
   $('pass').disabled = !canPass;
-  $('passSub').textContent = !live ? '' : willSell ? 'うりきりの入札があるので不可' : '売らずに、この品を終える';
+  $('passSub').textContent = '';
   syncSheet();
 }
 
@@ -98,7 +96,7 @@ async function cmd(action, extra = {}) {
   S.busy = false;
   // 手ごたえ: 通ったら短く1回、通らなかったら2回ふるわせる（画面を見ていなくても分かる）
   if ('vibrate' in navigator) navigator.vibrate(res?.ok ? 20 : [30, 60, 30]);
-  if (!res) say('応答がありません。通信を確かめて、もう一度押してください');
+  if (!res) say('応答がありません');
   else if (!res.ok) say(res.message);
   render();
   return res;
@@ -136,15 +134,15 @@ $('startForm').addEventListener('submit', async (ev) => {
   const amount = parseAmount($('startInput').value);
   if (!amount) return say('開始値を入れてください');
   const res = await cmd('set_start', { amount });
-  if (res?.ok) { S.editing = false; say(`No.${lot.lotNo} の開始値を ${yen(amount)} にしました`, 'ok'); render(); }
+  if (res?.ok) { S.editing = false; say(''); render(); }
 });
 
 // ---- うりきり・締め・流札
 $('urikiri').addEventListener('click', async () => {
   const lot = current();
-  if (!lot || !(await ask({ title: 'うりきりにしますか？', body: `No.${lot.lotNo} の最低落札額 ${yen(lot.reservePrice)} をなくします。\nこれからの最高入札者に、必ず売ることになります。取り消せません。`, okLabel: 'うりきりにする' }))) return;
+  if (!lot || !(await ask({ title: 'うりきりにしますか？', body: `No.${lot.lotNo}　最低落札額 ${yen(lot.reservePrice)} → なし`, okLabel: 'うりきりにする' }))) return;
   const res = await cmd('urikiri');
-  if (res?.ok) say(`No.${lot.lotNo} をうりきりにしました`, 'ok');
+  if (res?.ok) say('');
 });
 $('close').addEventListener('click', async () => {
   const lot = current();
@@ -152,25 +150,25 @@ $('close').addEventListener('click', async () => {
   // 次の品を開始: 確かめは出さない（すぐ始めたいことが多く、始めたあとも中断・取りやめができるため）
   if (S.mode === 'resume') {
     const res = await cmd('resume');
-    if (res?.ok) say(`No.${lot.lotNo} を再開しました`, 'ok');
+    if (res?.ok) say('');
     return;
   }
   if (S.mode === 'start' && lot.startPending) { openSheet(lot, true); return; }
   if (S.mode === 'start') {
     const res = await cmd('start');
-    if (res?.ok) say(`No.${lot.lotNo} を開始しました`, 'ok');
+    if (res?.ok) say('');
     return;
   }
   const willSell = lot.currentPrice !== null && (lot.reservePrice === null || lot.urikiri);
-  if (!(await ask({ title: '締めますか？', body: willSell ? `No.${lot.lotNo} を、${lot.highestPaddle}番が ${yen(lot.currentPrice)} で落札します。` : `No.${lot.lotNo} は、${lot.currentPrice === null ? '入札がないので' : '最低落札額に届かないので'}、流札になります。`, okLabel: '締める' }))) return;
+  if (!(await ask({ title: '締めますか？', body: willSell ? `No.${lot.lotNo}　${lot.highestPaddle}番 ${yen(lot.currentPrice)} 落札` : `No.${lot.lotNo}　流札`, okLabel: '締める' }))) return;
   const res = await cmd('close');
-  if (res?.ok) say(res.status === 'sold' ? `${res.paddle ?? lot.highestPaddle}番が落札しました` : '流札になりました', 'ok');
+  if (res?.ok) say('');
 });
 $('pass').addEventListener('click', async () => {
   const lot = current();
-  if (!lot || !(await ask({ title: '流札にしますか？', body: `No.${lot.lotNo} を、売らずに終えます。取り消せません。`, okLabel: '流札にする', danger: true }))) return;
+  if (!lot || !(await ask({ title: '流札にしますか？', body: `No.${lot.lotNo}`, okLabel: '流札にする', danger: true }))) return;
   const res = await cmd('pass');
-  if (res?.ok) say('流札にしました', 'ok');
+  if (res?.ok) say('');
 });
 
 // 中断: 確かめは出さない（すぐ止めたいときに使い、いちばん下の「再開」ですぐ戻せるため）
@@ -178,7 +176,7 @@ $('suspend').addEventListener('click', async () => {
   const lot = current();
   if (!lot) return;
   const res = await cmd('suspend');
-  if (res?.ok) say(`No.${lot.lotNo} を中断しました。入札は受け付けません`, 'ok');
+  if (res?.ok) say('');
 });
 
 // ---- 開始値の入力のシート: 品名だけの品が次の品になったら、自動で開く（1つの品につき1回。「あとで」で閉じたら、下のボタンから開き直す）
@@ -211,7 +209,7 @@ $('sheetForm').addEventListener('submit', async (ev) => {
   $('sheetGo').disabled = true;
   const res = await cmd('start', { amount });
   $('sheetGo').disabled = false;
-  if (res?.ok) { $('startSheet').close(); say(`No.${lot.lotNo} を ${yen(amount)} から開始しました`, 'ok'); }
+  if (res?.ok) { $('startSheet').close(); say(''); }
   else $('sheetMsg').textContent = res?.message ?? '応答がありません。もう一度押してください';
 });
 

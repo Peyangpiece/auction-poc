@@ -53,7 +53,7 @@ async function eventsPanel() {
     act(smallBtn('編集', () => eventDialog(e)),
       e.status !== 'published' && smallBtn('公開する', async () => { const r = await api('POST', `/api/events/${e.id}/publish`); if (!r.ok) alertLine(r.message); else show('events'); }, 'btn-primary'))));
   return [
-    el('div', { class: 'toolbar' }, el('p', { class: 'note', text: '公開した開催が、トップページのカレンダーに出ます。届出済みの印がない開催は、公開できません。' }), smallBtn('開催を作る', () => eventDialog(null), 'btn-primary')),
+    el('div', { class: 'toolbar' }, smallBtn('開催を作る', () => eventDialog(null), 'btn-primary')),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['名前', '日時', '会場', '届出', '状態', ''], rows, '開催はまだありません。'),
   ];
@@ -123,9 +123,9 @@ async function membersPanel() {
       : m.suspendedBy === 'unpaid' ? el('span', { class: 'warn', text: '未払いによる停止（消し込むと、自動で解ける）' }) : '利用中'),
     act(
       !m.approved && !m.withdrawn && smallBtn('承認する', () => issue(`/api/members/${m.id}/approve`, `会員 ${m.id} を承認しました`), 'btn-primary'),
-      !m.approved && !m.withdrawn && smallBtn('承認しない', () => askReason(`会員 ${m.id} の登録を承認しない`, '理由（記録に残ります。本人には送りません）', true, (reason) => api('POST', `/api/members/${m.id}/reject`, { reason })), 'btn-danger'),
+      !m.approved && !m.withdrawn && smallBtn('承認しない', () => askReason(`会員 ${m.id} の登録を承認しない`, '理由', true, (reason) => api('POST', `/api/members/${m.id}/reject`, { reason })), 'btn-danger'),
       m.approved && !m.withdrawn && smallBtn(m.loginId ? 'パスワードを再発行' : 'ログイン情報を発行', () => issue(`/api/members/${m.id}/credentials`, `会員 ${m.id} のログイン情報を発行しました`)),
-      !m.withdrawn && smallBtn('電話番号を変更', () => askForm(`会員 ${m.id} の電話番号を変更`, '本人を確かめたうえで、変更してください。変更すると、古い番号でのログインは切れます。',
+      !m.withdrawn && smallBtn('電話番号を変更', () => askForm(`会員 ${m.id} の電話番号を変更`, '',
         [field('新しい電話番号', 'phone', { type: 'tel', inputMode: 'tel', required: true }), field('本人を確かめた方法', 'reason', { required: true, placeholder: '会場で、運転免許証で確かめた' })], (d) => api('POST', `/api/members/${m.id}/phone`, d), '変更する')),
       m.suspendedBy === 'manual'
       ? smallBtn('停止を解く', async () => { await api('POST', `/api/members/${m.id}/unsuspend`); show('members'); })
@@ -156,13 +156,12 @@ async function receptionPanel() {
     el('div', { class: 'toolbar' },
       el('p', { class: 'dyn', text: `${res.event.title}　確認待ち ${waiting} 人` }),
       el('div', {}, smallBtn('更新', () => show('reception')), ' ',
-        smallBtn('参加手続きを代わりに行う', () => askForm('参加手続きを、代わりに行う', '会員登録は済んでいるが、端末で手続きできない人に使います。受け取り方法と支払方法を、本人に聞いて選んでください。会場参加・来場確認済みになります。',
+        smallBtn('参加手続きを代わりに行う', () => askForm('参加手続きを、代わりに行う', '',
           [field('会員の電話番号', 'phone', { type: 'tel', inputMode: 'tel', required: true }),
             field('受け取り方法', 'receive', { options: [['', '選んでください'], ['pickup', '現地受け取り'], ['ship', '配送']] }),
             field('支払方法', 'payment', { options: [['', '選んでください'], ['cash', '当日現金'], ['transfer', '銀行振込']] })],
           async (d) => { const r = await api('POST', '/api/reception/join', d); if (r.ok) alertLine(`参加番号 ${r.paddle} を振りました。この番号の札を渡してください。`); return r; }, '参加番号を振る')), ' ',
         smallBtn('会場の QR コード', () => qrDialog(res.event), 'btn-primary'))),
-    el('p', { class: 'note', text: '本人と参加番号を確かめてから「来場を確認」を押し、その番号の札を渡してください。' }),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['参加番号', '名前', '参加', '受け取り・支払', '来場', ''], rows, '参加手続きを済ませた人は、まだいません。'),
   ];
@@ -186,7 +185,6 @@ function qrDialog(event) {
   openDialog('会場の QR コード',
     el('p', { class: 'dyn', text: `${event.title}　会場参加の方は、このコードを読み取ってください。` }),
     el('img', { class: 'qr', src: '/api/reception/qr.svg', alt: '会場参加の QR コード', width: 320, height: 320 }),
-    el('p', { class: 'note', text: 'このコードは、開催ごとに変わります。会場の中にだけ掲示してください。' }),
     el('div', { class: 'actions' }, smallBtn('印刷', () => window.print()), closeBtn()));
 }
 
@@ -209,7 +207,7 @@ const secretsDialog = (title, res) => openDialog(title,
     el('dt', { text: '仮のパスワード' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.initialPassword }))),
     el('dt', { text: '認証アプリの鍵' }), el('dd', {}, noTranslate(el('div', { class: 'secret', text: res.totpSecret })))),
   qrImg(res.qrSvg),
-  el('p', { class: 'note', text: '認証アプリ（Google Authenticator など）で、QR コードを読み取ります。読み取れないときは「セットアップキーを入力」で鍵を入れます（種類は「時間ベース」）。' }),
+  el('p', { class: 'note', text: '認証アプリで読み取ってください' }),
   el('div', { class: 'actions' }, closeBtn('渡したので閉じる')));
 const post = async (url, body) => { const r = await api('POST', url, body); if (!r.ok) alertLine(r.message); show(current); return r; };
 /** 入力を1つ（または2つ）聞いてから実行する */
@@ -252,7 +250,7 @@ async function billingPanel() {
           [field('入金の金額（円）', 'amount', { inputMode: 'numeric', required: true }), field('メモ', 'memo', {}, '任意')], (d) => api('POST', `/api/billing/lines/${l.id}/clear`, { amount: Number(d.amount), memo: d.memo }), '消し込む'), 'btn-primary'),
         a && l.state === 'unpaid' && smallBtn('督促', () => askForm('督促の記録', l.dunning.map((d) => `${dateFmt.format(d.at)} ${d.method}: ${d.body}`).join('\n'),
           [field('方法', 'method', { required: true, placeholder: '電話・メールなど' }), field('内容', 'body', { rows: 3, required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/dun`, d), '記録する')),
-        a && l.state === 'unpaid' && smallBtn('解除…', () => askReason('落札を解除', '解除の理由（取り消せません。本人にメールで知らせます）', true, (reason) => api('POST', `/api/billing/lines/${l.id}/cancel`, { reason })), 'btn-danger'),
+        a && l.state === 'unpaid' && smallBtn('解除…', () => askReason('落札を解除', '解除の理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/cancel`, { reason })), 'btn-danger'),
         l.state === 'cleared' && l.kind !== 'penalty' && l.kind !== 'late' && smallBtn('引き渡し', () => post(`/api/billing/lines/${l.id}/deliver`), 'btn-primary'),
         a && l.state === 'cleared' && smallBtn('消し込みを取り消す', () => askReason('消し込みを取り消す', '取り消しの理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/unclear`, { reason }))),
         a && l.state === 'delivered' && smallBtn('引き渡しを取り消す', () => askReason('引き渡しの記録を取り消す', '取り消しの理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/undeliver`, { reason }))),
@@ -269,8 +267,7 @@ async function billingPanel() {
             field('方法', 'method', { options: [['transfer', '振込'], ['cash', '現金']] }), field('理由', 'reason', { rows: 2, required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/refund`, { ...d, amount: Number(d.amount) }), '記録する'))));
   });
   const nodes = [
-    el('div', { class: 'toolbar' }, el('p', { class: 'note', text: '当日現金は、明細を選んで「精算」。振込は、入金を確かめて「消し込み」。引き渡しは、消し込みのあとにだけ記録できます。' }),
-      el('div', { class: 'exports' }, settleBtn, isAdmin() && el('span', { class: 'exports__label', text: '書き出す:' }),
+    el('div', { class: 'toolbar' }, el('div', { class: 'exports' }, settleBtn, isAdmin() && el('span', { class: 'exports__label', text: '書き出す:' }),
         isAdmin() && el('a', { class: 'btn btn-quiet', href: '/api/billing/shipping.csv', text: '配送の一覧（CSV）' }),
         isAdmin() && el('a', { class: 'btn btn-quiet', href: `/api/billing/ledger.csv?month=${res.today.slice(0, 7)}`, text: '帳簿用の記録（CSV）' }),
         isAdmin() && el('a', { class: 'btn btn-quiet', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（Excel）' }))),
@@ -280,7 +277,6 @@ async function billingPanel() {
   if (isAdmin()) {
     const inv = await api('GET', '/api/billing/invoices');
     nodes.push(el('h2', { class: 'subhead', text: '請求書' }),
-      el('p', { class: 'note', text: '支払期限は、発行日の5日後です（違約金などは7日後）。メールの下書きを送ったら「送付済みにする」を押してください。' }),
       table(['請求番号', '宛先', '種類', '金額', '発行日', '送付・期限', ''], inv.invoices.map((i) => el('tr', {},
         el('td', { class: 'n', text: i.number }), el('td', { class: 'dyn', text: i.name }), el('td', { text: INV_KIND[i.kind] }), el('td', { class: 'n', text: yen(i.total) }), el('td', { class: 'n', text: jpDay(i.issuedOn) }),
         el('td', {}, i.kind === 'cash' ? 'その場で渡した' : el('span', { class: !i.sentOn && i.stale ? 'warn' : '', text: `${i.sentOn ? `送付 ${jpDay(i.sentOn)}` : i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付'}　期限 ${jpDay(i.dueDate)}` })),
@@ -292,8 +288,7 @@ async function billingPanel() {
 }
 async function pickupPanel() {
   const res = await api('GET', '/api/billing/pickup');
-  return [el('p', { class: 'note', text: '現地受け取りで、支払いは済んでいるのに、まだ受け取っていない品です。期限は、消し込みの日の翌日から7日目まで。' }),
-    table(['落札者', '品', '消し込み', '受け取り期限'], res.lines.map((l) => el('tr', {},
+  return [table(['落札者', '品', '消し込み', '受け取り期限'], res.lines.map((l) => el('tr', {},
       el('td', { class: 'dyn', text: l.name }), el('td', { class: 'dyn', text: l.label }), el('td', { class: 'n', text: l.clearedOn }),
       el('td', {}, el('span', { class: l.pickupLate ? 'warn' : 'n', text: `${jpDay(l.pickupBy)}${l.pickupLate ? '（期限を過ぎています）' : ''}` })))), '未引き取りの品はありません。')];
 }
@@ -341,7 +336,6 @@ function smsPanel() {
 function inviteDialog(title, res) {
   openDialog(title,
     el('p', { class: 'dyn', text: `${res.email} を登録しました。本人に、スタッフのログインの画面の「はじめての方」から、このメールアドレスを入れて、パスワードを決めるよう、お伝えください。` }),
-    el('p', { class: 'note', text: 'パスワードを決められるのは、7日以内です。メールアドレスを知っている人なら、だれでも決められるので、早めに決めてもらってください。' }),
     el('div', { class: 'actions' }, closeBtn('閉じる')));
 }
 async function staffPanel() {
@@ -415,7 +409,6 @@ function sealBox(fixed = false) {
 async function legalBox() {
   const res = await api('GET', '/api/legal');
   const form = el('form', { class: 'form', novalidate: true },
-    el('p', { class: 'note' }, '文面を入れると、', el('a', { href: '/legal.html', text: '規約のページ' }), 'に出ます。利用規約を入れると、会員登録のときに同意が必須になります。'),
     field('利用規約', 'terms', { value: res.docs.terms.body, rows: 8 }),
     field('特定商取引法に基づく表示', 'tokushoho', { value: res.docs.tokushoho.body, rows: 8 }),
     field('プライバシーポリシー', 'privacy', { value: res.docs.privacy.body, rows: 8 }),
@@ -435,7 +428,6 @@ async function settingsPanel() {
     field('返品特約の表示', 'returnPolicy', { value: s.returnPolicy, rows: 4, required: true }, 'トップページに表示します。弁護士の確認が済むまでは仮の文言です'),
     field('送料の表示', 'shippingNotice', { value: s.shippingNotice, rows: 3, required: true }, 'トップページに表示します'),
     el('h2', { class: 'subhead', text: '請求書に載せる内容' }),
-    s.fixed?.length ? el('p', { class: 'note', text: '原本の請求書と同じ値で固定しています（配るときの設定で変えます）。ここでは変えられません。' }) : null,
     field('住所', 'orgAddress', { value: s.orgAddress, rows: 2 }, '郵便番号から。改行できます'),
     el('div', { class: 'grid2' }, field('電話番号', 'orgTel', { value: s.orgTel }), field('メールアドレス', 'orgEmail', { value: s.orgEmail })),
     field('適格請求書発行事業者の登録番号', 'invoiceRegNo', { value: s.invoiceRegNo }, 'T から始まる番号'),
@@ -450,7 +442,6 @@ async function settingsPanel() {
       field('解除の違約金（個人。落札額の %）', 'penaltyRateB2c', { value: s.penaltyRateB2c, inputMode: 'decimal' }),
       field('遅延損害金（法人。年率 %）', 'lateRateB2b', { value: s.lateRateB2b, inputMode: 'decimal' }),
       field('遅延損害金（個人。年率 %）', 'lateRateB2c', { value: s.lateRateB2c, inputMode: 'decimal' })),
-    el('p', { class: 'note', text: '率を入れると、違約金・遅延損害金を請求するときに、金額の案が出ます（確定は、金額を確かめてから）。空なら、金額を手で入れます。' }),
     el('h2', { class: 'subhead', text: '手数料の集計' }),
     el('div', { class: 'grid2' },
       field('消費税の扱い', 'feeTaxMode', { options: [['exclusive', '外税（手数料に消費税を足す）'], ['inclusive', '内税（手数料に含む）']], value: s.feeTaxMode || 'exclusive' }),

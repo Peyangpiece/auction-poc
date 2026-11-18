@@ -21,7 +21,6 @@ api('GET', '/api/terms').then((t) => {
   input.closest('label').firstChild.textContent = 'メールアドレス';
   input.type = 'email'; input.placeholder = 'taro@example.com'; input.autocomplete = 'email';
   const note = forms.phone.querySelector('.note');
-  if (note) note.textContent = '登録したメールアドレスに、認証番号をお送りします。ログインのあと、マイページで、新しいパスワードを決めてください。';
 });
 
 onSubmit(forms.phone, async (data) => {

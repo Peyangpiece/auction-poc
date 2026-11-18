@@ -83,7 +83,9 @@ function field(label, name, props = {}, hint = '') {
   const { options, ...rest } = props;
   const input = el(tag, { class: 'input', name, ...rest }, (options ?? []).map(([value, text]) => el('option', { value, text })));
   if (props.value !== undefined && props.value !== null) input.value = props.value;
-  return el('label', { class: 'field' }, label, hint && el('small', { text: hint }), input, el('span', { class: 'err', role: 'alert' }));
+  // 説明の小さな文字は出さない（発注者の指示。報告書 78 章）。短い書き方の見本だけ、入力欄の中の薄い文字にする
+  if (hint && !input.placeholder && !input.value && hint.length <= 24 && !/[。、]/.test(hint)) input.placeholder = hint;
+  return el('label', { class: 'field' }, label, input, el('span', { class: 'err', role: 'alert' }));
 }
 
 const PREFECTURES = '北海道 青森県 岩手県 宮城県 秋田県 山形県 福島県 茨城県 栃木県 群馬県 埼玉県 千葉県 東京都 神奈川県 新潟県 富山県 石川県 福井県 山梨県 長野県 岐阜県 静岡県 愛知県 三重県 滋賀県 京都府 大阪府 兵庫県 奈良県 和歌山県 鳥取県 島根県 岡山県 広島県 山口県 徳島県 香川県 愛媛県 高知県 福岡県 佐賀県 長崎県 熊本県 大分県 宮崎県 鹿児島県 沖縄県'.split(' ');
@@ -92,7 +94,8 @@ const PREFECTURES = '北海道 青森県 岩手県 宮城県 秋田県 山形県
 const mark = (required) => el('span', { class: required ? 'req' : 'opt', text: required ? '必須' : '任意' });
 /** ラベル・印・補足・入力欄・エラーをまとめた1欄 */
 function labeled(label, required, input, hint = '') {
-  return el('label', { class: 'field' }, el('span', { class: 'field__label' }, label, mark(required)), hint && el('small', { text: hint }), input, el('span', { class: 'err', role: 'alert' }));
+  if (hint && !input.placeholder && !input.value && hint.length <= 24 && !/[。、]/.test(hint)) input.placeholder = hint;
+  return el('label', { class: 'field' }, el('span', { class: 'field__label' }, label, mark(required)), input, el('span', { class: 'err', role: 'alert' }));
 }
 
 /**
@@ -291,7 +294,6 @@ function showInstall() {
     el('img', { class: 'install__icon', src: 'icon-192.png', width: 56, height: 56, alt: '' }),
     el('div', { class: 'install__body' },
       el('h2', { id: 'installTitle', text: 'ホーム画面に追加' }),
-      el('p', { text: 'アプリのように、ホーム画面からすぐに開けます。' }),
       steps.length ? el('ol', { class: 'install__steps' }, steps.map((text) => el('li', { text }))) : null,
       how === 'prompt' ? el('div', { class: 'actions' },
         el('button', { class: 'btn btn-primary', type: 'button', text: '追加する', onclick: async () => {

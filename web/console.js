@@ -111,7 +111,6 @@ function render() {
     }
     return li;
   }) : [Object.assign(document.createElement('li'), { className: 'lotlist__empty', textContent: '品はまだありません。下の欄から追加してください。' })]));
-  $('lotsHint').hidden = !(busy && items.some((l) => l.status === 'waiting'));
 }
 function renderStream() {
   const s = S.stream; if (!s) return;

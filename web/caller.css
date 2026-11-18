@@ -70,7 +70,7 @@ dialog .actions .btn { flex: 1; min-height: 52px; }
 dialog p { white-space: pre-line; }
 
 /* 入札があって開始値を変えられないときは、欄をたたんで、価格の面を広くする */
-.start.locked .start__row { display: none; }
+.start.locked { display: none; } /* 入札があって変えられないときは、開始値の欄ごと隠す（見出しだけが残らないように） */
 
 /* 横長の画面（タブレットの横・パソコン・スマホの横）: 左に品と価格、右に開始値と操作 */
 @media (min-width: 640px) and (min-aspect-ratio: 5/4) {
