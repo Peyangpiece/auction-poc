@@ -65,14 +65,16 @@ $('#resendEmail').addEventListener('click', async (ev) => {
 // ---- 落札した品とお支払い（請求書、支払期限、受け取り期限、繰り上げのご案内）
 const STATE_TEXT = { unsettled: 'お支払い前', billed: 'ご請求済み', unpaid: 'お支払いの期限を過ぎています', cleared: 'お支払い済み', delivered: 'お渡し済み', cancelled: '解除されました' };
 const RECEIVE_TEXT = { pickup: '現地受け取り', ship: '配送' };
+// 2026-11-23 → 11月23日（月）
+const jpDay = (d) => { if (!d) return ''; const [y, m, dd] = d.split('-').map(Number); return `${m}月${dd}日（${'日月火水木金土'[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()]}）`; };
 const INVOICE_STATE = { paid: 'お支払い済み', overdue: 'お支払いの期限を過ぎています', billed: 'お支払い前' };
 // 請求書の一覧: 請求番号・発行日・金額・お支払期限・状態と、PDF を開くボタン
 function showInvoices(list) {
   if (!list.length) return;
   $('#invoices').replaceChildren(el('ul', { class: 'rows invlist' }, list.map((i) => el('li', {},
     el('div', { class: 'invlist__main' },
-      el('b', { class: 'digits', text: i.number }),
-      el('span', { class: 'note', text: [`発行日 ${i.issuedOn}`, i.dueDate && i.state !== 'paid' ? `お支払期限 ${i.dueDate}` : ''].filter(Boolean).join('　') })),
+      el('b', { text: `${jpDay(i.issuedOn)}の請求書` }),
+      el('span', { class: 'note', text: [`No.${i.number}`, i.dueDate && i.state !== 'paid' ? `お支払期限 ${jpDay(i.dueDate)}` : ''].filter(Boolean).join('　') })),
     el('span', { class: 'digits invlist__total', text: yen(i.total) }),
     el('span', { class: i.state === 'overdue' ? 'warn' : 'invlist__state', text: INVOICE_STATE[i.state] }),
     el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: '請求書を開く（PDF）' })))));
@@ -89,12 +91,12 @@ async function loadBilling() {
       el('button', { class: 'btn', type: 'button', text: '辞退する', onclick: async () => { await api('POST', `/api/my/offers/${o.id}`, { answer: 'decline' }); loadBilling(); } })))));
   $('#myLines').replaceChildren(...res.lines.map((l) => el('li', {},
     el('b', { text: l.label }), el('span', { class: 'digits', text: yen(l.payable) }),
-    el('span', { class: l.state === 'unpaid' ? 'warn' : '', text: STATE_TEXT[l.state] }),
+    el('span', { class: 'tag', 'data-state': l.state, text: STATE_TEXT[l.state] }),
     el('span', { class: 'note', text: [
       l.premium ? `落札額 ${yen(l.amount)}＋買歩銭 ${yen(l.premium)}` : '',
       l.receive && l.kind !== 'penalty' && l.kind !== 'late' ? `受け取り: ${RECEIVE_TEXT[l.receive]}` : '',
-      l.invoice?.dueDate && l.state !== 'cleared' && l.state !== 'delivered' ? `お支払期限 ${l.invoice.dueDate}` : '',
-      l.pickupBy && l.state === 'cleared' ? `受け取り期限 ${l.pickupBy}` : '',
+      l.invoice?.dueDate && l.state !== 'cleared' && l.state !== 'delivered' ? `お支払期限 ${jpDay(l.invoice.dueDate)}` : '',
+      l.pickupBy && l.state === 'cleared' ? `受け取り期限 ${jpDay(l.pickupBy)}` : '',
     ].filter(Boolean).join('　') }))));
 }
 

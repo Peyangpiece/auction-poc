@@ -65,11 +65,13 @@ function showWins(res) {
   if (!res.ok || !res.event || !res.lines.length) return;
   const [, mo, d] = res.event.date.split('-').map(Number);
   $('#winsTitle').textContent = `${mo}月${d}日の落札結果`;
-  $('#winsRows').replaceChildren(...res.lines.map((l) => el('tr', {},
-    el('td', { text: l.label }), el('td', { class: 'n digits', text: yen(l.amount) }), el('td', { class: 'n digits', text: yen(l.premium) }), el('td', { class: 'n digits', text: yen(l.payable) }))));
+  // 行の一覧: 1行目に品名、2行目に内訳（落札額＋買歩銭）、右にお支払い額（表にすると、スマホで品名が細く折り返す）
+  $('#winsRows').replaceChildren(...res.lines.map((l) => el('li', {},
+    el('span', { class: 'winlist__main' }, el('b', { text: l.label }), el('span', { class: 'num', text: `落札額 ${yen(l.amount)}＋買歩銭 ${yen(l.premium)}` })),
+    el('b', { class: 'digits winlist__amt', text: yen(l.payable) }))));
   $('#winsCount').textContent = `合計（${res.lines.length}点）`;
-  $('#winsAmount').textContent = yen(res.total.amount);
-  $('#winsPremium').textContent = yen(res.total.premium);
+  $('#winsAmount').textContent = `落札額 ${yen(res.total.amount)}`;
+  $('#winsPremium').textContent = `＋買歩銭 ${yen(res.total.premium)}`;
   $('#winsPayable').textContent = yen(res.total.payable);
   $('#wins').hidden = false;
 }
