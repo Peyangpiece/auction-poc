@@ -3,10 +3,23 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const S = { lots: new Map(), focus: null, history: [] };
+const S = { lots: new Map(), focus: null, history: [], event: null, ended: false };
 
 function render() {
   const lot = S.lots.get(S.focus);
+  // 待機（品がない）・休憩・終了は、中央の大きな知らせにする。次の品が決まっていれば、予告する
+  const next = [...S.lots.values()].find((l) => l.status === 'waiting');
+  const idle = S.ended ? ['本日の競りは終了しました', 'ご参加ありがとうございました']
+    : S.event?.phase === 'break' ? ['休憩中', `再開の予定 ${S.event.resumeAt}${next ? `　次は No.${next.lotNo} ${next.title}` : ''}`]
+    : !lot ? ['次の品をお待ちください', next ? `次は No.${next.lotNo} ${next.title}` : '']
+    : null;
+  $('idle').hidden = !idle;
+  $('now').hidden = !!idle;
+  document.querySelector('.hist').hidden = !!idle || S.history.length === 0;
+  if (idle) { $('idleTitle').textContent = idle[0]; $('idleSub').textContent = idle[1]; }
+  // いま入札できるか（受付中・中断など）を、色の付いた札で出す
+  $('state').textContent = lot ? STATE_LABEL[lot.status] ?? '' : '';
+  $('state').dataset.st = lot?.status ?? '';
   $('lotNo').textContent = lot ? `No.${lot.lotNo}` : '';
   $('title').textContent = lot ? lot.title : '次の品をお待ちください';
   const closed = lot && (lot.status === 'sold' || lot.status === 'unsold');
@@ -26,7 +39,9 @@ function render() {
   }));
 }
 function showEvent(event, ended = false) {
-  $('event').textContent = ended ? '本日の競りは終了しました' : !event ? '' : event.phase === 'break' ? `休憩中　再開の予定 ${event.resumeAt}` : event.title;
+  S.event = event; S.ended = ended;
+  // 休憩・終了の知らせは、画面の中央に大きく出すので、右上は開催の名前だけ
+  $('event').textContent = !event ? '' : event.title;
 }
 function onMessage(msg) {
   switch (msg.type) {

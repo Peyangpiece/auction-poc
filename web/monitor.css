@@ -3,7 +3,7 @@ body { background: var(--navy-dk); color: #fff; min-height: 100dvh; display: gri
 header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 2vh 3vw; border-bottom: 3px solid var(--gold); }
 header img { height: clamp(48px, 9vh, 96px); width: auto; }
 #event { font-size: clamp(16px, 2.4vh, 28px); font-weight: 700; color: var(--board-ink-2); text-align: right; }
-main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 3vw; padding: 3vh 3vw; align-items: start; }
+main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 3vw; padding: 3vh 3vw; align-items: center; align-content: center; } /* 大画面の上下の中央に置く */
 .lot { font-size: clamp(22px, 5vh, 56px); font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
 .lot .digits { color: var(--gold); margin-right: .4em; }
 .label { margin-top: 3vh; font-size: clamp(16px, 3vh, 32px); color: var(--board-ink-2); font-weight: 700; letter-spacing: 0; }
@@ -16,3 +16,20 @@ main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap:
 .hist li.void { text-decoration: line-through; color: var(--board-ink-2); }
 .hist li:first-child { color: var(--gold); border-top: 0; }
 @media (max-width: 720px) { main { grid-template-columns: minmax(0, 1fr); } }
+
+/* いま入札できるか: 色の付いた丸と言葉の札（受付中は緑、中断は橙、配信準備中は黄、終わった品は灰） */
+.state { display: inline-flex; align-items: center; gap: .5em; margin-bottom: 2vh; padding: .35em .9em .35em .7em; border-radius: 999px; background: rgba(255, 255, 255, .12); font-size: clamp(16px, 3vh, 34px); font-weight: 700; }
+.state:empty { display: none; }
+.state::before { content: ''; width: .6em; height: .6em; border-radius: 50%; background: #8e8e93; }
+.state[data-st="open"]::before { background: #30d158; }
+.state[data-st="suspended"]::before { background: #ff9f0a; }
+.state[data-st="preparing"]::before, .state[data-st="preparing_warn"]::before { background: #ffd60a; }
+/* 落札: 金の札にして、遠くからでも結果と分かるように */
+.who.sold { display: inline-block; padding: .2em .6em; border-radius: 16px; background: var(--gold); color: var(--navy-dk); }
+/* 待機・休憩・終了の知らせ（画面の中央） */
+.idle { grid-column: 1 / -1; display: grid; justify-items: center; text-align: center; gap: 2.5vh; }
+.idle[hidden], .now[hidden], .hist[hidden] { display: none; }
+.idle img { width: clamp(96px, 16vh, 200px); height: auto; }
+.idle__title { font-size: clamp(36px, 9vh, 120px); font-weight: 700; line-height: 1.2; }
+.idle__sub { font-size: clamp(20px, 4.5vh, 56px); color: var(--board-ink-2); font-weight: 600; }
+.idle__sub:empty { display: none; }

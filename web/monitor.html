@@ -22,7 +22,14 @@
 </header>
 <main>
   <h1 class="sr-only">会場モニター</h1>
-  <section class="now" aria-live="polite">
+  <!-- 待機・休憩・終了のあいだは、画面の中央に大きく出す（前の品の結果や、空の履歴を残さない） -->
+  <section class="idle" id="idle" hidden aria-live="polite">
+    <img src="emblem-400.webp" width="160" height="160" alt="">
+    <p class="idle__title" id="idleTitle"></p>
+    <p class="idle__sub dyn" id="idleSub"></p>
+  </section>
+  <section class="now" id="now" aria-live="polite">
+    <p class="state" id="state"></p>
     <p class="lot"><span class="digits" id="lotNo"></span><span class="dyn" id="title">次の品をお待ちください</span></p>
     <p class="label" id="priceLabel">現在価格</p>
     <p class="price digits" id="price"></p>
