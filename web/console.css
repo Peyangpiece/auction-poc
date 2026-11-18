@@ -9,6 +9,7 @@
 main { display: grid; gap: 40px; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; padding-top: 24px; padding-bottom: 48px; }
 .col { display: grid; gap: 32px; min-width: 0; align-content: start; }
 @media (max-width: 900px) { .brandbar > div, main { padding-left: 16px; padding-right: 16px; } main { grid-template-columns: minmax(0, 1fr); gap: 32px; } }
+section > h2, .sechead h2 { font-size: 22px; } /* 見出しの段の差を 1.25 倍以上に（Apple の Title 2 の大きさ） */
 section > h2 { margin-bottom: 8px; }
 .sechead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .sechead h2 { margin: 0; }
