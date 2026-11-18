@@ -63,7 +63,8 @@ for (const scheme of ['light', 'dark']) {
   const mon = await sc.newPage(); await mon.goto(B + '/monitor.html'); await mon.waitForTimeout(1200); await scan(mon, 'monitor', scheme);
   await con.click('#b_close'); await con.waitForTimeout(800); if (await con.isVisible('dialog[open]')) { await scan(con, 'console-dialog', scheme); await con.click('#dlgOk'); } await con.waitForTimeout(800);
   if (await con.isVisible('#b_close') && await con.isEnabled('#b_close')) { await con.click('#b_close'); await con.waitForTimeout(600); if (await con.isVisible('dialog[open]')) await con.click('#dlgOk'); }
-  await p.waitForTimeout(700); await scan(p, 'bidder-won', scheme);
+  // 落札の知らせの札は、出入りの途中（半透明）だと、文字の色の検査が正しく測れない。札が消えてから、板を検査する
+  await p.waitForTimeout(700); await p.waitForFunction(() => document.getElementById('winFx').hidden, null, { timeout: 5000 }).catch(() => {}); await scan(p, 'bidder-won', scheme);
   await c.close(); await sc.close();
 }
 const by = {};

@@ -1,13 +1,13 @@
 /*
  * 株式会社レイワ「令和の競り」 画面の共通スタイル。
- * 配色は、会社のシンボル（金の輪・紺の地球・赤い REIWA）から取る:
- *   紺 #000156 … 要所（ボタン・表示板・見出し）
- *   金 #d4aa00 … 細い線と、表示板の上のしるし
- *   赤 #ff0000 … 警告と、選んでいる場所の輪郭だけ。地は白
+ * 配色（発注者の指示で、装飾を外して整えた。報告書 71 章）:
+ *   ブランドの色は、ロゴと「紺」1色だけで伝える。紺は、押せるもの（主のボタン・リンク・選んでいるタブ）にだけ使う。
+ *   面は、白と Apple の灰色（#F2F2F7）。影・金の線・光の演出は使わない。
+ *   色で意味を伝えるのは、受付中・成功（緑）と、警告・誤り（赤）だけ
  *   書体 … 端末の書体（iPhone・Mac はヒラギノ角ゴシックと San Francisco、Android は Noto Sans CJK、Windows は 游ゴシック）。
  *          書体を読み込まないので、表示の途中で文字が切り替わらない（Apple の純正アプリと同じ考え方）。数字は等幅にそろえる
  *   角丸 … 6px、ボタンは高さ 48px・太字
- * この画面だけのしるしは1つ: 競り場の「表示板」（紺の板・金の細線・大きな数字・2つのランプ）。それ以外は静かにする。
+ * 表示板（価格の板）も、灰色の面に大きな数字。色の面で目立たせず、数字の大きさで目立たせる。
  */
 
 :root {
@@ -15,17 +15,16 @@
   --navy: #000156;         /* シンボルの紺。白地で 19.5:1 */
   --navy-dk: #00013a;
   --red: #ff0000;          /* シンボルの赤。輪郭にだけ使う（白地で 4.0:1） */
-  --gold: #d4aa00;         /* シンボルの金。細い線にだけ使う（文字には使わない。紺の上では 8.5:1） */
   --red-text: #c40000;     /* 文字に使う赤。白地で 6.3:1 */
 
   --ground: #ffffff;
-  --ground-alt: #f3f4f7;
-  --ground-3: #e9ebf0;
+  --ground-alt: #f2f2f7;   /* Apple の灰色の地 */
+  --ground-3: #e5e5ea;
   --placeholder: #767676;  /* 入力欄の見本の文字。白地で 4.5:1（入れた文字 #15181e とは、はっきり違う） */
   --ink: #15181e;
   --ink-2: #596170;        /* 補助の文字。白地で 6.0:1 */
   --ink-3: #596170;
-  --line: #e6e8ee;
+  --line: #e5e5ea;
   --edge: #868e9b;         /* 入力欄の縁。白地で 3.3:1 */
   --field: #ffffff;
   --action: var(--navy);
@@ -36,25 +35,23 @@
   --alarm: var(--red-text); /* 上回られたときの知らせの帯の色 */
   --ok: #1f6b3a;
 
-  /* 表示板。エンブレムと同じ、紺の地に赤い線 */
-  --board: var(--navy-dk);
-  --board-ink: #ffffff;
-  --board-ink-2: #c9cbe0;  /* 板の上で 10.2:1 */
-  --board-line: rgba(255, 255, 255, .18);
-  --board-ng: #f08a8a;     /* 板の上の赤。5.5:1 */
-  --lamp-off: #5a6096;
-  --lamp-green: #ffffff;
-  --lamp-amber: #ffffff;
+  /* 表示板: 灰色の面に、ふつうの文字の色 */
+  --board: var(--ground-alt);
+  --board-ink: var(--ink);
+  --board-ink-2: #5c616b;  /* #F2F2F7 の上で 5.6:1 */
+  --board-line: var(--ground-3);
+  --board-ng: var(--red-text);
+  --lamp-off: var(--edge);
 
   /* 角の丸み（Apple のデザインにそろえる）: 小さな印は 6px、ボタン・入力欄は 12px、面（表示板・映像の枠・ダイアログ・カード）は 20px。
      入れ子の角は、外側の丸み ＝ 内側の丸み ＋ 余白 を目安にする */
   --r-sm: 6px;
   --r: 12px;
   --r-lg: 20px;
-  /* 影: 細い縁どり＋近い影＋遠い影を重ねる（線で囲む代わりに、面を少し浮かせる） */
-  --shadow-1: 0 0 0 1px rgba(0, 0, 0, .04), 0 1px 2px rgba(0, 0, 0, .04), 0 6px 16px -6px rgba(0, 0, 0, .08);
-  --shadow-2: 0 0 0 1px rgba(0, 0, 0, .05), 0 4px 12px rgba(0, 0, 0, .08), 0 24px 48px -12px rgba(0, 0, 0, .25);
-  --shadow-btn: inset 0 1px 0 rgba(255, 255, 255, .14), 0 1px 2px rgba(0, 0, 0, .2), 0 4px 10px -4px rgba(0, 0, 0, .3); /* 影は、色を付けない（黒のうすい影） */
+  /* 影: 面には付けない（灰色の地の上の白い面で分ける）。浮いて出るもの（ダイアログ・知らせの帯）にだけ、うすい影 */
+  --shadow-1: none;
+  --shadow-2: 0 12px 40px rgba(0, 0, 0, .16);
+  --shadow-btn: none;
   --tint: color-mix(in srgb, var(--action) 6%, var(--ground));       /* 押せるものの、うすい塗り */
   --tint-2: color-mix(in srgb, var(--action) 11%, var(--ground));
   --ring: color-mix(in srgb, var(--action) 18%, transparent);        /* 入力中の欄のまわりの、うすい輪 */
@@ -68,6 +65,10 @@
     --ground: #000000;
     --ground-alt: #1c1c1e;
     --ground-3: #2c2c2e;
+    --board: #1c1c1e;
+    --board-ink-2: #a1a1a8;
+    --board-line: #38383a;
+    --board-ng: #ff6961;
     --placeholder: #98989d;  /* #1C1C1E の上で 5.6:1、#2C2C2E の上で 4.7:1 */
     --ink: #ffffff;
     --ink-2: #a1a1a8;        /* #1C1C1E の上で 6.6:1 */
@@ -82,10 +83,7 @@
     --danger-ink: #00013a;   /* 明るい赤の上の文字。6.6:1 */
     --alarm: #9c0000;
     --ok: #30d158;           /* Apple の暗い配色の緑（スイッチのオン） */
-    --board: #0a0c6e;
-    --shadow-btn: none;
-    --shadow-1: 0 0 0 1px rgba(255, 255, 255, .08);
-    --shadow-2: 0 0 0 1px rgba(255, 255, 255, .12), 0 24px 48px -12px rgba(0, 0, 0, .6);
+    --shadow-2: 0 0 0 1px rgba(255, 255, 255, .1), 0 12px 40px rgba(0, 0, 0, .5);
   }
 }
 
@@ -123,8 +121,8 @@ main:focus { outline: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .note { font-size: 13px; line-height: 1.7; color: var(--ink-3); }
 :focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
-/* 紺の面の上では、白い輪にする */
-.board :focus-visible, .today :focus-visible, #videoBox :focus-visible, .overlay :focus-visible { outline-color: #fff; }
+/* 暗い面（映像・再接続中）の上では、白い輪にする */
+#videoBox :focus-visible, .overlay :focus-visible { outline-color: #fff; }
 
 /* ---- ボタン: 形は1種類。主・従・取り消せない操作は、塗りと色だけで分ける */
 .btn {
@@ -137,12 +135,12 @@ main:focus { outline: none; }
 .btn:hover:not(:disabled) { background: var(--tint-2); }
 .btn:active:not(:disabled) { transform: scale(.97); }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
-/* 主のボタン: 紺の塗り。上の縁に細い光、下に短い影（押せる面に見せる） */
-.btn-primary { background: var(--action); color: var(--action-ink); font-weight: 700; box-shadow: var(--shadow-btn); }
+/* 主のボタン: 紺の塗りだけ（影・光は付けない） */
+.btn-primary { background: var(--action); color: var(--action-ink); font-weight: 600; }
 .btn-primary:hover:not(:disabled) { background: var(--action-hover); }
 .btn-danger { color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, var(--ground)); }
 .btn-danger:hover:not(:disabled) { background: var(--danger); color: var(--danger-ink); }
-.btn-lg { min-height: 56px; font-size: 17px; font-weight: 700; border-radius: 14px; }
+.btn-lg { min-height: 52px; font-size: 17px; font-weight: 600; border-radius: 14px; }
 
 /* ---- 入力 */
 .field { display: grid; gap: 6px; font-size: 15px; font-weight: 600; color: var(--ink); min-width: 0; } /* 欄の名前は、ふつうの文字の色で読めるように */
@@ -154,7 +152,7 @@ main:focus { outline: none; }
 .input::placeholder { color: var(--placeholder); opacity: 1; } /* 入れた文字（濃い色）とはっきり分かる薄さ。それでも 4.5:1 以上 */
 .input:hover { border-color: var(--ink-2); }
 /* 入力中の欄: 紺の縁と、まわりのうすい輪 */
-.input:focus-visible, .input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 4px var(--ring); }
+.input:focus-visible, .input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 3px var(--ring); }
 
 /* ---- 表示板（この画面のしるし） */
 /* 角を丸めた面には、太い上線を付けない（線が、角の曲がりとぶつかる） */
@@ -173,10 +171,13 @@ main:focus { outline: none; }
 .lamp + .lamp { border-left: 1px solid var(--board-line); padding-left: 12px; }
 /* ランプは、点灯＝塗りつぶし、消灯＝輪郭。色に頼らず形でも分かる */
 /* ランプは、押せる丸（選択ボタン）に見えないよう、縦長の灯りの形にする */
-/* ランプ: 消えているときは細い輪、点いたら金の丸にチェック（形だけでなく、印と、横の言葉でも伝える） */
+/* ランプ: 消えているときは細い輪、点いたら塗った丸にチェック（形だけでなく、印と、横の言葉でも伝える） */
 .bulb { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--lamp-off); grid-row: span 2; background: transparent center / 22px no-repeat; transition: background-color .2s var(--ease), border-color .2s var(--ease); }
-.lamp.on .bulb, .lamp.won .bulb { background-color: var(--gold); border-color: var(--gold);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Cpath d='M6 11.5l3.2 3.2L16 7.8' fill='none' stroke='%2300013a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+.lamp.on .bulb, .lamp.won .bulb { background-color: var(--action); border-color: var(--action);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Cpath d='M6 11.5l3.2 3.2L16 7.8' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+@media (prefers-color-scheme: dark) {
+  .lamp.on .bulb, .lamp.won .bulb { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Cpath d='M6 11.5l3.2 3.2L16 7.8' fill='none' stroke='%2300013a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+}
 .lamp b { font-size: 16px; font-weight: 700; color: var(--board-ink-2); line-height: 1.3; }
 /* 補足がないランプは、印と名前を1行でそろえる */
 .lamp small:empty { display: none; }
@@ -189,7 +190,7 @@ main:focus { outline: none; }
 .state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
 .state[data-on="1"]::before { background: currentColor; }
 /* 表示板の状態は、色の付いた丸と言葉の札（受付中は緑、中断は橙、配信準備中は黄、終わった品は灰） */
-.board .state[data-st] { padding: 4px 12px 4px 10px; border-radius: 999px; background: rgba(255, 255, 255, .12); font-size: 14px; color: var(--board-ink); }
+.board .state[data-st] { padding: 4px 12px 4px 10px; border-radius: 999px; background: var(--ground); font-size: 14px; color: var(--board-ink); }
 .board .state[data-st]::before { border: 0; width: 9px; height: 9px; background: #8e8e93; }
 .board .state[data-st="open"]::before { background: #30d158; }
 .board .state[data-st="suspended"]::before { background: #ff9f0a; }
@@ -203,7 +204,7 @@ main:focus { outline: none; }
 /* ---- 再接続中（大きく表示する。FR-UI-001） */
 .overlay {
   position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; text-align: center;
-  padding: 24px; background: rgba(0, 1, 58, .94); color: #fff; font-size: 32px; font-weight: 700; overscroll-behavior: contain;
+  padding: 24px; background: rgba(0, 0, 0, .86); color: #fff; font-size: 32px; font-weight: 700; overscroll-behavior: contain;
 }
 .overlay small { display: block; font-size: 15px; font-weight: 400; color: rgba(255, 255, 255, .78); margin-top: 8px; }
 
@@ -215,7 +216,7 @@ dialog {
   opacity: 1; transform: none; transition: opacity .2s var(--ease), transform .25s var(--ease), overlay .2s allow-discrete, display .2s allow-discrete;
 }
 @starting-style { dialog[open] { opacity: 0; transform: translateY(12px) scale(.98); } }
-dialog::backdrop { background: rgba(0, 1, 40, .45); backdrop-filter: blur(6px); }
+dialog::backdrop { background: rgba(0, 0, 0, .32); }
 dialog h2 { font-size: 19px; margin-bottom: 8px; letter-spacing: 0; color: var(--ink); }
 dialog p { color: var(--ink-2); font-size: 15px; }
 dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }

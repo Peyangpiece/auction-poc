@@ -130,7 +130,7 @@ try {
   check(hero.includes('本日開催') && hero.includes('12月の競り（検証）') && hero.includes('9:00 〜 18:00'), '開催の当日は、開催の名前と時間を大きく出す');
   check(hero.includes('本日の目玉商品') && hero.includes('防水シート') && hero.includes('寝袋'), '本日の目玉商品を出す');
   const go = await top.locator('.today__go').boundingBox();
-  check(go.height >= 72 && go.width >= 300, `「参加する」ボタンが大きい（${Math.round(go.width)}×${Math.round(go.height)}px）`);
+  check(go.height >= 52 && go.width >= 300, `「参加する」ボタンが大きい（${Math.round(go.width)}×${Math.round(go.height)}px）`);
   const order = await top.evaluate(() => document.querySelector('#today').compareDocumentPosition(document.querySelector('.next')) & Node.DOCUMENT_POSITION_FOLLOWING);
   check(!!order, '次の開催の一覧は、当日の案内の下に出る');
   await top.waitForFunction(() => document.querySelector('#nextList').textContent.includes('次回の競り（検証）'));

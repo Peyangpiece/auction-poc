@@ -33,13 +33,12 @@ try {
   await con.click('#b_close');
   await b2.waitForFunction(() => !document.getElementById('winFx').hidden);
   check(true, '落札した本人には、落札の演出が出る');
-  await b1.waitForFunction(() => ['ink', 'on'].some((c) => document.getElementById('stamp').classList.contains(c)));
-  check(await b1.evaluate(() => document.getElementById('winFx').hidden), '落札していない人には、全画面の演出は出ず、板の印だけ');
-  check((await b1.getAttribute('#stamp', 'data-who')) === '2番', '印に、落札した人の番号が出る');
+  await b1.waitForFunction(() => document.getElementById('result').textContent === '2番 落札');
+  check(await b1.evaluate(() => document.getElementById('winFx').hidden), '落札していない人には、知らせの札は出ず、板に「2番 落札」と出る');
   await b2.waitForTimeout(700); await snap(b2, 'win-pc');
   await b1.waitForTimeout(250); await snap(b1, 'stamp-phone');
   await b2.waitForFunction(() => document.getElementById('winFx').hidden, null, { timeout: 4000 });
-  check(true, '落札の演出は 3 秒ほどで消える');
+  check(true, '落札の知らせは 2.5 秒ほどで消える');
   // 自分の落札をスマホで
   await con.fill('#newTitle', '漆の盆'); await con.fill('#newPrice', '3000'); await con.click('#create');
   await con.waitForSelector('#b_next:not([hidden])'); await con.click('#b_next');

@@ -69,8 +69,7 @@
 </dialog>
 <!-- 落札の演出（自分が落札したとき）。読み上げは #alert が受け持つので、ここは目で見るだけ -->
 <div class="winfx" id="winFx" aria-hidden="true" hidden>
-  <canvas id="winCanvas"></canvas>
-  <div class="wincard"><span class="seal">落札</span><b class="dyn" id="winTitle"></b><span class="digits winprice" id="winPrice"></span></div>
+  <div class="wincard"><svg class="wincheck" viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="28"/><path d="M17 29l7.5 7.5L40 21"/></svg><span class="wintitle">落札しました</span><b class="dyn" id="winTitle"></b><span class="digits winprice" id="winPrice"></span></div>
 </div>
 <div class="overlay" id="overlay" role="alert"><div><span id="overlayText">再接続中…</span></div></div>
 
@@ -89,7 +88,7 @@
 <main>
   <div id="videoBox">
     <video id="video" playsinline muted aria-label="会場のライブ映像"></video>
-    <div id="break"><div class="waitbadge" aria-hidden="true"><div class="hop"><div class="spin" id="coin"><img class="face front" src="emblem-400.webp" width="148" height="148" alt=""><img class="face back" src="emblem-400.webp" width="148" height="148" alt=""></div></div><span class="ground"></span></div><strong id="breakTitle">映像は停止中です</strong></div>
+    <div id="break"><strong id="breakTitle">映像は停止中です</strong></div>
     <button class="tapzone" id="cmtTap" type="button" aria-pressed="true" aria-label="コメントの表示と非表示を切り替える"></button>
     <div class="cmtlayer" id="cmtLayer"></div>
     <p class="cmttoast" id="cmtToast" role="status"></p>
@@ -112,7 +111,6 @@
         </div>
       </div>
       <p class="board-result" id="result" role="status"></p>
-      <span class="stamp" id="stamp" aria-hidden="true"></span>
       <a class="btn paylink" id="toPay" href="/mypage.html" hidden>お支払いの確認へ</a>
       <div class="lamps">
         <div class="lamp" id="urikiri" role="img"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub"></small></div>
