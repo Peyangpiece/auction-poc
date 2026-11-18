@@ -134,11 +134,11 @@ setInterval(() => {
   $('offset').textContent = link.offset.toFixed(1); $('rtt').textContent = link.rtt?.toFixed(1) ?? '0';
 }, 50);
 
-async function cmd(action, extra = {}) {
+async function cmd(action, extra = {}, msgId = 'cmdMsg') {
   const reqId = ++link.reqId, sent = localNow();
   const res = await link.request(reqId, { type: 'cmd', reqId, action, ...extra, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
-  // うまくいかなかった操作は、記録の欄だけでなく、操作した場所のすぐ下にも理由を出す
-  $('cmdMsg').textContent = !res ? '応答がありません' : res.ok ? '' : res.message;
+  // うまくいかなかった操作は、記録の欄だけでなく、操作した場所のすぐ下にも理由を出す（代理入札は、代理入札の欄の下）
+  $(msgId).textContent = !res ? '応答がありません' : res.ok ? '' : res.message;
   if (!res) log(`${action}: 応答なし`);
   else if (!res.ok) log(`${action}: 拒否（${res.message}）`);
   else log(`${action}: OK${res.status ? `（${STATE_LABEL[res.status]}${res.reason === 'reserve_not_met' ? '・最低落札額に届かず' : ''} ${res.paddle ?? ''} ${res.amount ? yen(res.amount) : ''}）` : ''} ${Math.round(res.clientRecvAt - sent)}ms`);
@@ -286,7 +286,7 @@ $('proxyBox').addEventListener('toggle', () => {
 });
 $('proxyForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
-  const res = await cmd('proxy_bid', { lotId: S.focus, paddle: Number($('pxPaddle').value), amount: Number($('pxAmount').value), reason: $('pxReason').value || $('pxNote').value, cardChecked: $('pxCard').checked });
+  const res = await cmd('proxy_bid', { lotId: S.focus, paddle: Number($('pxPaddle').value), amount: Number($('pxAmount').value), reason: $('pxReason').value || $('pxNote').value, cardChecked: $('pxCard').checked }, 'pxMsg');
   if (res?.ok) { $('pxPaddle').value = ''; $('pxAmount').value = ''; $('pxNote').value = ''; $('pxCard').checked = false; }
   else if (res?.minBid) $('pxAmount').value = res.minBid;
 });

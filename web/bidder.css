@@ -38,7 +38,7 @@ body.outbid .price { color: var(--board-ng); }
 #videoBox { display: none; position: relative; aspect-ratio: 4 / 3; width: 100%; background: #000; border-radius: var(--r-lg); overflow: hidden; }
 #videoBox video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
 /* 映像のない間は、真っ黒ではなく、表示板と同じ紺にする（黒と紺の2つの暗い面が並ぶのを避ける）。飾りは置かない */
-#break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 22px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: var(--board); color: #fff; }
+#break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 16px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: var(--board); color: #fff; }
 #break strong { font-size: 18px; font-weight: 600; }
 /* 音声の切り替え。映像の右下に置く。音は、押してから出す（ブラウザは、操作なしに音を出させない） */
 #sound { position: absolute; right: 8px; bottom: 8px; z-index: 2; min-height: 44px; padding: 6px 14px; font-size: 14px; background: rgba(0, 0, 0, .72); border-color: rgba(255, 255, 255, .6); color: #fff; }
@@ -251,8 +251,10 @@ details dd { overflow-wrap: anywhere; }
 @media (min-width: 960px) { #break { --s: 148px; } }
 @media (max-width: 359px) { #break { --s: 76px; } }
 /* メダルは、映像の枠のちょうど中央に置く（止まっているときの位置が中央。そこから跳ね上がる）。文字は、その下に置く */
-.waitbadge { position: absolute; left: calc(50% - var(--s) / 2); top: calc(50% - var(--s) / 2); width: var(--s); height: var(--s); perspective: 700px; }
-#break strong { position: absolute; left: 12px; right: 12px; top: calc(50% + var(--s) / 2 + 26px); }
+.waitbadge { position: absolute; left: calc(50% - var(--s) / 2); top: calc(38% - var(--s) / 2); width: var(--s); height: var(--s); perspective: 700px; }
+#break strong { position: absolute; left: 12px; right: 12px; top: calc(38% + var(--s) / 2 + 18px); }
+/* 映像のない間は、メダルと文字を少し上に置き、コメントは下の3分の1に収める（重ならない） */
+#videoBox:has(#break[style*="flex"]) .cmtlayer { max-height: 34%; }
 .waitbadge .hop { width: 100%; height: 100%; transform-origin: 50% 100%; animation: badge-hop 2.2s infinite both; will-change: transform; }
 .waitbadge .spin { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; animation: badge-spin 2.2s infinite both; will-change: transform; }
 .waitbadge .face { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border-radius: 50%; backface-visibility: hidden; }

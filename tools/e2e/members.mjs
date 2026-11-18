@@ -331,8 +331,8 @@ try {
   await con.fill('#pxPaddle', '1');
   await con.fill('#pxAmount', '11000');
   await con.click('#proxyForm button[type=submit]');
-  await con.waitForFunction(() => document.getElementById('cmdMsg').textContent.includes('札を確認'));
-  check(true, '札の確認のチェックがないと、代理入札できない');
+  await con.waitForFunction(() => document.getElementById('pxMsg').textContent.includes('札を確認'));
+  check(true, '札の確認のチェックがないと、代理入札できない（理由は、代理入札の欄のすぐ下に出る）');
   await con.check('#pxCard');
   await con.click('#proxyForm button[type=submit]');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('1番（代理）'));

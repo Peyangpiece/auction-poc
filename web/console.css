@@ -130,3 +130,21 @@ section[aria-labelledby="histTitle"]:has(tbody:empty), section[aria-labelledby="
   #presenceSplit { display: none; }
   #clock { font-size: 20px; }
 }
+
+/* 代理入札の誤りは、代理入札の欄のすぐ下に出す */
+.pxmsg { margin-top: 8px; font-size: 14px; font-weight: 600; color: var(--danger); }
+.pxmsg:empty { display: none; }
+/* 開催の状態（進行中・休憩中）も、色の付いた札 */
+.eventbar .state { padding: 3px 10px 3px 8px; border-radius: 999px; background: var(--ground-alt); font-size: 14px; color: var(--ink-2); }
+.eventbar .state::before { border: 0; width: 8px; height: 8px; background: currentColor; }
+.eventbar .state[data-on="1"] { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, var(--ground)); }
+/* 落札一覧の品名は、数文字ずつに折り返さない */
+#sold td.dyn, #soldWrap td.dyn { min-width: 9em; }
+/* スマホの幅: 上の帯は、ロゴと「進行コンソール」と時計だけ（参加者の数は、狭いと字ごとに折り返して重なる） */
+@media (max-width: 640px) {
+  .brandbar > div { flex-wrap: wrap; row-gap: 4px; min-height: 0; padding-block: 8px; }
+  .brand__logo { height: 32px; }
+  .brand__service { font-size: 15px; }
+  .meta { width: 100%; justify-content: space-between; }
+  .meta > span:first-child { white-space: nowrap; }
+}
