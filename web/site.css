@@ -169,6 +169,12 @@ td .note { font-size: 12px; }
 .invlist__total { font-size: 20px; font-weight: 600; text-align: right; }
 .invlist__state { color: var(--ink-2); font-size: 14px; }
 .invlist .warn { font-size: 14px; }
+/* 請求書の中の品（報告書 85 章） */
+.invlist .btn { grid-column: 1 / -1; } /* 品の一覧の下、右端に */
+.invitems { grid-column: 1 / -1; list-style: none; margin: 4px 0 0; padding: 8px 0 0; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.invitems li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 16px; font-size: 15px; }
+.invitems .digits { text-align: right; }
+.invitems .note, .invitems .warn { grid-column: 1 / -1; font-size: 13px; }
 .invlist .btn { justify-self: end; min-height: 44px; padding: 6px 16px; font-size: 14px; text-decoration: none; display: inline-flex; align-items: center; }
 
 /* ログインの画面の、控えめな案内（会員登録がお済みでない方） */
@@ -261,7 +267,8 @@ input[name="code"] { font-size: 28px; font-weight: 600; letter-spacing: 0; text-
 @media (max-width: 640px) {
   .invlist__state, .invlist > li > .warn { order: 1; }
   .invlist__total { order: 2; }
-  .invlist .btn { order: 3; }
+  .invlist .invitems { order: 3; }
+  .invlist .btn { order: 4; }
 }
 
 /* ==== 細部の仕上げ（書体の太さ・字間・面の影・印の形） ==== */

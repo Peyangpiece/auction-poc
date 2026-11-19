@@ -10,6 +10,8 @@ function showDevVerify(url) {
   const me = await setupNav();
   const m = me.member;
   if (!m) return location.replace('/login.html');
+  // 「競りに参加する」は、開催の日だけ出す（開催のない日に押しても「本日の開催はありません」になるだけ。報告書 85 章）
+  api('GET', '/api/participation').then((p) => { $('#goBid').hidden = !p.ok || !p.event; });
   const q = new URLSearchParams(location.search);
   const notice = q.get('registered') ? '登録が済みました。確認のメールをお送りしました。'
     : q.get('email') === 'verified' ? 'メールアドレスを確認しました。'
@@ -32,9 +34,10 @@ function showDevVerify(url) {
   const dev = sessionStorage.getItem('devVerifyUrl'); sessionStorage.removeItem('devVerifyUrl');
   if (dev && !m.emailVerified) showDevVerify(dev);
   const rows = [
-    ['ログイン ID', m.loginId], ['区分', m.kind === 'b2b' ? '法人' : '個人'],
-    ['会社名', m.company], ['担当者名', m.contactName], ['氏名', m.name], ['フリガナ', m.nameKana], ['電話番号', telFmt(m.phone) + (m.phoneVerified ? '' : '（未確認。ログインには、メールアドレスをお使いください）')],
-    ['メールアドレス', m.email + (m.emailVerified ? '（確認済み）' : '（未確認）')],
+    // 書き添えは、本人が何かをする必要のあるときだけ（「個人」「確認済み」など、いつも同じ言葉は出さない。報告書 85 章）
+    ['ログイン ID', m.loginId], ['区分', m.kind === 'b2b' ? '法人' : null],
+    ['会社名', m.company], ['担当者名', m.contactName], ['氏名', m.name], ['フリガナ', m.nameKana], ['電話番号', telFmt(m.phone)],
+    ['メールアドレス', m.email + (m.emailVerified ? '' : '（未確認）')],
     ['住所', m.address], ['配送先', m.shipTo], ['請求先', m.billing],
   ];
   profile = m;
@@ -67,7 +70,18 @@ const STATE_TEXT = { unsettled: 'お支払い前', billed: 'ご請求済み', un
 const RECEIVE_TEXT = { pickup: '現地受け取り', ship: '配送' };
 const INVOICE_STATE = { paid: 'お支払い済み', overdue: 'お支払いの期限を過ぎています', billed: 'お支払い前' };
 // 請求書の一覧: 請求番号・発行日・金額・お支払期限・状態と、PDF を開くボタン
-function showInvoices(list) {
+// 品は、その請求書の中に並べる（同じ品を「落札した品」に二度出さない。報告書 85 章）。
+// 品ごとの状態は、請求書の状態と違うとき（お渡し済み・解除など）と、受け取りの期限だけを書き添える
+const ITEM_NOTE = { delivered: 'お渡し済み', cancelled: '解除されました' };
+function invoiceItems(lines) {
+  if (!lines.length) return null;
+  return el('ul', { class: 'invitems' }, lines.map((l) => {
+    const note = [l.premium ? `落札額 ${yen(l.amount)}＋買歩銭 ${yen(l.premium)}` : '', ITEM_NOTE[l.state], l.pickupBy && l.state === 'cleared' ? `受け取り期限 ${jpDay(l.pickupBy)}` : ''].filter(Boolean).join('　');
+    return el('li', {}, el('span', { class: 'dyn', text: l.label }), el('span', { class: 'digits', text: yen(l.payable) }),
+      note ? el('span', { class: l.pickupLate ? 'warn' : 'note', text: note }) : null);
+  }));
+}
+function showInvoices(list, lines = []) {
   if (!list.length) return;
   $('#invoices').replaceChildren(el('ul', { class: 'rows invlist' }, list.map((i) => el('li', {},
     el('div', { class: 'invlist__main' },
@@ -75,6 +89,7 @@ function showInvoices(list) {
       el('span', { class: 'note', text: [`No.${i.number}`, i.dueDate && i.state !== 'paid' ? `お支払期限 ${jpDay(i.dueDate)}` : ''].filter(Boolean).join('　') })),
     el('span', { class: 'digits invlist__total', text: yen(i.total) }),
     el('span', { class: i.state === 'overdue' ? 'warn' : 'invlist__state', text: INVOICE_STATE[i.state] }),
+    invoiceItems(lines.filter((l) => l.invoice?.id === i.id)),
     el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: '請求書を開く（PDF）' })))));
 }
 // 繰り上げ落札の回答: どちらも取り消せないので、金額と結果を書いて確かめる。最初のフォーカスは「やめる」（報告書 80 章）
@@ -102,8 +117,12 @@ function answerOffer(o, answer) {
 }
 async function loadBilling() {
   const res = await api('GET', '/api/my/billing');
-  if (res.ok) showInvoices(res.invoices ?? []);
-  if (!res.ok || (!res.lines.length && !res.offers.length)) return;
+  if (res.ok) showInvoices(res.invoices ?? [], res.lines ?? []);
+  if (!res.ok) return;
+  // 「落札した品」には、まだ請求書になっていない品と、繰り上げのご案内だけを出す
+  res.lines = res.lines.filter((l) => !l.invoice);
+  $('#billing').hidden = !res.lines.length && !res.offers.some((o) => o.state === 'open');
+  if ($('#billing').hidden) return;
   $('#billing').hidden = false;
   $('#offers').replaceChildren(...res.offers.filter((o) => o.state === 'open').map((o) => el('div', { class: 'banner' },
     el('span', { text: `繰り上げ落札のご案内: ${o.label}　お支払い ${yen(o.payable)}（落札額 ${yen(o.amount)}＋買歩銭 ${yen(o.premium)}）　回答期限 ${jpDay(o.deadline)}` }),

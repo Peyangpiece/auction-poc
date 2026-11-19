@@ -36,7 +36,7 @@
   <button class="textlink" type="button" id="resendEmail">確認メールを送る</button>
 </div>
 <p class="msg ok" id="notice" role="status"></p>
-<div class="lead" id="goBid"><div class="actions"><a class="btn btn-primary btn-lg" href="/bidder.html">競りに参加する</a></div></div>
+<div class="lead" id="goBid" hidden><div class="actions"><a class="btn btn-primary btn-lg" href="/bidder.html">競りに参加する</a></div></div>
 <div class="tabs" role="tablist" aria-label="マイページ" id="myTabs">
   <button type="button" role="tab" id="tab-bills" data-tab="bills" aria-controls="panel-bills" aria-selected="true">請求書</button>
   <button type="button" role="tab" id="tab-profile" data-tab="profile" aria-controls="panel-profile" aria-selected="false">個人情報の設定</button>
@@ -60,10 +60,8 @@
     <li><label class="menu__switch" for="eventMail"><span>開催のお知らせメール</span><input type="checkbox" role="switch" id="eventMail"></label></li>
   </ul>
   <p class="msg" id="accountMsg" role="alert"></p>
+  <!-- 規約類へのリンクは、どの画面でも下の帯にあるので、ここには置かない（報告書 85 章） -->
   <ul class="menu card">
-    <li><a href="/legal.html#terms">利用規約</a></li>
-    <li><a href="/legal.html#privacy">プライバシーポリシー</a></li>
-    <li><a href="/legal.html#tokushoho">特定商取引法に基づく表示</a></li>
     <li><button type="button" class="menu__quiet" id="withdrawBtn">退会の手続き</button></li>
   </ul>
 </section>

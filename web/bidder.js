@@ -697,7 +697,7 @@ $('enter').addEventListener('click', async () => {
   setGateOpen(false);
   $('title').closest('h1').tabIndex = -1; $('title').closest('h1').focus(); // 入ったら、品名へ（フォーカスが行き場を失わないように。報告書 81 章）
   // 検証用の情報は、検証用の合言葉で入った人にだけ出す。会員には、ほかのページへの入口を出す
-  $('devInfo').hidden = !token; $('siteLinks').hidden = !!token;
+  $('devInfo').hidden = !token; // ほかのページへは、上の「ホーム」から戻る（下の「マイページ」のリンクは、なくした。報告書 85 章）
   // 会員には、参加のしかたの切り替えを出す（検証用の合言葉で入った人には出さない）
   $('modeLine').hidden = !!token;
   $('modeNow').textContent = switchPlan().now; $('toVenue').textContent = switchPlan().button;

@@ -386,10 +386,11 @@ try {
   check(true, '消し込みのあとに、引き渡しを記録できる');
   await shot(admin, 'mvp-25-billing', { fullPage: true });
   await guest.goto(sys.base + '/mypage.html');
-  await guest.waitForSelector('#billing:not([hidden])');
-  const mine = await guest.textContent('#myLines');
-  check(mine.includes('¥11,000') && mine.includes('買歩銭 ¥1,000'), 'マイページに、買歩銭を含めた金額と内訳が出る');
-  check(mine.includes('防水シート') && mine.includes('お渡し済み'), '落札者のマイページに、品・状態が出る');
+  await guest.waitForSelector('#invoices .invitems');
+  const mine = await guest.textContent('#invoices .invitems');
+  check(mine.includes('¥11,000') && mine.includes('買歩銭 ¥1,000'), 'マイページの請求書の中に、買歩銭を含めた金額と内訳が出る');
+  check(mine.includes('防水シート') && mine.includes('お渡し済み'), '落札者のマイページに、品・状態が出る（請求書の中に）');
+  check(await guest.isHidden('#billing'), '請求書になった品は、「落札した品」に二度出さない');
   const invs = await guest.textContent('#invoices');
   check(/\d{8}-0001/.test(invs) && invs.includes('¥11,000') && invs.includes('お支払い済み') && invs.includes('請求書を開く'), 'マイページの「請求書」に、請求番号・金額・状態と、PDF を開くボタンが出る');
   await guest.evaluate(() => { location.hash = '#profile'; });
