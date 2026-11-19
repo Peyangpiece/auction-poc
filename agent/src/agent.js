@@ -24,6 +24,8 @@ const cfg = {
   obsPassword: process.env.OBS_PASSWORD || undefined,
   outputWaitMs: Number(process.env.AGENT_OUTPUT_WAIT_MS || 10000),
   logDir: process.env.AGENT_LOG_DIR || path.join(here, 'logs'),
+  // カメラの切り替え（報告書 92 章）: OBS のシーンのうち、名前がこの言葉で始まるものを「カメラ」として進行コンソールに出す
+  cameraPrefix: process.env.AGENT_CAMERA_PREFIX || 'カメラ',
 };
 if (!cfg.serverUrl || !cfg.token) {
   console.error('AGENT_SERVER_URL と AGENT_TOKEN を環境変数（または agent/.env）で指定してください。');
@@ -56,6 +58,7 @@ async function connectObs() {
     const v = await obs.call('GetVersion');
     obsVersion = { obs: v.obsVersion, obsWebSocket: v.obsWebSocketVersion, rpc: hello.negotiatedRpcVersion, platform: v.platform };
     log('obs_connected', obsVersion); // 【未検証】の確認用: OBS と obs-websocket のバージョンを記録する
+    reportCameras();
     return true;
   } catch (err) {
     log('obs_connect_failed', { message: err.message, code: err.code });
@@ -66,6 +69,7 @@ obs.on('ConnectionClosed', (err) => {
   if (obsConnected) log('obs_disconnected', { message: err?.message });
   obsConnected = false;
   sendToServer({ type: 'agent_state', obsActive: false, obsConnected: false, at: now() });
+  sendToServer({ type: 'agent_cameras', cameras: [], current: null, at: now() }); // OBS が止まっている間は、切り替えられない
 });
 // OBS の側で配信の状態が変わったら（手で止められた場合も含めて）、サーバーに知らせる
 obs.on('StreamStateChanged', (e) => {
@@ -75,6 +79,22 @@ obs.on('StreamStateChanged', (e) => {
   }
 });
 setInterval(() => { if (!obsConnected) connectObs(); }, 5000).unref();
+
+// ------------------------------------------------------------------ カメラ（OBS のシーン。報告書 92 章）
+// スマホ・無線カメラ・USB カメラは、OBS の中で、それぞれのシーンに入れておく。ここは、どのシーンを映すかを切り替えるだけ
+async function cameraState() {
+  const list = await obs.call('GetSceneList');
+  const names = list.scenes.map((x) => x.sceneName).filter((n) => n.startsWith(cfg.cameraPrefix));
+  // OBS は、シーンの一覧を下から上の順で返す（OBS の画面の上にあるものが、配列の後ろ）。画面の並びにそろえる
+  names.reverse();
+  return { cameras: names, current: list.currentProgramSceneName ?? null };
+}
+async function reportCameras() {
+  if (!obsConnected) return;
+  try { sendToServer({ type: 'agent_cameras', ...(await cameraState()), at: now() }); }
+  catch (err) { log('camera_list_failed', { message: err.message }); }
+}
+for (const ev of ['CurrentProgramSceneChanged', 'SceneListChanged', 'SceneNameChanged', 'SceneCreated', 'SceneRemoved']) obs.on(ev, () => reportCameras());
 
 /** 配信の状態が want になるまで待つ（StartStream / StopStream は、受け付けた時点で返ってくるため） */
 async function waitOutput(want) {
@@ -101,6 +121,16 @@ async function handle(cmd) {
       timings.obsSentAt = timings.receivedAt;
       timings.obsResultAt = now();
       return done(true, { obsActive: before.outputActive });
+    }
+    if (cmd.action === 'camera') {
+      // 映すカメラを切り替える。配信は止めない（シーンを替えるだけ）
+      const { cameras } = await cameraState();
+      if (!cameras.includes(cmd.camera)) return done(false, { error: 'unknown_camera', obsActive: before.outputActive });
+      timings.obsSentAt = now();
+      await obs.call('SetCurrentProgramScene', { sceneName: cmd.camera });
+      timings.obsResultAt = timings.obsStateAt = now();
+      reportCameras();
+      return done(true, { obsActive: before.outputActive, camera: cmd.camera });
     }
     const want = cmd.action === 'start';
     if (cmd.action !== 'start' && cmd.action !== 'stop') return done(false, { error: 'unknown_action' });
@@ -154,6 +184,7 @@ function connectServer() {
     attempts = 0;
     log('server_connected');
     syncClock();
+    reportCameras();
   });
   ws.on('message', (raw) => {
     let msg;

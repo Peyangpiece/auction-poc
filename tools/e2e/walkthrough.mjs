@@ -59,6 +59,15 @@ try {
   check((await text(con, 's_obs')) === '配信中', '競りを始めると、配信が自動で始まる');
   check((await con.isHidden('#b_next')) && (await con.isVisible('#b_close')) && (await con.isVisible('#b_urikiri')), '受付中は「締め」「うりきり」「中断」が出る（うりきりは、ランプが消えている品だけ）');
 
+  console.log('カメラの切り替え');
+  await con.waitForFunction(() => document.querySelectorAll('#cameras .camopt').length === 3);
+  check((await con.$$eval('#cameras .camopt', (bs) => bs.map((b) => b.textContent).join(','))) === 'スマホ,無線,USB', '進行コンソールに、OBS のカメラ（スマホ・無線・USB）が並ぶ。カメラでないシーンは出ない');
+  check((await con.getAttribute('#cameras [data-camera="カメラ: スマホ"]', 'aria-pressed')) === 'true', 'いま映しているカメラが分かる');
+  await con.click('#cameras [data-camera="カメラ: USB"]');
+  await con.waitForFunction(() => document.querySelector('#cameras [data-camera="カメラ: USB"]')?.getAttribute('aria-pressed') === 'true');
+  check((await text(con, 's_obs')) === '配信中' && (await text(con, 'status')).includes('受付中'), 'カメラを切り替えても、配信と競りは止まらない');
+  await shot(con, 'console-camera');
+
   console.log('入札');
   await b1.waitForFunction(() => document.getElementById('bid').textContent === '入札');
   check(true, '入ってすぐ、入札できる（切り替えは要らない）');

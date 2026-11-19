@@ -123,6 +123,13 @@
         <dt>配信エージェント</dt><dd><span class="state" id="s_agent">未接続</span></dd>
         <dt>OBS</dt><dd><span class="state" id="s_obs">不明</span></dd>
       </dl>
+      <!-- 映すカメラ（OBS の、名前が「カメラ」で始まるシーン）。押すと、配信を止めずに切り替わる（報告書 92 章） -->
+      <div class="cambox" id="cameraBox" hidden>
+        <h3 id="camTitle">カメラ</h3>
+        <div class="camgroup" id="cameras" role="group" aria-labelledby="camTitle"></div>
+        <p class="note" id="camNone" hidden>OBS に、名前が「カメラ」で始まるシーンがありません。カメラごとにシーンを作ると、ここで切り替えられます。</p>
+        <p class="msg" id="camMsg" role="alert"></p>
+      </div>
       <p id="idleWarn" role="status"></p>
       <p class="sr-only" id="boardSay" role="status" aria-atomic="true"></p>
       <div class="actions">

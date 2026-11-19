@@ -169,6 +169,12 @@ const SECURITY_HEADERS = {
   ...(config.csp === 'off' ? {} : { 'content-security-policy': CSP }),
 };
 const startedAt = nowMs();
+const CAMERA_FAIL = {
+  unknown_camera: 'そのカメラは、OBS にありません。OBS のシーンの名前を確かめてください',
+  agent_not_connected: '配信エージェントがつながっていないため、切り替えられません',
+  timeout: '配信用PCから応答がありません。OBS の画面で確かめてください',
+  obs_not_connected: 'OBS につながっていません。配信用PCで OBS が起動しているか確かめてください',
+};
 const JSQR_FILE = createRequire(import.meta.url).resolve('jsqr/dist/jsQR.js');
 
 const server = http.createServer((req, res) => {
@@ -529,6 +535,11 @@ function onAuctioneer(conn, msg, send) {
       case 'stream_start': stream.manual('start'); return ok();
       case 'stream_stop': stream.manual('stop'); return ok();
       case 'stream_status': stream.manual('status'); return ok();
+      case 'camera': { // 映すカメラの切り替え（OBS のシーン。報告書 92 章）。配信は止めない
+        const name = String(msg.camera ?? '');
+        return stream.setCamera(name).then((res) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, action: 'camera', ok: !!res?.ok,
+          message: res?.ok ? undefined : CAMERA_FAIL[res?.error] ?? 'カメラを切り替えられませんでした。OBS の画面で確かめてください' }));
+      }
       case 'set_auto_stop': stream.setAutoStopMs(Number(msg.ms)); return ok();
       case 'create_lot': {
         // 商品は、競りの最中にその場で登録する（発注者の決定）。登録は記録に残す。

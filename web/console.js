@@ -129,6 +129,31 @@ function renderStream() {
   $('s_by').textContent = `問い合わせ ${yn(s.liveBy.poll)}、イベント ${yn(s.liveBy.event)}` + (s.mode === 'mock' ? `、代役 ${yn(s.liveBy.mock)}` : '');
   $('s_agent').textContent = s.agentConnected ? '接続中' : '未接続'; $('s_agent').dataset.on = s.agentConnected ? '1' : '';
   $('s_obs').textContent = s.obsActive === null ? '不明' : s.obsActive ? '配信中' : '停止'; $('s_obs').dataset.on = s.obsActive ? '1' : '';
+  renderCameras(s);
+}
+// 映すカメラの切り替え（報告書 92 章）。「カメラ: スマホ」なら「スマホ」と出す
+const camLabel = (name) => name.replace(/^カメラ[\s:：・]*/, '') || name;
+function renderCameras(s) {
+  const cams = s.cameras ?? [];
+  $('cameraBox').hidden = !s.agentConnected;
+  $('camNone').hidden = cams.length > 0;
+  const key = JSON.stringify([cams, s.camera]);
+  if ($('cameras').dataset.key === key) return; // 変わったときだけ描き直す（押している最中のフォーカスを失わない）
+  $('cameras').dataset.key = key;
+  const focused = document.activeElement?.dataset?.camera;
+  $('cameras').replaceChildren(...cams.map((name) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'btn camopt', textContent: camLabel(name) });
+    b.dataset.camera = name;
+    b.setAttribute('aria-pressed', String(name === s.camera));
+    b.onclick = async () => {
+      if (name === S.stream?.camera) return;
+      b.disabled = true;
+      await cmd('camera', { camera: name }, 'camMsg');
+      b.disabled = false;
+    };
+    return b;
+  }));
+  if (focused) $('cameras').querySelector(`[data-camera="${CSS.escape(focused)}"]`)?.focus();
 }
 setInterval(() => {
   if (!link) return;
@@ -145,7 +170,7 @@ setInterval(() => {
 const ACTION_TEXT = {
   start: '開始', start_without_video: '映像なしで開始', back_to_waiting: '待機に戻す', close: '締め', suspend: '中断', resume: '再開', cancel: '取りやめ', exclude: '除外',
   create_lot: '品を追加', proxy_bid: '代理入札', proxy_cancel: '代理入札の取り消し', hide_comment: 'コメントを非表示', event_break: '休憩に入る', event_end: '開催終了',
-  stream_start: '配信を開始', stream_stop: '配信を停止', stream_status: '配信の状態の問い合わせ', mark: '測定の印', crash: '強制終了（模擬）',
+  stream_start: '配信を開始', stream_stop: '配信を停止', camera: 'カメラの切り替え', stream_status: '配信の状態の問い合わせ', mark: '測定の印', crash: '強制終了（模擬）',
 };
 async function cmd(action, extra = {}, msgId = 'cmdMsg') {
   const reqId = ++link.reqId, sent = localNow();

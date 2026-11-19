@@ -181,3 +181,48 @@ test('競りがない状態が始まった時刻を進行コンソールに伝�
   const again = await A.waitFor((x) => x.type === 'snapshot');
   assert.ok(again.stream.idleSince >= idle.stream.idleSince);
 });
+
+test('カメラの切り替え: OBS の「カメラ」で始まるシーンを一覧にし、進行役が配信を止めずに切り替える（報告書 92 章）', async () => {
+  // 前のテストで OBS を止めているので、別のサーバー・OBS・エージェントで確かめる
+  const ctx3 = makeEnv(T);
+  const srv3 = await startServer(ctx3);
+  const obs3 = startMockObs({ port: 0, startDelayMs: 100, stopDelayMs: 100 });
+  await new Promise((r) => obs3.wss.on('listening', r));
+  const port3 = obs3.wss.address().port;
+  const { auctioneer: A3 } = await connectAll(srv3, ctx3, 0);
+  const is = (pred, ms = 5000) => A3.waitFor((x) => x.type === 'stream' && pred(x.stream), ms);
+  const listedP = is((s) => s.cameras.length === 3);
+  const agent3 = spawn('node', ['src/agent.js'], {
+    cwd: path.join(ROOT, 'agent'), stdio: 'ignore',
+    env: { ...process.env, AGENT_SERVER_URL: srv3.agentUrl, AGENT_TOKEN: ctx3.tokens.agent, OBS_URL: `ws://127.0.0.1:${port3}`, AGENT_LOG_DIR: path.join(ctx3.dataDir, 'agent-logs') },
+  });
+  try {
+    const listed = await listedP;
+    assert.deepEqual(listed.stream.cameras, ['カメラ: スマホ', 'カメラ: 無線', 'カメラ: USB'], 'OBS の画面と同じ並び。「カメラ」で始まらないシーンは出さない');
+    assert.equal(listed.stream.camera, 'カメラ: スマホ');
+    // 配信中に切り替えても、配信は止まらない
+    const on = is((s) => s.obsActive === true);
+    await A3.cmd('stream_start');
+    await on;
+    const switched = is((s) => s.camera === 'カメラ: USB');
+    assert.equal((await A3.cmd('camera', { camera: 'カメラ: USB' })).ok, true);
+    await switched;
+    assert.equal(obs3.state.current, 'カメラ: USB');
+    assert.equal(obs3.state.active, true, '切り替えても、配信は続く');
+    const bad = await A3.cmd('camera', { camera: '休憩の画面' });
+    assert.equal(bad.ok, false, '「カメラ」で始まらないシーンには、切り替えない');
+    assert.match(bad.message, /OBS にありません/);
+    assert.equal(obs3.state.current, 'カメラ: USB');
+    // OBS の画面で、手で切り替えた場合も、進行コンソールに伝わる
+    const manual = is((s) => s.camera === 'カメラ: スマホ');
+    const c = new (await import('ws')).WebSocket(`ws://127.0.0.1:${port3}`);
+    await new Promise((r) => c.on('open', r));
+    c.send(JSON.stringify({ op: 6, d: { requestType: 'SetCurrentProgramScene', requestId: 'x', requestData: { sceneName: 'カメラ: スマホ' } } }));
+    await manual;
+    c.close();
+    // OBS が止まったら、カメラの一覧を消す（切り替えられないため）
+    const cleared = is((s) => s.cameras.length === 0);
+    await obs3.close();
+    await cleared;
+  } finally { agent3.kill(); await obs3.close().catch(() => {}); await srv3.stop(); cleanup(ctx3); }
+});

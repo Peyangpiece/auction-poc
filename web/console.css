@@ -152,3 +152,12 @@ section[aria-labelledby="histTitle"]:has(tbody:empty), section[aria-labelledby="
 .addlot .note, .addlot .msg { grid-column: 1 / -1; margin: 0; }
 .addlot .msg:empty { display: none; }
 @media (pointer: coarse) { td.act .btn, #comments .btn { min-height: 44px; } }
+/* 映すカメラの切り替え（報告書 92 章）。いま映しているカメラを塗りつぶす */
+.cambox { display: grid; gap: 8px; margin-top: 12px; }
+.cambox h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.cambox[hidden], .cambox .note[hidden] { display: none; }
+.camgroup { display: flex; flex-wrap: wrap; gap: 8px; }
+.camgroup:empty { display: none; }
+.camopt[aria-pressed="true"] { background: var(--action); color: var(--action-ink); font-weight: 600; }
+.camopt[aria-pressed="true"]:hover:not(:disabled) { background: var(--action-hover); }
+.cambox .msg:empty { display: none; }
