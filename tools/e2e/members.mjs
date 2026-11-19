@@ -318,7 +318,7 @@ try {
   await shot(guest, 'mvp-20-venue-bidder', { fullPage: true });
   // オンライン参加の人を、受付で会場参加に切り替える
   await admin.click('#tabs [data-key=reception]');
-  await admin.click('#panel td.act >> text=会場参加に切り替え');
+  await admin.click('#panel td.act >> text=会場参加にする');
   await admin.click('#dlg button[type=submit]');
   await admin.waitForFunction(() => document.querySelector('#dlg .msg')?.textContent.includes('支払方法'));
   await admin.check('#dlg [name=payment][value=cash]');

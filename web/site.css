@@ -518,3 +518,20 @@ td.act { white-space: nowrap; }
 /* 記録の「内容」 */
 .auditdetail summary { cursor: pointer; color: var(--action); font-size: 13px; font-weight: 600; min-height: 32px; display: inline-flex; align-items: center; }
 .auditdetail p { margin: 4px 0 0; font-size: 13px; color: var(--ink-2); }
+
+/* 受付の一覧（報告書 90 章）: オンラインの人は控えめに。スマホでは、表をやめて、1人1枚の行にする（横にはみ出さない） */
+#panel .state.state--quiet { background: none; padding-left: 0; color: var(--ink-3); font-weight: 500; }
+#panel .state.state--quiet::before { display: none; }
+@media (max-width: 640px) {
+  .reclist { overflow: visible; }
+  .reclist table, .reclist tbody { display: block; width: 100%; }
+  .reclist thead { display: none; }
+  .reclist tr { display: grid; grid-template-columns: 2.6em minmax(0, 1fr) auto; grid-template-rows: auto auto auto; gap: 2px 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .reclist td { border: 0; padding: 0; min-width: 0; white-space: normal; }
+  .reclist td.paddle { grid-column: 1; grid-row: 1 / span 3; font-size: 24px; }
+  .reclist td:nth-child(2) { grid-column: 2; grid-row: 1; font-weight: 600; }
+  .reclist td:nth-child(3) { grid-column: 2; grid-row: 2; }
+  .reclist td:nth-child(4) { grid-column: 2; grid-row: 3; font-size: 13px; }
+  .reclist td.act { grid-column: 3; grid-row: 1 / span 3; text-align: right; }
+  .reclist td.act .btn { margin: 0; white-space: nowrap; }
+}

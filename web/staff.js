@@ -225,15 +225,19 @@ async function receptionPanel() {
   if (!res.event) return [el('div', { class: 'empty' }, el('p', { text: '本日の開催はありません。' }),
     me.role === 'admin' && smallBtn('開催を開く', () => leavePanel(() => { pendingNotice = null; show('events'); })))];
   const waiting = res.participants.filter((p) => p.mode === 'venue' && !p.checkedIn).length;
-  const rows = res.participants.map((p) => el('tr', {},
+  // 受付でやることがある人（来場の確認待ち）を上に。「参加」と「来場」の列は、1つの「状態」にまとめた（報告書 90 章）
+  const order = (p) => (p.mode === 'venue' && !p.checkedIn ? 0 : p.mode === 'venue' ? 1 : 2);
+  const sorted = [...res.participants].sort((a, b) => order(a) - order(b) || a.paddle - b.paddle);
+  const rows = sorted.map((p) => el('tr', {},
     el('td', { class: 'n paddle', text: String(p.paddle) }),
     el('td', { class: 'dyn', text: p.name }),
-    el('td', { text: p.mode === 'venue' ? '会場' : 'オンライン' }),
-    el('td', { text: `${RECV[p.receive]}・${PAY[p.payment]}` }),
-    el('td', {}, p.mode === 'venue' ? el('span', { class: 'state', 'data-on': p.checkedIn ? '1' : '0', text: p.checkedIn ? '来場確認済み' : '確認待ち' }) : ''),
+    el('td', {}, p.mode === 'venue'
+      ? el('span', { class: 'state', 'data-on': p.checkedIn ? '1' : '0', text: p.checkedIn ? '来場確認済み' : '確認待ち' })
+      : el('span', { class: 'state state--quiet', text: 'オンライン' })),
+    el('td', { class: 'note', text: `${RECV[p.receive]}・${PAY[p.payment]}` }),
     act(
       p.mode === 'venue' && !p.checkedIn && smallBtn('来場を確認', async () => { const r = await api('POST', `/api/reception/${p.id}/checkin`); if (!r.ok) alertLine(r.message); show('reception'); }, 'btn-primary'),
-      p.mode === 'online' && smallBtn('会場参加に切り替え', () => switchDialog(p)))));
+      p.mode === 'online' && smallBtn('会場参加にする', () => switchDialog(p)))));
   return [
     el('div', { class: 'toolbar' },
       el('p', { class: 'dyn', text: `${res.event.title}　確認待ち ${waiting} 人` }),
@@ -245,7 +249,7 @@ async function receptionPanel() {
           async (d) => { const r = await api('POST', '/api/reception/join', d); if (r.ok) alertLine(`参加番号 ${r.paddle} を振りました。この番号の札を渡してください。`); return r; }, '参加番号を振る')), ' ',
         smallBtn('会場の QR コード', () => qrDialog(res.event), 'btn-primary'))),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
-    table(['参加番号', '名前', '参加', '受け取り・支払', '来場', ''], rows, '参加手続きを済ませた人は、まだいません。'),
+    (() => { const t = table(['参加番号', '名前', '状態', '受け取り・支払', ''], rows, '参加手続きを済ませた人は、まだいません。'); t.classList.add('reclist'); return t; })(),
   ];
 }
 function switchDialog(p) {
