@@ -32,7 +32,7 @@ function render() {
   $('title').textContent = lot ? lot.title : '品を待っています';
   $('status').textContent = !lot ? '待機中' : st === 'waiting' ? '次の品' : STATE_LABEL[st];
   $('status').dataset.st = st;
-  $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札価格' : hasBid ? '現在価格' : '開始価格';
+  $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札額' : hasBid ? '現在価格' : '開始値';
   $('price').textContent = !lot ? '—' : lot.startPending ? '未定' : yen(lot.currentPrice ?? lot.startPrice);
   $('leader').textContent = lot?.highestPaddle ? `${lot.highestPaddle}番` : 'なし';
   $('bids').textContent = `${bids}件`;
@@ -40,6 +40,9 @@ function render() {
   // うりきりまで、あといくらか（入札がなければ、最低落札額そのもの）。オークショニアが、声をかける目安にする
   $('urikiriState').textContent = !lot ? '—' : urikiri ? '済み' : hasBid ? `あと${yen(lot.reservePrice - lot.currentPrice)}` : yen(lot.reservePrice);
   $('urikiriState').dataset.on = urikiri ? '1' : '';
+  // 読み上げは、1か所の要約だけ（面の全体を読み上げると、入札のたびに細切れに何度も読まれる。報告書 81 章）
+  const said = !lot ? '' : [`No.${lot.lotNo}`, $('status').textContent, $('price').textContent, lot.highestPaddle ? `${lot.highestPaddle}番` : ''].filter(Boolean).join('　');
+  if (said !== S.lotSaid) { S.lotSaid = said; $('lotSay').textContent = said; }
 
   // 開始値: 入札の前だけ変えられる
   const canStart = !!lot && ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(st) && !hasBid && !S.busy;
@@ -99,7 +102,7 @@ async function cmd(action, extra = {}) {
   S.busy = false;
   // 手ごたえ: 通ったら短く1回、通らなかったら2回ふるわせる（画面を見ていなくても分かる）
   if ('vibrate' in navigator) navigator.vibrate(res?.ok ? 20 : [30, 60, 30]);
-  if (!res) say('応答がありません');
+  if (!res) say('通信が切れました。つながり直したあとの表示で、操作が通ったかを確かめてください');
   else if (!res.ok) say(res.message);
   render();
   return res;

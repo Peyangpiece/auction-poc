@@ -309,3 +309,17 @@ function showInstall() {
 addEventListener('beforeinstallprompt', (ev) => { ev.preventDefault(); installEvent = ev; showInstall(); });
 addEventListener('appinstalled', () => hideInstall(true));
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showInstall); else showInstall();
+
+/** タブの並び（role=tablist）を、矢印キー（横並びでも縦並びでも、上下左右）・Home・End で移れるようにする（選んだタブだけが Tab で止まる。報告書 81 章） */
+function tabKeys(list) {
+  list.addEventListener('keydown', (ev) => {
+    const tabs = [...list.querySelectorAll('[role=tab]')];
+    const i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = { ArrowRight: i + 1, ArrowLeft: i - 1, ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: tabs.length - 1 }[ev.key];
+    if (next === undefined) return;
+    ev.preventDefault();
+    const t = tabs[(next + tabs.length) % tabs.length];
+    t.focus(); t.click();
+  });
+}

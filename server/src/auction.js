@@ -469,10 +469,10 @@ export class Auction {
     // 開始価格は、空でもよい（品名だけ登録し、オークショニアが開始のときに決める。発注者の指示。報告書 76 章）。そのあいだは仮に 1 を入れておく
     const pending = startPrice === null || startPrice === undefined || startPrice === '' || startPrice === 0;
     const start = pending ? 1 : Number(startPrice);
-    if (!Number.isSafeInteger(start) || start <= 0) throw new Error('開始価格は1円以上の整数にしてください');
+    if (!Number.isSafeInteger(start) || start <= 0) throw new Error('開始値は1円以上の整数にしてください');
     let reserve = reservePrice === null || reservePrice === undefined || reservePrice === '' ? null : Number(reservePrice);
     if (reserve !== null) {
-      if (!Number.isSafeInteger(reserve) || reserve < start) throw new Error('最低落札額は、開始価格以上の整数にしてください');
+      if (!Number.isSafeInteger(reserve) || reserve < start) throw new Error('最低落札額は、開始値以上の整数にしてください');
       if (reserve === start) reserve = null; // 開始価格と同じなら、最初の入札で必ず届くので、設定なしと同じ
     }
     if (!String(title ?? '').trim()) throw new Error('品名を入力してください');

@@ -148,3 +148,6 @@ section[aria-labelledby="histTitle"]:has(tbody:empty), section[aria-labelledby="
   .meta { width: 100%; justify-content: space-between; }
   .meta > span:first-child { white-space: nowrap; }
 }
+/* 品を追加: 開催がないときの知らせと、断られた理由（フォームのすぐ下。報告書 81 章） */
+.addlot .note, .addlot .msg { grid-column: 1 / -1; margin: 0; }
+.addlot .msg:empty { display: none; }

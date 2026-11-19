@@ -45,9 +45,11 @@ function showDevVerify(url) {
 // 開催のお知らせメールの受け取り。切り替えたら、すぐ保存する（失敗したら、元に戻す）
 $('#eventMail').addEventListener('change', async (ev) => {
   const box = ev.target;
-  box.disabled = true;
+  // 保存中は aria-busy で示す（disabled にすると、キーボードのフォーカスが外れる。報告書 81 章）。続けて切り替えたら、保存が終わるまで戻す
+  if (box.getAttribute('aria-busy') === 'true') { box.checked = !box.checked; return; }
+  box.setAttribute('aria-busy', 'true');
   const res = await api('POST', '/api/my/event-mail', { on: box.checked });
-  box.disabled = false;
+  box.removeAttribute('aria-busy');
   if (!res.ok) { box.checked = !box.checked; $('#accountMsg').textContent = res.message; return; }
   $('#notice').textContent = res.eventMail ? '開催のお知らせメールを、お送りします。' : '開催のお知らせメールを、止めました。';
 });
@@ -163,14 +165,15 @@ $('#withdrawBtn').addEventListener('click', () => {
   dlg.replaceChildren(el('h2', { text: '退会しますか？' }),
     el('p', { text: '退会すると、ログインできなくなります。お取引の記録は、法令で定められた期間、保管します。' }), msg,
     el('div', { class: 'actions' },
-      el('button', { class: 'btn btn-danger', type: 'button', text: '退会する', onclick: async () => { const res = await api('POST', '/api/my/withdraw'); if (res.ok) location.href = '/'; else msg.textContent = res.message; } }),
-      el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() })));
+      el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() }),
+      el('button', { class: 'btn btn-danger', type: 'button', text: '退会する', onclick: async () => { const res = await api('POST', '/api/my/withdraw'); if (res.ok) location.href = '/'; else msg.textContent = res.message; } })));
   dlg.showModal();
+  dlg.querySelector('.actions .btn').focus(); // 最初のフォーカスは「やめる」（Enter で退会しないように。報告書 81 章）
 });
 
 // ---- タブ（開いているタブを URL に載せる。#bills / #profile）
 function showTab(key) {
-  for (const b of $('#myTabs').children) b.setAttribute('aria-selected', String(b.dataset.tab === key));
+  for (const b of $('#myTabs').children) { b.setAttribute('aria-selected', String(b.dataset.tab === key)); b.tabIndex = b.dataset.tab === key ? 0 : -1; }
   $('#panel-bills').hidden = key !== 'bills';
   $('#panel-profile').hidden = key !== 'profile';
   if (location.hash.slice(1) !== key) history.replaceState(null, '', `#${key}`);
@@ -179,6 +182,7 @@ function showTab(key) {
   if (matchMedia('(max-width: 640px)').matches) $('.pagehead h1').textContent = key === 'bills' ? '請求書' : 'マイページ';
 }
 for (const b of $('#myTabs').children) b.addEventListener('click', () => showTab(b.dataset.tab));
+tabKeys($('#myTabs'));
 // 下のタブバー（請求書／マイページ）から来たときも、開くタブを切り替える
 addEventListener('hashchange', () => { if (location.hash === '#profile' || location.hash === '#bills') showTab(location.hash.slice(1)); });
 $('#logoutBtn').addEventListener('click', async () => { await api('POST', '/api/logout'); location.href = '/'; });

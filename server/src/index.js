@@ -294,7 +294,8 @@ function onClient(ws, req) {
   const pendingKey = conn.ip;
   pending.set(pendingKey, (pending.get(pendingKey) ?? 0) + 1);
   const leavePending = () => { if (conn.pendingLeft) return; conn.pendingLeft = true; const n = (pending.get(pendingKey) ?? 1) - 1; if (n > 0) pending.set(pendingKey, n); else pending.delete(pendingKey); };
-  if (pending.get(pendingKey) > 20) { leavePending(); return ws.close(4429, 'too many pending connections'); }
+  // 会場の Wi-Fi のように、大勢が同じ接続元から一斉につなぎ直すこともある。利用者のせいではないので、4503（混雑）で切り、画面は少し待ってつなぎ直す（報告書 81 章）
+  if (pending.get(pendingKey) > 20) { leavePending(); return ws.close(4503, 'busy'); }
   const send = (msg) => ws.readyState === 1 && ws.send(JSON.stringify(msg));
   const allow = limiter(config.messageRate);
   // 名乗らないままの接続を残さない

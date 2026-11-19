@@ -370,6 +370,9 @@ try {
   await admin.click('#dlg >> text=閉じる');
   await admin.waitForSelector('#panel td.act >> text=引き渡し');
   await admin.click('#panel td.act >> text=引き渡し');
+  await admin.waitForSelector('#dlg[open] >> text=引き渡しますか');
+  check(await admin.evaluate(() => document.activeElement?.textContent === 'やめる'), '引き渡しは、だれに何を渡すかを書いて確かめる（最初のフォーカスは「やめる」）');
+  await admin.click('#dlg >> button:has-text("引き渡す")');
   await admin.waitForSelector('#panel >> text=引き渡し済み');
   check(true, '消し込みのあとに、引き渡しを記録できる');
   await shot(admin, 'mvp-25-billing', { fullPage: true });

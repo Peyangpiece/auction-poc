@@ -17,7 +17,8 @@ body { padding-bottom: calc(var(--board-h, 256px) + 24px + env(safe-area-inset-b
 #lotNo:empty { display: none; }
 main { display: grid; gap: 24px; }
 .side { display: contents; }
-#videoBox { order: 1; } .board { order: 2; } .hist { order: 3; } .cmt { order: 4; } .fine { order: 5; }
+#videoBox { order: 1; } .board { order: 2; } .hist { order: 3; } .cmt { order: 4; } .finewrap { order: 5; min-width: 0; }
+/* 履歴・コメントの欄は、キーボードでもスクロールできる（tabindex=0）。フォーカスの輪は、全体の決まりのまま */
 
 /* 上回られたら（FR-UI-004）: 画面の上から赤い帯の知らせが下りてきて、表示板の縁と価格が赤くなる。振動と音も。
    画面全体は塗らない（全面の赤は警報のように見え、ほかの情報も読みにくくなる。Apple のアプリは、知らせの帯と、該当する所だけの色で伝える） */
@@ -138,6 +139,7 @@ details dd { overflow-wrap: anywhere; }
 @media (max-height: 520px) { #gate .gatelogo { width: 180px; } }
 #gateMsg { color: var(--danger); font-size: 14px; font-weight: 600; }
 #gateMsg:empty { display: none; }
+#gateMsg[data-kind="info"] { color: var(--ink); font-weight: 400; font-size: 16px; line-height: 1.8; }
 
 /* PC と、横向きのスマホ: 左に映像とコメント、右に表示板と履歴。表示板は固定しない（横向きでは画面が低く、固定すると映像が隠れる） */
 /* 低くて幅も狭い画面（PC の拡大表示など）: 板を固定せず、映像のすぐ下に置く（固定すると映像が隠れる） */
@@ -152,6 +154,7 @@ details dd { overflow-wrap: anywhere; }
   #videoBox { grid-column: 1; grid-row: 1; }
   .side { display: grid; gap: 24px; min-width: 0; align-content: start; grid-column: 2; grid-row: 1 / span 2; }
   .cmt { grid-column: 1; grid-row: 2; }
+  .finewrap { grid-column: 1; grid-row: 3; } /* パソコン: 注意書きは、コメントの欄の下（Tab で進む順と同じ） */
   .board { position: relative; padding: 16px; gap: 12px; border-radius: var(--r-lg); }
   .board > * { max-width: none; }
   .board:has(#msg:not(:empty)) #result { display: block; }

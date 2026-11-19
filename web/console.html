@@ -51,12 +51,12 @@
         </div>
         <div class="pricewrap">
           <div class="plabel" id="priceLabel">現在価格</div>
-          <div class="price" id="price" aria-live="polite"></div>
+          <div class="price" id="price"></div>
         </div>
-        <p class="board-result" id="result" role="status"></p>
+        <p class="board-result" id="result"></p>
         <div class="lamps">
-          <div class="lamp" id="urikiri" role="status"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub"></small></div>
-          <div class="lamp" id="right" role="status"><span class="bulb"></span><b id="rightLabel">最高入札者</b><small class="num" id="rightSub"></small></div>
+          <div class="lamp" id="urikiri"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub"></small></div>
+          <div class="lamp" id="right"><span class="bulb"></span><b id="rightLabel">最高入札者</b><small class="num" id="rightSub"></small></div>
         </div>
       </div>
       <div class="actions">
@@ -109,8 +109,10 @@
       <form class="addlot" id="addLot">
         <h3 class="addlot__title">品を追加</h3>
         <label class="field">品名<input class="input" id="newTitle" name="title" autocomplete="off" maxlength="60" placeholder="例: 未使用品／ブーツ 10.5R 1足" required></label>
-        <label class="field">開始価格（税込・任意）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="空欄でも可"></label>
+        <label class="field">開始値（税込・任意）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="空欄でも可"></label>
         <label class="field">最低落札額（任意・非公開）<input class="input num" id="newReserve" name="reserve" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="なし"></label>
+        <p class="note" id="noEvent" hidden>本日の公開中の開催がありません。管理の「開催」で、本日の開催を公開してから追加してください。</p>
+        <p class="msg" id="addMsg" role="alert"></p>
         <button class="btn" id="create" type="submit">品を追加</button>
       </form>
     </section>
@@ -121,6 +123,7 @@
         <dt>OBS</dt><dd><span class="state" id="s_obs">不明</span></dd>
       </dl>
       <p id="idleWarn" role="status"></p>
+      <p class="sr-only" id="boardSay" role="status" aria-atomic="true"></p>
       <div class="actions">
         <button class="btn" data-cmd="stream_start" type="button">配信を開始</button>
         <button class="btn" data-cmd="stream_stop" type="button">配信を停止</button>

@@ -1,5 +1,5 @@
 /* 会員登録・ログイン・マイページ・カタログ・スタッフ用の管理画面のスタイル。色と書体は app.css を使う。 */
-.brandbar > div { max-width: 1080px; padding: 0 16px; }
+.brandbar > div { max-width: 1080px; padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); } /* iPhone の横向きで、ノッチにかからない */
 .brandbar nav { display: flex; align-items: center; gap: 4px; flex: none; }
 .brandbar nav a, .linkbtn { white-space: nowrap; }
 .brandbar nav a, .linkbtn {
@@ -9,7 +9,7 @@
 .brandbar nav a:hover, .linkbtn:hover { text-decoration: underline; text-underline-offset: 4px; }
 [hidden] { display: none !important; }
 
-main { max-width: 1080px; margin: 0 auto; padding: 32px 16px 80px; }
+main { max-width: 1080px; margin: 0 auto; padding: 32px max(16px, env(safe-area-inset-right)) 80px max(16px, env(safe-area-inset-left)); }
 main.narrow { max-width: 520px; }
 .pagehead { margin-bottom: 24px; }
 .pagehead h1 { font-size: 26px; letter-spacing: 0; }
@@ -134,6 +134,9 @@ td .note { font-size: 12px; }
 .mylines a { color: var(--action); font-weight: 700; text-underline-offset: 4px; font-size: 14px; }
 .facts dt { padding-right: 24px; }
 .sealbox { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+/* 画像を選ぶ欄は隠しているので、キーボードで来たときは、見えているボタンに輪を出す（報告書 81 章） */
+.sealbox input:focus-visible + label { outline: 2px solid var(--action); outline-offset: 2px; }
+#panel:focus { outline: none; }
 .seal { width: 96px; height: 96px; object-fit: contain; background: #fff; border: 1px solid var(--line); border-radius: var(--r); }
 @media (max-width: 560px) { .brand__logo { height: 40px; } }
 @media (max-width: 370px) { .brand__logo { height: 34px; } }
@@ -150,7 +153,7 @@ td .note { font-size: 12px; }
 /* ---- スタッフ向けの警告（データの保存の失敗） */
 .alarm { background: #c40000; color: #fff; font-weight: 700; padding: 12px 16px; text-align: center; }
 .check a { color: var(--action); font-weight: 700; text-underline-offset: 4px; }
-.legaldoc { margin-bottom: 48px; scroll-margin-top: 16px; }
+.legaldoc { margin-bottom: 48px; scroll-margin-top: 80px; } /* 上の帯（60px あまり）の下に、見出しが隠れないように */
 .legaldoc h2 { font-size: 20px; color: var(--ink); margin-bottom: 12px; }
 
 /* ---- トップページ: 落札の結果（開催が終わったあと） */
@@ -284,6 +287,7 @@ th { font-size: 12px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; 
 .msg { font-size: 14px; line-height: 1.7; }
 /* 下のタブバー: うっすら透ける面。選んでいるタブは、紺 */
 @media (max-width: 640px) {
+  html:has(.tabbar) { scroll-padding-bottom: 100px; } /* 下のタブバーの下に、欄が隠れないように */
   .tabbar { background: color-mix(in srgb, var(--ground) 88%, transparent); backdrop-filter: saturate(180%) blur(16px); -webkit-backdrop-filter: saturate(180%) blur(16px); border-top: 0; box-shadow: 0 -1px 0 var(--line); }
   .tabbar a { font-weight: 500; transition: color .15s var(--ease), transform .12s var(--ease); }
   .tabbar a:active { transform: scale(.94); }

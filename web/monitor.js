@@ -23,7 +23,7 @@ function render() {
   $('lotNo').textContent = lot ? `No.${lot.lotNo}` : '';
   $('title').textContent = lot ? lot.title : '次の品をお待ちください';
   const closed = lot && (lot.status === 'sold' || lot.status === 'unsold');
-  $('priceLabel').textContent = !lot ? '' : lot.status === 'sold' ? '落札価格' : lot.currentPrice === null ? '開始価格' : '現在価格';
+  $('priceLabel').textContent = !lot ? '' : lot.status === 'sold' ? '落札額' : lot.currentPrice === null ? '開始価格' : '現在価格';
   $('price').textContent = lot ? yen(lot.currentPrice ?? lot.startPrice) : '';
   $('who').className = lot?.status === 'sold' ? 'who sold' : 'who';
   $('who').textContent = !lot ? '' : lot.status === 'sold' ? `${lot.highestPaddle}番 落札`

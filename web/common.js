@@ -114,6 +114,7 @@ class Link {
         if (msg.type === 'time') return;
       }
       if (msg.type === 'welcome') {
+        this.closeInfo = null;
         const wasDown = this.downAt;
         this.attempt = 0;
         this.downAt = null;
@@ -133,6 +134,7 @@ class Link {
     };
     ws.onclose = (ev) => {
       if (ws !== this.ws) return; // すでに見切りをつけて、つなぎ直しに入っている
+      if (ev.code === 4503) return this.dropped('busy'); // 混み合っている: 少し待って、つなぎ直す
       if (CLOSE_REASON[ev.code]) { // つなぎ直さない。サーバーが理由を送っていれば、その文を出す（固定の文では、何が起きたか分からないため）
         this.ws = { readyState: 3, send() {}, close() {} };
         const info = ev.code === 4403 ? this.closeInfo : null;
@@ -152,9 +154,11 @@ class Link {
     this.lastDropCause = cause;
     // 応答を待っている操作（入札など）を、時間切れまで待たせない。届いたかどうかは、再接続後の表示で分かる
     for (const [key, w] of this.waiters) { this.waiters.delete(key); w(null); }
-    this.onStatus(false);
-    // 切れてから1秒後に1回目を試し、その後は2秒ごとに試す（FR-UI-001）
-    setTimeout(() => this.connect(), this.attempt++ === 0 ? 1000 : 2000);
+    this.onStatus(false, cause === 'busy' ? '混み合っています。自動でつなぎ直します' : undefined);
+    // 切れてから1秒後に1回目を試し、その後は2秒ごとに試す（FR-UI-001）。混み合っているときは、2〜6秒の間でばらして試す（一斉につなぎ直さない）
+    const wait = cause === 'busy' ? 2000 + Math.random() * 4000 : this.attempt === 0 ? 1000 : 2000;
+    this.attempt++;
+    setTimeout(() => this.connect(), wait);
   }
 
   send(obj) {

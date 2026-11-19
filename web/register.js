@@ -11,7 +11,8 @@ function show(step) {
     const li = $('#steps').children[i];
     if (name === step) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
   });
-  forms[step].querySelector('input:not([type=radio])')?.focus();
+  // 見えていて使える最初の欄へ（隠れた法人の欄に当たると、フォーカスが行き場を失う。報告書 81 章）
+  [...forms[step].querySelectorAll('input:not([type=radio]):not([type=checkbox])')].find((i) => !i.disabled && i.offsetParent !== null)?.focus();
 }
 
 // SMS を使わない設定（本番）のときは、連絡先の欄を、メールアドレスだけにする
@@ -43,6 +44,7 @@ $('#resend').addEventListener('click', async (ev) => {
   const msg = $('.msg', forms.code);
   msg.classList.toggle('ok', res.ok);
   msg.textContent = res.ok ? '認証番号を送り直しました' : res.message;
+  forms.code.elements.code.focus(); // 押したボタンは10秒止まるので、次に入れる欄へ（フォーカスが外れないように）
   setTimeout(() => { ev.target.disabled = false; }, 10000); // 続けて押せないようにする
 });
 

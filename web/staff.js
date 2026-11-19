@@ -26,10 +26,11 @@ function table(heads, rows, empty) {
 const act = (...buttons) => el('td', { class: 'act' }, buttons);
 const smallBtn = (text, onclick, cls = '') => el('button', { class: `btn ${cls}`, type: 'button', text, onclick });
 /** 理由を聞いてから実行する、取り消しにくい操作 */
-function askReason(title, label, required, run) {
+function askReason(title, label, required, run, okText = '実行する', danger = true) {
+  // 実行のボタンは、操作の名前にする（「実行する」では、何が起きるかが分からない。報告書 81 章）
   const form = el('form', { class: 'form', novalidate: true },
     field(label, 'reason', { rows: 3, required }), msgLine(),
-    el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '実行する' }), closeBtn('やめる')));
+    el('div', { class: 'actions' }, el('button', { class: `btn ${danger ? 'btn-danger' : 'btn-primary'}`, type: 'submit', text: okText }), closeBtn('やめる')));
   onSubmit(form, async (data) => {
     const res = await run(data.reason);
     if (res.ok) { dlg.close(); show(current); }
@@ -39,6 +40,14 @@ function askReason(title, label, required, run) {
   form.elements.reason.focus();
 }
 
+// 設定・規約類に入れたまま、ほかのタブに移ると、入力が消える。移る前に確かめる（報告書 81 章）
+let unsaved = false;
+panel.addEventListener('input', (ev) => { if (current === 'settings' && ev.target.closest('form')) unsaved = true; });
+addEventListener('beforeunload', (ev) => { if (unsaved) ev.preventDefault(); });
+function leavePanel(go) {
+  if (!unsaved) return go();
+  confirmDo('保存していない入力があります', 'ほかのタブに移ると、設定・規約類に入れた内容は消えます。', '保存せずに移る', async () => ({ ok: true }), { danger: true, then: async () => { unsaved = false; go(); } });
+}
 // 知らせは、パネルを描き直したあとも残す（操作のあとに show() で描き直すため、先に出した文が消えていた。報告書 80 章）
 let pendingNotice = null;
 const alertLine = (text) => { pendingNotice = text || null; const line = $('#line'); if (line) line.textContent = text; };
@@ -151,7 +160,7 @@ async function membersPanel() {
       : m.suspendedBy === 'unpaid' ? el('span', { class: 'warn', text: '未払いによる停止（消し込むと、自動で解ける）' }) : '利用中'),
     act(
       !m.approved && !m.withdrawn && smallBtn('承認する', () => issue(`/api/members/${m.id}/approve`, `会員 ${m.id} を承認しました`), 'btn-primary'),
-      !m.approved && !m.withdrawn && smallBtn('承認しない', () => askReason(`会員 ${m.id} の登録を承認しない`, '理由', true, (reason) => api('POST', `/api/members/${m.id}/reject`, { reason })), 'btn-danger'),
+      !m.approved && !m.withdrawn && smallBtn('承認しない', () => askReason(`会員 ${m.id} の登録を承認しない`, '理由', true, (reason) => api('POST', `/api/members/${m.id}/reject`, { reason }), '承認しない'), 'btn-danger'),
       m.approved && !m.withdrawn && smallBtn(m.loginId ? 'パスワードを再発行' : 'ログイン情報を発行', () => (m.loginId
         ? confirmDo(`会員 ${m.id} のパスワードを再発行しますか？`, 'いまのパスワードは使えなくなります。新しいパスワードを、本人へメールで送ります。', '再発行する',
           () => api('POST', `/api/members/${m.id}/credentials`), { danger: true, then: async (r) => { await show('members'); issuedDialog(`会員 ${m.id} のログイン情報を発行しました`, r); } })
@@ -160,7 +169,7 @@ async function membersPanel() {
         [field('新しい電話番号', 'phone', { type: 'tel', inputMode: 'tel', required: true }), field('本人を確かめた方法', 'reason', { required: true, placeholder: '会場で、運転免許証で確かめた' })], (d) => api('POST', `/api/members/${m.id}/phone`, d), '変更する')),
       m.suspendedBy === 'manual'
       ? smallBtn('停止を解く', () => post(`/api/members/${m.id}/unsuspend`))
-      : !m.withdrawn && m.suspendedBy !== 'unpaid' && smallBtn('停止', () => askReason(`会員 ${m.id} を停止`, '停止の理由', true, (reason) => api('POST', `/api/members/${m.id}/suspend`, { reason })), 'btn-danger'))));
+      : !m.withdrawn && m.suspendedBy !== 'unpaid' && smallBtn('停止', () => askReason(`会員 ${m.id} を停止`, '停止の理由', true, (reason) => api('POST', `/api/members/${m.id}/suspend`, { reason }), '停止する'), 'btn-danger'))));
   return [el('p', { class: 'msg', id: 'line', role: 'alert' }),
     waiting ? el('div', { class: 'banner', role: 'status' }, el('span', { text: `承認待ちの会員登録が ${waiting} 件あります。承認すると、ログイン ID とパスワードが、本人へメールで送られます。` })) : null,
     table(['会員番号', '名前', '区分', 'ログイン ID', '電話番号', 'メール', '状態', ''], rows, '会員はまだいません。')];
@@ -281,11 +290,11 @@ async function billingPanel() {
           [field('入金の金額（円）', 'amount', { inputMode: 'numeric', required: true }), field('メモ', 'memo', {}, '任意')], (d) => api('POST', `/api/billing/lines/${l.id}/clear`, { amount: Number(d.amount), memo: d.memo }), '消し込む'), 'btn-primary'),
         a && l.state === 'unpaid' && smallBtn('督促', () => askForm('督促の記録', l.dunning.map((d) => `${dateFmt.format(d.at)} ${d.method}: ${d.body}`).join('\n'),
           [field('方法', 'method', { required: true, placeholder: '電話・メールなど' }), field('内容', 'body', { rows: 3, required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/dun`, d), '記録する')),
-        a && l.state === 'unpaid' && smallBtn('解除…', () => askReason('落札を解除', '解除の理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/cancel`, { reason })), 'btn-danger'),
-        l.state === 'cleared' && l.kind !== 'penalty' && l.kind !== 'late' && smallBtn('引き渡し', () => post(`/api/billing/lines/${l.id}/deliver`), 'btn-primary'),
-        a && l.state === 'cleared' && smallBtn('消し込みを取り消す', () => askReason('消し込みを取り消す', '取り消しの理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/unclear`, { reason }))),
-        a && l.state === 'delivered' && smallBtn('引き渡しを取り消す', () => askReason('引き渡しの記録を取り消す', '取り消しの理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/undeliver`, { reason }))),
-        a && l.state === 'cancelled' && l.kind === 'lot' && !l.offer && smallBtn('繰り上げを打診', () => post(`/api/billing/lines/${l.id}/offer`)),
+        a && l.state === 'unpaid' && smallBtn('解除…', () => askReason('落札を解除', '解除の理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/cancel`, { reason }), '解除する'), 'btn-danger'),
+        l.state === 'cleared' && l.kind !== 'penalty' && l.kind !== 'late' && smallBtn('引き渡し', () => confirmDo(`${l.name}さんに引き渡しますか？`, `${l.label}。引き渡しの記録を残します（取り消しは主催者管理者だけができます）。`, '引き渡す', () => api('POST', `/api/billing/lines/${l.id}/deliver`)), 'btn-primary'),
+        a && l.state === 'cleared' && smallBtn('消し込みを取り消す', () => askReason('消し込みを取り消す', '取り消しの理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/unclear`, { reason }), '取り消す')),
+        a && l.state === 'delivered' && smallBtn('引き渡しを取り消す', () => askReason('引き渡しの記録を取り消す', '取り消しの理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/undeliver`, { reason }), '取り消す')),
+        a && l.state === 'cancelled' && l.kind === 'lot' && !l.offer && smallBtn('繰り上げを打診', () => confirmDo('次点の人に、繰り上げを打診しますか？', `${l.label}。次点の人に、繰り上げ落札のご案内をメールで送ります（回答の期限は3日後）。打診できるのは1人だけで、取り消せません。`, '打診する', () => api('POST', `/api/billing/lines/${l.id}/offer`))),
         a && ['lot', 'promote'].includes(l.kind) && l.receive === 'ship' && l.state !== 'cancelled' && smallBtn('送料', () => shippingForm(l.accountId, l.eventId, l.name)),
         // 違約金・遅延損害金: 設定の率から計算した案を初めに入れておく。金額は、確かめてから確定する
         ...(a && l.state === 'cancelled' || a && ['cleared', 'delivered'].includes(l.state) && l.invoice?.dueDate && l.clearedOn > l.invoice.dueDate ? [l.state === 'cancelled' ? ['penalty', '違約金'] : ['late', '遅延損害金']].map(([kind, name]) => smallBtn(name, async () => {
@@ -330,7 +339,7 @@ async function feesPanel() {
   const pick = el('input', { class: 'input', type: 'month', value: f.month, 'aria-label': '月', onchange: (ev) => { feeMonth = ev.target.value; show('fees'); } });
   return [
     el('div', { class: 'toolbar' }, el('div', { class: 'monthpick' }, pick),
-      f.confirmedOn ? el('p', { text: `確認済み（${f.confirmedOn}）` }) : isAdmin() && smallBtn('この月の明細を、確認済みにする', () => post('/api/billing/fees/confirm', { month: f.month }), 'btn-primary')),
+      f.confirmedOn ? el('p', { text: `確認済み（${jpDay(f.confirmedOn)}）` }) : isAdmin() && smallBtn('この月の明細を、確認済みにする', () => confirmDo(`${f.month.slice(0, 4)}年${Number(f.month.slice(5))}月の明細を、確認済みにしますか？`, '確認済みにすると、取り消せません。金額を確かめてから押してください。', '確認済みにする', () => api('POST', '/api/billing/fees/confirm', { month: f.month })), 'btn-primary')),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     el('dl', { class: 'facts' },
       el('dt', { text: '対象の落札額（消し込み済み・税込）' }), el('dd', { class: 'n', text: yen(f.base) }),
@@ -444,7 +453,8 @@ function sealBox(fixed = false) {
   // 原本の印鑑で固定しているときは、ここでは変えられない（配るときの設定で変える）
   if (fixed) { preview.onload = () => { preview.hidden = false; note.textContent = '原本の印鑑を押します（配るときの設定で固定しています）。'; }; return el('div', { class: 'sealbox' }, preview, el('div', {}, note)); }
   return el('div', { class: 'sealbox' }, preview, el('div', {}, note, input, el('label', { class: 'btn', htmlFor: 'sealInput', text: '画像を選ぶ' }), ' ',
-    el('button', { class: 'btn', type: 'button', text: '登録を消す', onclick: async () => { await api('POST', '/api/settings/seal', { image: null }); refresh(); } })));
+    el('button', { class: 'btn', type: 'button', text: '登録を消す', onclick: () => confirmDo('印鑑の画像を消しますか？', 'これから出す請求書には、印鑑が押されなくなります。', '消す',
+      () => api('POST', '/api/settings/seal', { image: null }), { danger: true, then: async () => refresh() }) })));
 }
 // 規約類（利用規約・特定商取引法に基づく表示・プライバシーポリシー）の文面
 async function legalBox() {
@@ -457,7 +467,7 @@ async function legalBox() {
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '規約類を保存する' })));
   onSubmit(form, async (data) => {
     const r = await api('POST', '/api/settings/legal', data);
-    if (r.ok) releaseWarning();
+    if (r.ok) { releaseWarning(); unsaved = false; }
     if (r.ok) { const m = $('.msg', form); m.classList.add('ok'); m.textContent = '保存しました'; return null; }
     return r;
   });
@@ -493,7 +503,7 @@ async function settingsPanel() {
   for (const name of s.fixed ?? []) { const input = form.elements[name]; if (input) { input.readOnly = true; input.setAttribute('aria-readonly', 'true'); } }
   onSubmit(form, async (data) => {
     const res = await api('POST', '/api/settings', data);
-    if (res.ok) releaseWarning();
+    if (res.ok) { releaseWarning(); unsaved = false; }
     if (res.ok) { const m = $('.msg', form); m.classList.add('ok'); m.textContent = '保存しました'; return null; }
     return res;
   });
@@ -503,7 +513,7 @@ async function settingsPanel() {
 // ------------------------------------------------------------ 記録（監査ログ・知らせ）
 // 記録の「操作」を、読める言葉にする（無いものは、そのまま出す）
 const AUDIT_TEXT = {
-  'staff.login': 'スタッフがログイン', 'staff.create': 'スタッフを登録', 'staff.reset': 'スタッフのパスワードを再発行', 'staff.stop': 'スタッフを停止', 'staff.reactivate': 'スタッフの停止を解除', 'staff.password_change': 'スタッフがパスワードを変更',
+  'staff.login': 'スタッフがログイン', 'staff.create': 'スタッフを登録', 'staff.reset': 'スタッフのパスワードを再発行', 'staff.stop': 'スタッフを停止', 'staff.setup': 'スタッフがパスワードを決めた', 'staff.locked': 'スタッフのログインを一時停止（失敗が続いたため）', 'event.running': '開催を進行中にした', 'event.break': '休憩に入った', 'event.ended': '開催を終了', 'staff.reactivate': 'スタッフの停止を解除', 'staff.password_change': 'スタッフがパスワードを変更',
   'member.register': '会員登録', 'member.approve': '会員登録を承認', 'member.reject': '会員登録を承認しない', 'member.credentials_issue': 'ログイン情報を発行', 'member.credentials': '会員がパスワードを変更', 'member.update': '会員が登録内容を変更', 'member.withdraw': '会員が退会', 'member.suspend': '会員を停止', 'member.unsuspend': '会員の停止を解除', 'member.phone_change': '会員の電話番号を変更',
   'event.create': '開催を登録', 'event.update': '開催を変更', 'event.publish': '開催を公開', 'event.join': '参加手続き', 'participation.change': '参加の内容を変更',
   'lot.create': '品を登録', 'proxy.bid': '代理で入札', 'proxy.cancel': '代理の入札を取り消し',
@@ -516,7 +526,10 @@ const AUDIT_TEXT = {
 };
 // 記録の「前」「後」（機械向けの形）を、読める言葉にする
 const AUDIT_KEY = { mode: '参加', payment: '支払', receive: '受け取り', checkedIn: '来場確認', paddle: '参加番号', kind: '区分', fields: '変えた項目', loginId: 'ログイン ID', role: '役割', by: '登録元', amount: '金額', title: '名前', status: '状態', reason: '理由', memo: 'メモ', shipping: '送料', dueDate: '期限', number: '請求番号' };
-const AUDIT_VALUE = { venue: '会場', online: 'オンライン', cash: '当日現金', transfer: '銀行振込', pickup: '現地受け取り', ship: '配送', b2c: '個人', b2b: '法人', true: 'はい', false: 'いいえ', admin: '主催者管理者', auctioneer: '進行役', reception: '受付係', operator: '開発運営者' };
+const AUDIT_VALUE = { venue: '会場', online: 'オンライン', cash: '当日現金', transfer: '銀行振込', pickup: '現地受け取り', ship: '配送', b2c: '個人', b2b: '法人', true: 'はい', false: 'いいえ', admin: '主催者管理者', auctioneer: '進行役', caller: 'オークショニア', reception: '受付係', operator: '開発運営者' };
+// 記録の「対象」を、読める形にする（member:12 → 会員 12。報告書 81 章）
+const TARGET_KIND = { member: '会員', staff: 'スタッフ', event: '開催', lot: '品', line: '明細', offer: '繰り上げ', participant: '参加者', invoice: '請求書', account: '会員' };
+const targetText = (t) => String(t ?? '').replace(/\b([a-z]+):(\d+)\b/g, (m, k, id) => (TARGET_KIND[k] ? `${TARGET_KIND[k]} ${id}` : m));
 function auditText(raw) {
   if (!raw) return '';
   let v;
@@ -531,7 +544,7 @@ async function auditPanel() {
   return [
     (notices.notices ?? []).length ? el('div', { class: 'banner', role: 'alert' }, el('span', { text: `送信に失敗した知らせが ${notices.notices.length} 件あります（SMS・メール）。` })) : null,
     table(['日時', '操作', '誰が', '対象', '前', '後', '理由'], audit.entries.map((e) => el('tr', {},
-      el('td', { class: 'n', text: dateFmt.format(e.at) }), el('td', { text: AUDIT_TEXT[e.type] ?? e.type }), el('td', { text: who(e) }), el('td', { text: e.target }),
+      el('td', { class: 'n', text: dateFmt.format(e.at) }), el('td', { text: AUDIT_TEXT[e.type] ?? e.type }), el('td', { text: who(e) }), el('td', { text: targetText(e.target) }),
       el('td', { class: 'dyn', text: auditText(e.before) }), el('td', { class: 'dyn', text: auditText(e.after) }), el('td', { class: 'dyn', text: e.reason ?? '' }))), '記録はまだありません。'),
   ];
 }
@@ -551,12 +564,16 @@ const PANELS = {
 };
 async function show(key) {
   current = key;
+  unsaved = false; // パネルを描き直すと、書きかけの欄はなくなる
   // 開いているタブを URL に載せる（読み込み直しても、同じタブに戻る。URL を人に渡せる）
   if (location.hash.slice(1) !== key) history.replaceState(null, '', `#${key}`);
-  for (const b of $('#tabs').children) b.setAttribute('aria-selected', String(b.dataset.key === key));
+  for (const b of $('#tabs').children) { b.setAttribute('aria-selected', String(b.dataset.key === key)); b.tabIndex = b.dataset.key === key ? 0 : -1; }
   const nodes = await PANELS[key][1]();
   if (current !== key) return;
   panel.replaceChildren(...nodes.filter(Boolean));
+  // ダイアログで実行すると、開いたボタンは描き直しで消える。フォーカスが行き場を失ったら、パネルへ戻す（報告書 81 章）
+  if (!document.activeElement || document.activeElement === document.body) panel.focus({ preventScroll: true });
+  panel.setAttribute('aria-labelledby', `tab-${key}`);
   if (pendingNotice) { const line = $('#line'); if (line) line.textContent = pendingNotice; pendingNotice = null; }
 }
 
@@ -592,7 +609,7 @@ $('#backToLogin').addEventListener('click', () => { $('#setupForm').hidden = tru
   // SMS を使わない設定（本番）のときは、「SMS の制限」を出さない
   const terms = await api('GET', '/api/terms');
   const keys = Object.keys(PANELS).filter((k) => PANELS[k][2].includes(me.role) && !(k === 'sms' && terms.sms === false));
-  $('#tabs').replaceChildren(...keys.map((k) => el('button', { type: 'button', role: 'tab', 'data-key': k, text: PANELS[k][0], onclick: () => { pendingNotice = null; show(k); } })));
+  $('#tabs').replaceChildren(...keys.map((k) => el('button', { type: 'button', role: 'tab', id: `tab-${k}`, 'aria-controls': 'panel', 'data-key': k, text: PANELS[k][0], onclick: () => leavePanel(() => { pendingNotice = null; show(k); }) })));
   show(keys.includes(location.hash.slice(1)) ? location.hash.slice(1) : keys[0]);
   if (me.role === 'admin') releaseWarning();
 })();
@@ -609,5 +626,6 @@ async function releaseWarning() {
   if (!missing.length) return;
   $('#tabs').before(el('div', { class: 'banner', id: 'releaseWarn', role: 'status' },
     el('span', { class: 'warn', text: `まだ入っていません: ${missing.join('・')}。会員に見える画面と請求書に出るため、公開の前に入れてください。` }),
-    smallBtn('設定を開く', () => { pendingNotice = null; show('settings'); })));
+    smallBtn('設定を開く', () => leavePanel(() => { pendingNotice = null; show('settings'); }))));
 }
+tabKeys($('#tabs'));

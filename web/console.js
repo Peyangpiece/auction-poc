@@ -11,7 +11,7 @@ function renderComments() {
     const body = document.createElement('span'); body.className = 'dyn'; body.textContent = c.text;
     const hide = document.createElement('button'); hide.type = 'button'; hide.className = 'btn'; hide.textContent = '非表示';
     hide.setAttribute('aria-label', `${c.paddle}番のコメント「${c.text}」を非表示にする`);
-    hide.onclick = () => cmd('hide_comment', { id: c.id });
+    hide.onclick = async () => { if (await ask({ title: 'コメントを非表示にしますか？', body: `${c.paddle}番「${c.text}」。参加者の画面から消えます。元には戻せません。`, okLabel: '非表示にする', danger: true })) cmd('hide_comment', { id: c.id }); };
     li.append(who, body, hide);
     return li;
   })));
@@ -34,7 +34,7 @@ function render() {
   $('status').dataset.st = st ?? 'idle';
   $('lotNo').textContent = lot ? `No.${lot.lotNo}` : '';
   $('title').textContent = lot ? lot.title : '進行中の品はありません';
-  $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札価格' : lot.currentPrice === null ? '開始価格' : '現在価格';
+  $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札額' : lot.currentPrice === null ? '開始値' : '現在価格';
   $('price').textContent = lot ? yen(lot.currentPrice ?? lot.startPrice) : '';
   // 落札の条件は、うりきり（最低落札額に届いている）と、最高入札者がいることの両方
   setLamp('urikiri', !!lot?.urikiri, !lot || lot.reservePrice === null ? '' : `最低落札額 ${yen(lot.reservePrice)}`);
@@ -48,6 +48,9 @@ function render() {
     : st === 'open' ? (lot.urikiri && lot.currentPrice !== null ? `締めると ${lot.highestPaddle}番が落札` : '締めると流札')
     : st === 'preparing_warn' ? '配信が始まりません（60秒経過）'
     : '';
+  // 読み上げは、1か所の要約だけ（価格・ランプ・結果が別々に読まれて細切れにならないように。報告書 81 章）
+  const summary = !lot ? '' : [`No.${lot.lotNo}`, STATE_LABEL[st] ?? '', yen(lot.currentPrice ?? lot.startPrice), lot.highestPaddle ? `${lot.highestPaddle}番` : '', $('result').textContent].filter(Boolean).join('　');
+  if (summary !== S.boardSaid) { S.boardSaid = summary; $('boardSay').textContent = summary; }
   // その状態でできる操作だけを出す
   const show = (id, on) => { $(id).hidden = !on; };
   // 締めた後・最初は、次にやることが1つだけ（次の品を開始）。板から目を離さずに進められる
@@ -126,19 +129,20 @@ function renderStream() {
 setInterval(() => {
   if (!link) return;
   // 千分の一秒までの時刻は、遅延を測るとき（検証用の設定）だけ出す
-  $('clock').textContent = S.dev ? jst(link.serverNow()) : jst(link.serverNow()).slice(0, 8);
+  const setText = (id, t) => { if ($(id).textContent !== t) $(id).textContent = t; }; // 変わったときだけ書く（読み上げの繰り返しと、無駄な描き直しを避ける）
+  setText('clock', S.dev ? jst(link.serverNow()) : jst(link.serverNow()).slice(0, 8));
   // 配信の止め忘れ: 競りがないまま配信が続いた時間が長くなったら知らせる（自動では止めない）
   const st = S.stream;
   const idleMs = st && st.idleSince && (st.obsActive || st.live) && st.mode !== 'always-live' ? link.serverNow() - st.idleSince : 0;
-  $('idleWarn').textContent = st && idleMs >= st.idleWarnMs ? `競りがないまま ${Math.floor(idleMs / 60000)} 分、配信が続いています` : '';
-  $('offset').textContent = link.offset.toFixed(1); $('rtt').textContent = link.rtt?.toFixed(1) ?? '0';
+  setText('idleWarn', st && idleMs >= st.idleWarnMs ? `競りがないまま ${Math.floor(idleMs / 60000)} 分、配信が続いています` : '');
+  setText('offset', link.offset.toFixed(1)); setText('rtt', link.rtt?.toFixed(1) ?? '0');
 }, 50);
 
 async function cmd(action, extra = {}, msgId = 'cmdMsg') {
   const reqId = ++link.reqId, sent = localNow();
   const res = await link.request(reqId, { type: 'cmd', reqId, action, ...extra, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
   // うまくいかなかった操作は、記録の欄だけでなく、操作した場所のすぐ下にも理由を出す（代理入札は、代理入札の欄の下）
-  $(msgId).textContent = !res ? '応答がありません' : res.ok ? '' : res.message;
+  $(msgId).textContent = !res ? '通信が切れました。つながり直したあとの表示で、操作が通ったかを確かめてください' : res.ok ? '' : res.message;
   if (!res) log(`${action}: 応答なし`);
   else if (!res.ok) log(`${action}: 拒否（${res.message}）`);
   else log(`${action}: OK${res.status ? `（${STATE_LABEL[res.status]}${res.reason === 'reserve_not_met' ? '・最低落札額に届かず' : ''} ${res.paddle ?? ''} ${res.amount ? yen(res.amount) : ''}）` : ''} ${Math.round(res.clientRecvAt - sent)}ms`);
@@ -188,14 +192,27 @@ document.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click
   await lotCmd(b.dataset.act, lot.id, !!b.dataset.reason);
   b.disabled = false; render();
 }));
-document.querySelectorAll('[data-cmd]').forEach((b) => b.addEventListener('click', () => cmd(b.dataset.cmd)));
+// 配信の停止は、オンラインの全員の映像が止まるので、確かめる（報告書 81 章）
+document.querySelectorAll('[data-cmd]').forEach((b) => b.addEventListener('click', async () => {
+  if (b.dataset.cmd === 'stream_stop' && !(await ask({ title: '配信を停止しますか？', body: 'オンラインで参加している全員の映像が止まります。「配信を開始」で再開できます。', okLabel: '停止する', danger: true }))) return;
+  cmd(b.dataset.cmd);
+}));
 document.querySelectorAll('[data-crash]').forEach((b) => b.addEventListener('click', async () => {
   const ans = await ask({ title: 'サーバーを強制終了しますか？', body: `${b.textContent.replace('…', '')}。参加者の画面は「再接続中」になり、受付中の品は復旧の規則に従って中断または確定になります。`, okLabel: '強制終了する', danger: true });
   if (ans) cmd('crash', { point: b.dataset.crash });
 }));
 document.querySelectorAll('[data-mark]').forEach((b) => b.addEventListener('click', () => cmd('mark', { label: $('markLabel').value || 'unnamed', phase: b.dataset.mark })));
 $('markForm').addEventListener('submit', (ev) => ev.preventDefault());
-$('addLot').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('create_lot', { title: $('newTitle').value, startPrice: $('newPrice').value === '' ? null : Number($('newPrice').value), reservePrice: $('newReserve').value === '' ? null : Number($('newReserve').value) }); for (const id of ['newTitle', 'newPrice', 'newReserve']) $(id).value = ''; $('newTitle').focus(); }); // 追加したら、欄を空にして、次の品を書けるようにする
+// 品を追加: 通ってから欄を空にする（断られたら、入れた内容を残して、理由をフォームのすぐ下に出す。報告書 81 章）
+$('addLot').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  if ($('create').disabled) return;
+  $('create').disabled = true; $('create').textContent = '追加しています…';
+  const res = await cmd('create_lot', { title: $('newTitle').value, startPrice: $('newPrice').value === '' ? null : Number($('newPrice').value), reservePrice: $('newReserve').value === '' ? null : Number($('newReserve').value) }, 'addMsg');
+  $('create').textContent = '品を追加'; renderEvent();
+  if (res?.ok) { for (const id of ['newTitle', 'newPrice', 'newReserve']) $(id).value = ''; $('newTitle').focus(); }
+  else $(res?.message?.includes('最低落札額') ? 'newReserve' : res?.message?.includes('開始') ? 'newPrice' : 'newTitle').focus();
+});
 
 function onMessage(msg, at) {
   switch (msg.type) {
@@ -255,6 +272,9 @@ const PAYMENT = { transfer: '銀行振込', cash: '当日現金' };
 const RECEIVE = { pickup: '現地受け取り', ship: '配送' };
 function renderEvent() {
   const e = S.event;
+  // 本日の公開中の開催がないと、追加した品は、どの開催にも入らず、会員から見えない。知らせて、追加を止める（検証用の合言葉で入ったときは止めない）
+  $('noEvent').hidden = !!e || !!token;
+  $('create').disabled = !e && !token;
   $('eventBar').hidden = !e;
   $('proxySection').hidden = !e; // 代理入札は、開催の参加者（会場参加）が相手なので、開催があるときだけ
   if (!e) return;
@@ -266,7 +286,8 @@ function renderEvent() {
 setInterval(() => {
   if (!S.event || !link) return;
   const now = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false }).format(link.serverNow());
-  $('evWarn').textContent = now >= S.event.endsAt ? `終了の予定（${S.event.endsAt}）を過ぎています` : '';
+  const warn = now >= S.event.endsAt ? `終了の予定（${S.event.endsAt}）を過ぎています` : '';
+  if ($('evWarn').textContent !== warn) $('evWarn').textContent = warn;
 }, 5000);
 function renderSold() {
   const cell = (text, cls) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; return td; };

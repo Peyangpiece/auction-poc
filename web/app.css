@@ -88,7 +88,9 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scrollbar-color: var(--ink-3) transparent; }
+html { -webkit-text-size-adjust: 100%; scrollbar-color: var(--ink-3) transparent;
+  /* 上に留まる帯・下に固定した表示板の下に、Tab で進んだ欄が隠れないように（報告書 81 章） */
+  scroll-padding-top: 72px; scroll-padding-bottom: calc(var(--board-h, 0px) + 16px); }
 body {
   margin: 0;
   background: var(--ground);

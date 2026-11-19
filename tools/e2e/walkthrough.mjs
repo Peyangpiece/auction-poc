@@ -114,6 +114,9 @@ try {
   check(true, '競りがないまま配信が続くと、進行コンソールに注意が出る');
   await shot(con, 'console-after-close');
   await con.click('[data-cmd="stream_stop"]');
+  await con.waitForSelector('#dlg[open]');
+  check((await con.textContent('#dlgBody')).includes('全員の映像'), '「配信を停止」は、全員の映像が止まることを書いて確かめる');
+  await con.click('#dlgOk');
   await con.waitForFunction(() => document.getElementById('s_obs').textContent === '停止', null, { timeout: 10000 });
   await con.waitForFunction(() => document.getElementById('idleWarn').textContent === '', null, { timeout: 5000 });
   check(true, '「配信を停止」で止まり、注意も消える');

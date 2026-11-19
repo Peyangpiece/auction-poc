@@ -27,7 +27,7 @@
   <main class="stage" id="main" tabindex="-1">
     <h1 class="sr-only">オークショニア</h1>
     <!-- 品と価格 -->
-    <section class="lot" aria-live="polite">
+    <section class="lot">
       <div class="lot__head">
         <p class="lot__name"><span class="num" id="lotNo"></span><span class="dyn" id="title">品を待っています</span></p>
         <span class="state" id="status" data-st="idle">待機中</span>
@@ -63,6 +63,7 @@
       <button class="act act--close" type="button" id="close"><b id="closeLabel">締め</b><span id="closeSub"></span></button>
     </section>
     <p class="msg" id="msg" role="status"></p>
+    <p class="sr-only" id="lotSay" role="status" aria-atomic="true"></p>
     </div>
   </main>
 </div>

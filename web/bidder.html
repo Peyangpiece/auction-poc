@@ -51,6 +51,7 @@
 </div>
 
 <p class="sr-only" id="alert" role="alert"></p>
+<p class="sr-only" id="priceSay" role="status"></p>
 <!-- 上回られたときの知らせの帯（読み上げは #alert が受け持つ） -->
 <div class="outbidbar" id="outbidBar" aria-hidden="true">
   <svg viewBox="0 0 24 24"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4.5M12 17.3v.2"/></svg>
@@ -114,7 +115,7 @@
       <a class="btn paylink" id="toPay" href="/mypage.html" hidden>お支払いの確認へ</a>
       <div class="lamps">
         <div class="lamp" id="urikiri" role="img"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub"></small></div>
-        <div class="lamp" id="right" role="img"><span class="bulb"></span><b id="rightLabel">権利</b><small class="num" id="rightSub"></small></div>
+        <div class="lamp" id="right" role="img"><span class="bulb"></span><b id="rightLabel">最高入札</b><small class="num" id="rightSub"></small></div>
       </div>
       <p id="msg" role="status" aria-live="polite"></p>
       <form class="bidrow" id="bidForm" novalidate>
@@ -125,11 +126,30 @@
 
     <section class="hist" aria-labelledby="histTitle">
       <div class="sechead"><h2 id="histTitle">入札の履歴</h2><span class="count num" id="count">0件</span></div>
-      <ul id="history" class="rows"></ul>
+      <ul id="history" class="rows" tabindex="0" aria-labelledby="histTitle"></ul>
     </section>
 
+  </div>
+
+  <section class="cmt" aria-labelledby="cmtTitle">
+    <h2 class="sr-only" id="cmtTitle">コメント</h2>
+    <div id="cmtBody">
+      <ul id="comments" tabindex="0" aria-label="コメントの一覧"></ul>
+      <p class="sr-only" id="cmtSay" role="status"></p>
+      <form id="cmtForm">
+        <label class="sr-only" for="cmtText">コメント</label>
+        <input class="input" id="cmtText" name="comment" maxlength="20" autocomplete="off" enterkeyhint="send" placeholder="コメント" aria-describedby="cmtCount">
+        <button class="btn" id="cmtSend" type="submit">送信</button>
+      </form>
+      <span class="num" id="cmtCount">0／20</span>
+      <p id="cmtMsg" role="alert"></p>
+    </div>
+  </section>
+
+  <!-- 注意書き・参加のしかた・マイページは、コメントのあと（表示の順と、Tab で進む順をそろえる。報告書 81 章） -->
+  <div class="finewrap">
     <div class="fine">
-      <p class="note">落札価格に送料は含まれません。締めの直前の入札は、通信の遅れで間に合わないことがあります。</p>
+      <p class="note">落札額に送料は含まれません。締めの直前の入札は、通信の遅れで間に合わないことがあります。</p>
       <p class="note" id="contact"></p>
       <p class="note" id="modeLine" hidden><span id="modeNow"></span>　<button class="textbtn" type="button" id="toVenue"></button></p>
       <p class="note links" id="siteLinks" hidden><a href="/mypage.html">マイページ</a></p>
@@ -149,20 +169,6 @@
       </details>
     </div>
   </div>
-
-  <section class="cmt" aria-labelledby="cmtTitle">
-    <h2 class="sr-only" id="cmtTitle">コメント</h2>
-    <div id="cmtBody">
-      <ul id="comments" aria-live="polite"></ul>
-      <form id="cmtForm">
-        <label class="sr-only" for="cmtText">コメント</label>
-        <input class="input" id="cmtText" name="comment" maxlength="20" autocomplete="off" enterkeyhint="send" placeholder="コメント" aria-describedby="cmtCount">
-        <button class="btn" id="cmtSend" type="submit">送信</button>
-      </form>
-      <span class="num" id="cmtCount">0／20</span>
-      <p id="cmtMsg" role="alert"></p>
-    </div>
-  </section>
 </main>
 
 <script src="common.js"></script>

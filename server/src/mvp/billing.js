@@ -184,7 +184,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
           ['落札額', `${yen(r.amount)}（税込）`],
           ['買歩銭', `${yen(premium)}（落札額の${premiumRate()}%）`],
           ['お支払いの金額', yen(r.amount + premium)],
-          ['お受け取り', { ship: '配送（送料は別にかかります）', pickup: '会場で受け取り' }[r.receive]],
+          ['お受け取り', { ship: '配送（送料は別にかかります）', pickup: '現地受け取り' }[r.receive]],
         ]),
         '',
         '当日、会場で精算しなかった品は、開催の終了後に、銀行振込の請求書をお送りします。',

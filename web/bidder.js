@@ -25,6 +25,16 @@ const REJECT = {
   NOT_JOINED: () => '参加手続きを済ませてください',
   NOT_CHECKED_IN: () => '受付で、来場の確認を受けてください',
 };
+// ほかの人の入札で価格が変わったことを、読み上げで伝える（自分が最高入札者でないとき）。続けて変わるときは、3秒に1回の最新の値だけ（報告書 81 章）
+function sayPrice(msg) {
+  S.priceSayNext = `現在 ${yen(msg.currentPrice)}、${msg.paddle}番`;
+  if (S.priceSayTimer) return;
+  $('priceSay').textContent = S.priceSayNext; S.priceSayNext = null;
+  S.priceSayTimer = setTimeout(function flush() {
+    S.priceSayTimer = null;
+    if (S.priceSayNext) { $('priceSay').textContent = S.priceSayNext; S.priceSayNext = null; S.priceSayTimer = setTimeout(flush, 3000); }
+  }, 3000);
+}
 function say(text, kind = '') { $('msg').textContent = text; $('msg').dataset.kind = kind; }
 // 入札ボタンの「押せない」は、aria-disabled で表す（disabled にすると、キーボードのフォーカスが外れて、続けて入札できない。報告書 80 章）
 const bidOff = (off) => $('bid').setAttribute('aria-disabled', String(!!off));
@@ -74,7 +84,7 @@ function render() {
     $('boardNo').textContent = ''; $('boardTitle').textContent = '次の品をお待ちください'; $('board').classList.remove('haslot');
     $('status').textContent = '待機中'; $('status').dataset.on = ''; $('status').dataset.st = 'idle';
     $('priceLabel').textContent = '現在価格'; $('price').textContent = ''; $('result').textContent = '';
-    setLamp('urikiri', '', 'うりきり', ''); setLamp('right', '', '権利', '');
+    setLamp('urikiri', '', 'うりきり', ''); setLamp('right', '', '最高入札', '');
     $('priceTotal').textContent = ''; $('toPay').hidden = true; $('board').classList.remove('lead', 'won');
     bidOff(true); $('bid').textContent = '入札は、品が出てから'; S.shownPrice = null; return;
   }
@@ -88,7 +98,7 @@ function render() {
   $('status').textContent = STATE_LABEL[st] + (lot.noVideo && st === 'open' ? '（映像なし）' : '');
   $('status').dataset.on = st === 'open' ? '1' : '';
   $('status').dataset.st = st;
-  $('priceLabel').textContent = st === 'sold' ? '落札価格' : lot.currentPrice === null ? '開始価格' : '現在価格';
+  $('priceLabel').textContent = st === 'sold' ? '落札額' : lot.currentPrice === null ? '開始価格' : '現在価格';
   const price = lot.currentPrice ?? lot.startPrice;
   $('price').textContent = yen(price);
   if (S.shownPrice !== null && S.shownPrice !== price) { // 価格が動いたことを、短い動きで知らせる
@@ -98,12 +108,12 @@ function render() {
   // 買歩銭を足した、支払う金額の目安（落札額のほかにかかることを、入札の前に数字で見せる）
   $('priceTotal').textContent = S.premiumRate > 0 ? `買歩銭（${S.premiumRate}%）込み ${yen(price + Math.floor(price * S.premiumRate / 100))}` : '';
 
-  // 「うりきり」: 最低落札額（公開）に届いていて、この価格で締めれば売れる。「権利」: 最高入札者。両方が点いた人が落札する
+  // 「うりきり」: 最低落札額（公開）に届いていて、この価格で締めれば売れる。「最高入札」（業界では「権利」）: 最高入札者。両方が点いた人が落札する
   const urikiri = !!lot.urikiri;
   // 最低落札額の金額は表示しない（端末にも届かない）。分かるのは、届いたかどうか（ランプ）だけ
   setLamp('urikiri', urikiri ? 'on' : '', 'うりきり', urikiri ? '達しています' : 'まだです');
   const holds = mine && st !== 'unsold';
-  setLamp('right', holds ? (st === 'sold' ? 'won' : 'on') : '', holds && st === 'sold' ? '落札' : '権利',
+  setLamp('right', holds ? (st === 'sold' ? 'won' : 'on') : '', holds && st === 'sold' ? '落札' : '最高入札',
     lot.highestPaddle === null ? '入札なし' : mine ? 'あなた' : `${lot.highestPaddle}番`);
 
   $('result').textContent = st === 'sold' ? (mine ? 'あなたが落札しました' : `${lot.highestPaddle}番 落札`) : st === 'unsold' ? '流札' : '';
@@ -196,6 +206,9 @@ function renderComments() {
     li.append(who, body);
     return li;
   })));
+  // 読み上げは、新しく届いた1件だけ（一覧ごと読み直すと、入札の知らせとぶつかる。報告書 81 章）
+  const fresh = S.cmtReady ? S.comments.filter((c) => !seen.has(c.id) && c.paddle !== S.paddle) : [];
+  if (fresh.length) $('cmtSay').textContent = `コメント ${fresh.at(-1).paddle}番: ${fresh.at(-1).text}`;
   S.cmtReady = true;
 }
 S.cmtShow = store.get('poc-comments', 'on') === 'on';
@@ -331,6 +344,7 @@ function onMessage(msg, at) {
       if (msg.lotId === S.focus) S.history.push({ seq: msg.seq, amount: msg.amount, received_at: msg.receivedAt, valid: 1, paddle: msg.paddle, proxy: msg.proxy });
       render(); renderHistory();
       if (outbid) notifyOutbid(msg);
+      else if (msg.paddle !== S.paddle && msg.lotId === S.focus) sayPrice(msg);
       break;
     }
     case 'result': {
@@ -339,7 +353,7 @@ function onMessage(msg, at) {
       render();
       if (msg.lotId !== S.focus) break;
       const won = msg.status === 'sold' && msg.paddle === S.paddle;
-      say('', 'ok'); // 落札は、板の帯（「あなたが落札しました」）と「落札価格」で伝える。同じことを、もう1行では書かない
+      say('', 'ok'); // 落札は、板の帯（「あなたが落札しました」）と「落札額」で伝える。同じことを、もう1行では書かない
       $('alert').textContent = msg.status === 'sold' ? (won ? `あなたが ${yen(msg.amount)} で落札しました` : `${msg.paddle}番が ${yen(msg.amount)} で落札しました`) : '流札になりました';
       if (msg.status === 'sold' && !won) stampSold();
       if (won) { celebrateWin(msg); if ('vibrate' in navigator) navigator.vibrate([80, 60, 80, 60, 240]); }
@@ -574,7 +588,12 @@ if (!token) (async () => {
   const p = await getJson('/api/participation' + (venueCode ? `?venue=${encodeURIComponent(venueCode)}` : ''));
   if (p.status === 401) return location.replace('/login.html?next=bidder');
   if (p.status !== 200) { $('gateMsg').textContent = p.message ?? '開けませんでした。開き直してください'; return; }
-  if (!p.event) { $('gateMsg').textContent = '本日の開催はありません。'; return; }
+  // 開催がない日: 誤りではないので赤にせず、次の開催を見られる所への道を出す（報告書 81 章）
+  if (!p.event) {
+    $('gateMsg').dataset.kind = 'info';
+    $('gateMsg').replaceChildren('本日の開催はありません。', document.createElement('br'), Object.assign(document.createElement('a'), { href: '/', textContent: '次の開催を見る' }));
+    return;
+  }
   if (p.joined) {
     // 手続きが済んでいる人にも、入るたびに、オンラインか会場かを選んでもらう（発注者の指示）。
     // いまと同じほうを選べば、そのまま入る。違うほうを選べば、切り替えてから入る（会場にした場合は、来場の確認を待つ）
@@ -674,6 +693,8 @@ $('enter').addEventListener('click', async () => {
   $('audio').textContent = audioCtx ? audioCtx.state : '使えない';
   $('vib').textContent = 'vibrate' in navigator ? '対応' : '非対応';
   $('gate').style.display = 'none';
+  setGateOpen(false);
+  $('title').closest('h1').tabIndex = -1; $('title').closest('h1').focus(); // 入ったら、品名へ（フォーカスが行き場を失わないように。報告書 81 章）
   // 検証用の情報は、検証用の合言葉で入った人にだけ出す。会員には、ほかのページへの入口を出す
   $('devInfo').hidden = !token; $('siteLinks').hidden = !!token;
   // 会員には、参加のしかたの切り替えを出す（検証用の合言葉で入った人には出さない）
@@ -704,3 +725,8 @@ new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty('--board-h', `${Math.ceil(entry.target.getBoundingClientRect().height)}px`);
 }).observe($('board'));
 
+// 入場の画面を出しているあいだは、後ろの本文に Tab で移れないようにする（報告書 81 章）
+function setGateOpen(open) {
+  for (const el of document.querySelectorAll('body > header, body > .top, body > main, body > .brandbar')) el.inert = open;
+}
+if (getComputedStyle($('gate')).display !== 'none') setGateOpen(true);

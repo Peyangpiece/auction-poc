@@ -54,6 +54,7 @@ $('#resend').addEventListener('click', async (ev) => {
   const msg = $('.msg', codeForm);
   msg.classList.toggle('ok', res.ok);
   msg.textContent = res.ok ? '認証番号を送り直しました' : res.message;
+  codeForm.elements.code.focus(); // 押したボタンは10秒止まるので、次に入れる欄へ（フォーカスが外れないように）
   setTimeout(() => { ev.target.disabled = false; }, 10000);
 });
 
