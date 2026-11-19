@@ -30,6 +30,7 @@ try {
   await b2.waitForFunction(() => document.getElementById('board').classList.contains('bidpop'));
   await b2.waitForTimeout(200); await snap(b2, 'bid-pc');
   check(!(await b1.evaluate(() => document.getElementById('board').classList.contains('bidpop'))), 'ほかの人の入札では、自分の入札の演出は出ない');
+  if (await con.isVisible('#b_urikiri')) { await con.click('#b_urikiri'); await con.click('#dlgOk'); await con.waitForTimeout(300); } // 最低落札額のない品は、うりきりを押してから締める（報告書 89 章）
   await con.click('#b_close'); await con.click('#dlgOk'); // 締めは確かめてから
   await b2.waitForFunction(() => !document.getElementById('winFx').hidden);
   check(true, '落札した本人には、落札の演出が出る');
@@ -45,6 +46,7 @@ try {
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
   await b1.waitForFunction(() => document.getElementById('bid').textContent === '入札'); await b1.waitForTimeout(700);
   await b1.click('#bid'); await b1.waitForFunction(() => document.getElementById('right').classList.contains('on'));
+  if (await con.isVisible('#b_urikiri')) { await con.click('#b_urikiri'); await con.click('#dlgOk'); await con.waitForTimeout(300); } // 最低落札額のない品は、うりきりを押してから締める（報告書 89 章）
   await con.click('#b_close'); await con.click('#dlgOk'); // 締めは確かめてから
   await b1.waitForFunction(() => !document.getElementById('winFx').hidden);
   await b1.waitForTimeout(650); await snap(b1, 'win-phone');

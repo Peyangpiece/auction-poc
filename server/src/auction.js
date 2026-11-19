@@ -17,6 +17,15 @@ export function reserveMet(reservePrice, currentPrice) {
   if (reservePrice === null || reservePrice === undefined) return true;
   return currentPrice !== null && currentPrice !== undefined && currentPrice >= reservePrice;
 }
+/**
+ * 「うりきり」のランプ（発注者の決定。報告書 89 章）: オークショニアが「うりきり」を押したか、
+ * 最低落札額が入っていて、いまの価格がそこに届いているとき。最低落札額の入力がない品は、押すまで点かない
+ */
+export function urikiriOn(lot, currentPrice = lot?.current_price ?? null) {
+  if (!lot) return false;
+  if (lot.urikiri_on) return true;
+  return lot.reserve_price !== null && lot.reserve_price !== undefined && currentPrice !== null && currentPrice !== undefined && currentPrice >= lot.reserve_price;
+}
 
 export class Auction {
   /**
@@ -163,7 +172,7 @@ export class Auction {
     item.reply({
       type: 'bid_result', reqId: item.reqId, lotId: item.lotId, seq: item.seq, accepted,
       code: accepted ? null : result, amount: item.amount, currentPrice, minBid, minAllowed,
-      urikiri: lot ? reserveMet(lot.reserve_price, currentPrice) : null,
+      urikiri: lot ? urikiriOn(lot, currentPrice) : null,
       receivedAt: item.receivedAt, sentAt: processedAt,
     });
     const repliedAt = nowMs();
@@ -172,7 +181,7 @@ export class Auction {
     if (accepted) {
       broadcastAt = this.broadcast({
         type: 'price', lotId: item.lotId, seq: item.seq, amount: item.amount, paddle: item.member.paddle_no, proxy: item.proxyBy ? 1 : 0,
-        receivedAt: item.receivedAt, currentPrice, minBid, minAllowed, urikiri: reserveMet(lot.reserve_price, currentPrice),
+        receivedAt: item.receivedAt, currentPrice, minBid, minAllowed, urikiri: urikiriOn(lot, currentPrice),
       });
     }
     this.metrics.write('bid', {
@@ -204,7 +213,7 @@ export class Auction {
         if (item.amount !== undefined && item.amount !== null && item.amount !== '') {
           const amount = Number(item.amount);
           if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1e10) return fail('開始値を、1円以上の整数で入れてください');
-          const reserve = lot.reserve_price !== null && lot.reserve_price > amount ? lot.reserve_price : null;
+          const reserve = lot.reserve_price // 最低落札額は、開始値を変えても、そのまま（なくすと、ランプが点かなくなる。報告書 89 章）;
           this.store.tx(() => {
             q.setStartPrice.run(amount, reserve, item.receivedAt, lot.id);
             q.insertEvent.run(this.nextSeq(), lot.id, 'set_start', item.receivedAt, item.actor.name, JSON.stringify({ from: lot.start_pending ? null : lot.start_price, to: amount, withStart: true }));
@@ -233,7 +242,7 @@ export class Auction {
         if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1e10) return fail('開始値を、1円以上の整数で入れてください');
         if (amount === lot.start_price && !lot.start_pending) return fail('いまの開始値と同じです');
         // 最低落札額が新しい開始値以下になるなら、最低落札額はなくなる（最初の入札で必ず届くため）
-        const reserve = lot.reserve_price !== null && lot.reserve_price > amount ? lot.reserve_price : null;
+        const reserve = lot.reserve_price // 最低落札額は、開始値を変えても、そのまま（なくすと、ランプが点かなくなる。報告書 89 章）;
         this.store.tx(() => {
           q.setStartPrice.run(amount, reserve, item.receivedAt, lot.id);
           q.insertEvent.run(item.seq, lot.id, 'set_start', item.receivedAt, item.actor.name, JSON.stringify({ from: lot.start_pending ? null : lot.start_price, to: amount, reserveCleared: lot.reserve_price !== null && reserve === null }));
@@ -243,21 +252,21 @@ export class Auction {
         break;
       }
       case 'urikiri': {
-        // うりきり: 最低落札額をなくし、いまの最高入札者（これからの最高入札者）に必ず売ると宣言する。取り消せない
+        // うりきり: いまの最高入札者（これからの最高入札者）に必ず売ると宣言し、ランプを点ける。取り消せない
         if (!['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(s)) return fail(`「${stateName}」の品は、うりきりにできません`);
-        if (lot.reserve_price === null || reserveMet(lot.reserve_price, lot.current_price)) return fail('すでに、うりきりです');
+        if (urikiriOn(lot)) return fail('すでに、うりきりです');
         this.store.tx(() => {
-          q.clearReserve.run(item.receivedAt, lot.id);
+          q.setUrikiri.run(item.receivedAt, lot.id);
           q.insertEvent.run(item.seq, lot.id, 'urikiri', item.receivedAt, item.actor.name, JSON.stringify({ reservePrice: lot.reserve_price, currentPrice: lot.current_price }));
         });
         this.broadcast({ type: 'lot', lot: this.lotView(lot.id), reason: null });
         break;
       }
       case 'pass': {
-        // 流札: 売らずに、この品を終える。うりきりのランプが点いている品（最低落札額がない・届いた）は、流札にできない（発注者の指示。報告書 79 章）。
+        // 流札: 売らずに、この品を終える。うりきりのランプが点いている品（うりきりを押した・最低落札額に届いた）は、流札にできない（報告書 79・89 章）。
         // 締めれば、入札があれば落札、なければ流札になる
         if (s !== 'open' && s !== 'suspended') return fail(`「${stateName}」の品は、流札にできません`);
-        if (reserveMet(lot.reserve_price, lot.current_price)) return fail(`うりきりのため、流札にできません（締めると${lot.current_bid_seq ? '落札' : '流札'}になります）`);
+        if (urikiriOn(lot)) return fail(`うりきりのため、流札にできません（締めると${lot.current_bid_seq ? '落札' : '流札'}になります）`);
         q.insertEvent.run(item.seq, lot.id, 'close', item.receivedAt, item.actor.name, JSON.stringify({ pass: true }));
         extra = this.#finalize(lot, item.seq, item.actor.name, { passed: true }, item);
         break;
@@ -381,8 +390,8 @@ export class Auction {
   #finalize(lot, closeSeq, actor, data = {}, item = null) {
     const { q, tx } = this.store;
     const fresh = q.lot.get(lot.id);
-    // 落札の条件: 受理された有効な入札があり（＝最高入札者に「権利」がある）、かつ最低落札額に届いている（＝「うりきり」）
-    const met = reserveMet(fresh.reserve_price, fresh.current_price);
+    // 落札の条件: 受理された有効な入札があり（＝最高入札者に「権利」がある）、かつ「うりきり」のランプが点いている
+    const met = urikiriOn(fresh);
     const status = fresh.current_bid_seq && met ? 'sold' : 'unsold';
     const reason = status === 'unsold' ? (fresh.current_bid_seq ? 'reserve_not_met' : 'no_bids') : null;
     const at = nowMs();
@@ -433,7 +442,7 @@ export class Auction {
       highestPaddle: lot.highest_paddle ?? null,
       // 最低落札額。進行役だけに送る。会員の端末には金額を送らない（index.js の forMember で必ず落とす）
       reservePrice: lot.reserve_price ?? null,
-      urikiri: reserveMet(lot.reserve_price, lot.current_price),
+      urikiri: urikiriOn(lot),
       closeSeq: lot.close_seq ?? null,
     };
   }
@@ -473,7 +482,7 @@ export class Auction {
     let reserve = reservePrice === null || reservePrice === undefined || reservePrice === '' ? null : Number(reservePrice);
     if (reserve !== null) {
       if (!Number.isSafeInteger(reserve) || reserve < start) throw new Error('最低落札額は、開始値以上の整数にしてください');
-      if (reserve === start) reserve = null; // 開始価格と同じなら、最初の入札で必ず届くので、設定なしと同じ
+      // 開始値と同じ最低落札額は、そのまま持つ（最初の入札で届き、ランプが点く。報告書 89 章）
     }
     if (!String(title ?? '').trim()) throw new Error('品名を入力してください');
     const info = this.store.q.insertLot.run({ event: this.eventId(), title: String(title).trim(), start, unit: unitOverride, reserve, at: nowMs(), pending: pending ? 1 : 0 });

@@ -65,6 +65,7 @@ for (const scheme of ['light', 'dark']) {
   { const b = (await cl.isEnabled('#pass')) ? '#pass' : '#close'; if (await cl.isEnabled(b)) { await cl.click(b); await cl.waitForTimeout(300); await scan(cl, 'caller-dialog', scheme); await cl.click('#dlgCancel'); } }
   await cl.close();
   const mon = await sc.newPage(); await mon.goto(B + '/monitor.html'); await mon.waitForTimeout(1200); await scan(mon, 'monitor', scheme);
+  if (await con.isVisible('#b_urikiri')) { await con.click('#b_urikiri'); await con.click('#dlgOk'); await con.waitForTimeout(300); }
   await con.click('#b_close'); await con.waitForTimeout(800); if (await con.isVisible('dialog[open]')) { await scan(con, 'console-dialog', scheme); await con.click('#dlgOk'); } await con.waitForTimeout(800);
   if (await con.isVisible('#b_close') && await con.isEnabled('#b_close')) { await con.click('#b_close'); await con.waitForTimeout(600); if (await con.isVisible('dialog[open]')) await con.click('#dlgOk'); }
   // 落札の知らせの札は、出入りの途中（半透明）だと、文字の色の検査が正しく測れない。札が消えてから、板を検査する

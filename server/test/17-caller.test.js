@@ -11,7 +11,7 @@ before(async () => {
 });
 after(async () => { await srv.stop(); cleanup(ctx); });
 
-test('開始値は、入札の前だけ変えられる。最低落札額以上にすると、最低落札額はなくなる', async () => {
+test('開始値は、入札の前だけ変えられる。最低落札額は、開始値を変えてもそのまま', async () => {
   const lot = await createLot(A, 10000, null, '柱時計', 15000);
   let r = await A.cmd('set_start', { lotId: lot.id, amount: 8000 });
   assert.deepEqual([r.ok, r.startPrice], [true, 8000], '待機中でも変えられる（始まる前に決められる）');
@@ -30,7 +30,7 @@ test('開始値は、入札の前だけ変えられる。最低落札額以上�
   const lot2 = await createLot(A, 10000, null, '花瓶', 15000);
   await A.cmd('set_start', { lotId: lot2.id, amount: 16000 });
   await sleep(50);
-  assert.equal(A.lots.get(lot2.id).reservePrice, null, '最低落札額以上の開始値にしたら、最低落札額はなくなる（最初の入札で届くため）');
+  assert.deepEqual([A.lots.get(lot2.id).reservePrice, A.lots.get(lot2.id).urikiri], [15000, false], '最低落札額以上の開始値にしても、最低落札額は残る（最初の入札で届き、ランプが点く。報告書 89 章）');
 });
 
 test('うりきり: 最低落札額をなくす。締めると、最低落札額に届かない額でも落札になる', async () => {

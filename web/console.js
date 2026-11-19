@@ -59,6 +59,8 @@ function render() {
   // 開始値が未定の品（品名だけで登録した品）は、オークショニアの画面で開始値を入れて始める
   if (next) { $('b_next').textContent = next.startPending ? `No.${next.lotNo} は、オークショニアの開始値の入力待ち` : `No.${next.lotNo} を開始`; $('b_next').disabled = !!next.startPending; $('b_next').onclick = () => lotCmd('start', next.id); }
   show('b_close', st === 'open');
+  // うりきり: ランプが消えている品だけ（最低落札額の入力がない品は、押すまで点かない。報告書 89 章）
+  show('b_urikiri', !!lot && ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(st) && !lot.urikiri);
   show('b_suspend', st === 'open'); show('b_resume', st === 'suspended'); show('b_cancel', st === 'suspended');
   show('b_nv', st === 'preparing_warn'); show('b_back', st === 'preparing' || st === 'preparing_warn');
 
@@ -184,9 +186,10 @@ const CONFIRM = {
   cancel: (l) => ({ title: `No.${l.lotNo} を取りやめますか？`, body: 'この品のすべての入札を無効にして、待機に戻します。入札の記録は残ります。', okLabel: '取りやめる', danger: true }),
   // 締め: 取り消せないので、押した結果（落札か流札か）を書いて確かめる。オークショニアの画面と同じ（発注者の決定。報告書 80 章）
   close: (l) => {
-    const willSell = l.currentPrice !== null && (l.reservePrice === null || l.urikiri);
+    const willSell = l.currentPrice !== null && !!l.urikiri; // ランプはサーバーが決める（報告書 89 章）
     return { title: '締めますか？', body: willSell ? `No.${l.lotNo}　${l.highestPaddle}番 ${yen(l.currentPrice)} で落札になります。` : `No.${l.lotNo}　流札になります。`, okLabel: '締める' };
   },
+  urikiri: (l) => ({ title: 'うりきりにしますか？', body: l.reservePrice === null ? `No.${l.lotNo}　うりきりのランプを点けます。締めると、最高入札者に落札します。` : `No.${l.lotNo}　最低落札額 ${yen(l.reservePrice)} に届かなくても、締めると、最高入札者に落札します。`, okLabel: 'うりきりにする' }),
   exclude: (l) => ({ title: `No.${l.lotNo} を除外しますか？`, body: 'この品は「未実施」になり、この開催では競りにかけられなくなります。', okLabel: '除外する', danger: true }),
 };
 async function lotCmd(action, lotId, needReason = false) {
@@ -195,7 +198,7 @@ async function lotCmd(action, lotId, needReason = false) {
     const ans = await ask({ ...CONFIRM[action](S.lots.get(lotId)), needReason: true });
     if (!ans) return;
     reason = ans.reason;
-  } else if (action === 'close' && !(await ask(CONFIRM.close(S.lots.get(lotId))))) return;
+  } else if ((action === 'close' || action === 'urikiri') && !(await ask(CONFIRM[action](S.lots.get(lotId))))) return;
   return cmd(action, { lotId, reason });
 }
 document.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async () => {

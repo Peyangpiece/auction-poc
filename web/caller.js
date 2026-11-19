@@ -55,9 +55,10 @@ function render() {
   $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札額' : hasBid ? '現在価格' : '開始値';
   $('price').textContent = !lot ? '—' : lot.startPending ? '未定' : yen(lot.currentPrice ?? lot.startPrice);
   $('leader').textContent = lot?.highestPaddle ? `${lot.highestPaddle}番` : 'なし';
-  const urikiri = !!lot && (lot.reservePrice === null || lot.urikiri);
-  // うりきりまで、あといくらか（入札がなければ、最低落札額そのもの）。オークショニアが、声をかける目安にする
-  $('urikiriState').textContent = !lot ? '—' : urikiri ? '済み' : hasBid ? `あと${yen(lot.reservePrice - lot.currentPrice)}` : yen(lot.reservePrice);
+  // うりきりのランプは、サーバーが決める（うりきりを押した・最低落札額に届いた。最低落札額の入力がない品は、押すまで点かない。報告書 89 章）
+  const urikiri = !!lot && !!lot.urikiri;
+  // うりきりまで、あといくらか（入札がなければ、最低落札額そのもの）。最低落札額がない品は「—」（うりきりを押すまで点かない）
+  $('urikiriState').textContent = !lot ? '—' : urikiri ? '済み' : lot.reservePrice === null ? '—' : hasBid ? `あと${yen(lot.reservePrice - lot.currentPrice)}` : yen(lot.reservePrice);
   $('urikiriState').dataset.on = urikiri ? '1' : '';
   // 読み上げは、1か所の要約だけ（面の全体を読み上げると、入札のたびに細切れに何度も読まれる。報告書 81 章）
   const said = !lot ? '' : [`No.${lot.lotNo}`, $('status').textContent, $('price').textContent, lot.highestPaddle ? `${lot.highestPaddle}番` : ''].filter(Boolean).join('　');
@@ -165,7 +166,8 @@ $('startForm').addEventListener('submit', async (ev) => {
 // ---- うりきり・締め・流札
 $('urikiri').addEventListener('click', async () => {
   const lot = current();
-  if (!lot || !(await ask({ title: 'うりきりにしますか？', body: `No.${lot.lotNo}　最低落札額 ${yen(lot.reservePrice)} → なし`, okLabel: 'うりきりにする' }))) return;
+  const body = lot.reservePrice === null ? `No.${lot.lotNo}　うりきりのランプを点けます。締めると、最高入札者に落札します` : `No.${lot.lotNo}　最低落札額 ${yen(lot.reservePrice)} に届かなくても、締めると、最高入札者に落札します`;
+  if (!lot || !(await ask({ title: 'うりきりにしますか？', body, okLabel: 'うりきりにする' }))) return;
   const res = await cmd('urikiri');
   if (res?.ok) say('');
 });
@@ -186,7 +188,7 @@ $('close').addEventListener('click', async () => {
     if (res?.ok) { S.editing = false; say(''); }
     return;
   }
-  const willSell = lot.currentPrice !== null && (lot.reservePrice === null || lot.urikiri);
+  const willSell = lot.currentPrice !== null && !!lot.urikiri;
   if (!(await ask({ title: '締めますか？', body: willSell ? `No.${lot.lotNo}　${lot.highestPaddle}番 ${yen(lot.currentPrice)} 落札` : `No.${lot.lotNo}　流札`, okLabel: '締める' }))) return;
   const res = await cmd('close');
   if (res?.ok) say('');

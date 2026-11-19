@@ -57,9 +57,16 @@ export async function connectAll(srv, ctx, n) {
   return { auctioneer, members };
 }
 
-export async function createLot(auctioneer, startPrice, unitOverride = null, title = 'テスト品', reservePrice = null) {
+// 最低落札額の入力がない品は、オークショニアが「うりきり」を押すまで、ランプが点かず、締めても売れない（発注者の決定。報告書 89 章）。
+// 入札・締め・請求などを確かめるテストは、売れる品が要るので、ここで「うりきり」を押しておく。うりきりそのものを確かめるときは { urikiri: false }
+export async function createLot(auctioneer, startPrice, unitOverride = null, title = 'テスト品', reservePrice = null, { urikiri = true } = {}) {
   const res = await auctioneer.cmd('create_lot', { title, startPrice, unitOverride, reservePrice });
   if (!res.ok) throw new Error(res.message);
+  if (urikiri && (reservePrice === null || reservePrice === undefined)) {
+    const u = await auctioneer.cmd('urikiri', { lotId: res.lot.id });
+    if (!u.ok) throw new Error(u.message);
+    return { ...res.lot, urikiri: true };
+  }
   return res.lot;
 }
 

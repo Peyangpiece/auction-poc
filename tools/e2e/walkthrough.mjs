@@ -57,7 +57,7 @@ try {
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('配信準備中'));
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
   check((await text(con, 's_obs')) === '配信中', '競りを始めると、配信が自動で始まる');
-  check((await con.isHidden('#b_next')) && (await con.isVisible('#b_close')), '受付中は「締め」と「中断」だけが出る');
+  check((await con.isHidden('#b_next')) && (await con.isVisible('#b_close')) && (await con.isVisible('#b_urikiri')), '受付中は「締め」「うりきり」「中断」が出る（うりきりは、ランプが消えている品だけ）');
 
   console.log('入札');
   await b1.waitForFunction(() => document.getElementById('bid').textContent === '入札');
@@ -97,6 +97,7 @@ try {
   await shot(pc, 'bidder-pc');
 
   console.log('締め');
+  if (await con.isVisible('#b_urikiri')) { await con.click('#b_urikiri'); await con.click('#dlgOk'); await con.waitForTimeout(300); } // 最低落札額のない品は、うりきりを押してから締める（報告書 89 章）
   await con.click('#b_close');
   await con.waitForSelector('#dlg[open]');
   check((await con.textContent('#dlgBody')).includes('1番') && (await con.textContent('#dlgBody')).includes('落札'), '締めは、結果（だれが・いくらで落札か）を書いて確かめる');

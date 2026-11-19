@@ -360,6 +360,7 @@ try {
   await guest.waitForFunction(() => document.querySelector('#right')?.classList.contains('on'));
   check(!(await guest.evaluate(() => document.body.classList.contains('outbid'))) && (await guest.textContent('#msg')).includes('最高入札者に戻りました'), '権利が戻った人の画面から、上回られた警告が消える');
   check(true, '代理入札を取り消すと、現在価格が1つ前に戻り、前の最高入札者に権利表示が戻る');
+  if (await con.isVisible('#b_urikiri')) { await con.click('#b_urikiri'); await con.click('#dlgOk'); await con.waitForTimeout(300); } // 最低落札額のない品は、うりきりを押してから締める（報告書 89 章）
   await con.click('#b_close'); await con.click('#dlgOk'); // 締めは確かめてから
   await con.waitForFunction(() => document.getElementById('sold').textContent.includes('10,000'));
   const soldRow = await con.textContent('#sold');
