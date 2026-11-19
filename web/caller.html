@@ -20,10 +20,20 @@
 <div class="overlay" id="overlay" role="alert"><div><span id="overlayText">接続しています…</span></div></div>
 <div class="app">
   <header class="bar">
-    <span class="bar__role">オークショニア</span>
-    <span class="bar__meta"><span id="presence">参加者 0人</span><span class="num" id="clock"></span><button class="btn barbtn" type="button" id="suspend" hidden>中断</button></span>
+    <!-- 役割の名前と時計は出さない（本人は分かっている。時刻はスマホの上に出ている。報告書 87 章） -->
+    <span class="bar__meta"><span id="presence">参加者 0人</span></span>
+    <button class="btn barbtn" type="button" id="suspend" hidden>中断</button>
   </header>
 
+  <!-- 競りの時間外（本日の開催がない・終わった）: 操作のボタンは出さず、そのことと次の開催だけを出す（発注者の指示。報告書 87 章） -->
+  <section class="offhours" id="offhours" hidden aria-live="polite">
+    <p class="offhours__title" id="offTitle"></p>
+    <div class="offhours__next" id="offNext" hidden>
+      <span class="offhours__label">次の開催</span>
+      <b class="offhours__date" id="offDate"></b>
+      <span class="offhours__info dyn" id="offInfo"></span>
+    </div>
+  </section>
   <main class="stage" id="main" tabindex="-1">
     <h1 class="sr-only">オークショニア</h1>
     <!-- 品と価格 -->
@@ -36,7 +46,6 @@
       <p class="lot__price digits" id="price">—</p>
       <ul class="facts" id="facts">
         <li><span>最高入札者</span><b class="num" id="leader">—</b></li>
-        <li><span>入札</span><b class="num" id="bids">0件</b></li>
         <li><span>うりきりまで</span><b id="urikiriState">—</b></li>
       </ul>
     </section>
@@ -44,10 +53,7 @@
     <div class="controls">
     <!-- 開始値 -->
     <section class="start" id="startBox" aria-labelledby="startTitle">
-      <div class="start__head">
-        <h2 id="startTitle">開始値</h2>
-        
-      </div>
+      <h2 class="sr-only" id="startTitle">開始値</h2>
       <form class="start__row" id="startForm" novalidate>
         <button class="btn step" type="button" id="stepDown" aria-label="1段下げる">−</button>
         <label class="amount"><span class="yen" aria-hidden="true">¥</span><input id="startInput" inputmode="numeric" autocomplete="off" aria-label="新しい開始値（円）"></label>

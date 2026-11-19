@@ -20,13 +20,33 @@ const parseAmount = (t) => { const d = String(t ?? '').replace(/[０-９]/g, (c)
 const setInput = (n) => { $('startInput').value = n === null ? '' : n.toLocaleString('ja-JP'); };
 const say = (text, kind = 'ng') => { $('msg').textContent = text; $('msg').dataset.kind = kind; };
 
+// 競りの時間外: 本日の開催がない、または終わったうえで、扱う品がないとき（発注者の指示。報告書 87 章）
+const WORKING = ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'];
+function offHours() { return S.connected && (S.ended || !S.event) && ![...S.lots.values()].some((l) => WORKING.includes(l.status)); }
+async function renderOffHours() {
+  const off = offHours();
+  $('offhours').hidden = !off; $('main').hidden = off;
+  if (!off) return;
+  $('suspend').hidden = true;
+  $('offTitle').textContent = S.ended ? '本日の競りは終了しました' : '本日の競りはありません';
+  // 次の開催（公開中の開催のうち、今日より後でいちばん早いもの）
+  if (!S.schedule) S.schedule = await fetch('/api/schedule', { credentials: 'same-origin' }).then((r) => r.json()).catch(() => null);
+  const today = S.schedule?.today ?? '';
+  const next = (S.schedule?.events ?? []).find((e) => e.startsAt.slice(0, 10) > today);
+  $('offNext').hidden = !next;
+  if (!next) return;
+  const [y, m, dd] = next.startsAt.slice(0, 10).split('-').map(Number);
+  $('offDate').textContent = `${m}月${dd}日（${'日月火水木金土'[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()]}）`; // ほかの画面と同じ書き方
+  $('offInfo').textContent = `${next.title}　${next.startsAt.slice(11, 16)}〜　${next.venueName}`;
+}
 function render() {
+  renderOffHours();
+  if (offHours()) return;
   const lot = current();
   const st = lot?.status ?? 'idle';
   const live = st === 'open' || st === 'suspended';
   const ended = st === 'sold' || st === 'unsold';
   const hasBid = !!lot && lot.currentPrice !== null;
-  const bids = lot && lot.id === S.focus ? S.history.filter((h) => h.valid).length : 0;
 
   $('lotNo').textContent = lot ? `No.${lot.lotNo}` : '';
   $('title').textContent = lot ? lot.title : '品を待っています';
@@ -35,7 +55,6 @@ function render() {
   $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札額' : hasBid ? '現在価格' : '開始値';
   $('price').textContent = !lot ? '—' : lot.startPending ? '未定' : yen(lot.currentPrice ?? lot.startPrice);
   $('leader').textContent = lot?.highestPaddle ? `${lot.highestPaddle}番` : 'なし';
-  $('bids').textContent = `${bids}件`;
   const urikiri = !!lot && (lot.reservePrice === null || lot.urikiri);
   // うりきりまで、あといくらか（入札がなければ、最低落札額そのもの）。オークショニアが、声をかける目安にする
   $('urikiriState').textContent = !lot ? '—' : urikiri ? '済み' : hasBid ? `あと${yen(lot.reservePrice - lot.currentPrice)}` : yen(lot.reservePrice);
@@ -226,6 +245,7 @@ function onMessage(msg) {
   switch (msg.type) {
     case 'welcome': case 'snapshot':
       S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history ?? [];
+      S.connected = true; S.event = msg.event ?? null; S.ended = !msg.event && !!msg.ended;
       if (msg.ladder) S.ladder = msg.ladder;
       render(); break;
     case 'lot': {
@@ -246,11 +266,11 @@ function onMessage(msg) {
     }
     case 'bid_void': S.lots.set(msg.lot.id, msg.lot); S.history.forEach((h) => { if (h.seq === msg.seq) h.valid = 0; }); render(); break;
     case 'result': S.lots.set(msg.lotId, msg.lot); render(); break;
+    case 'event': S.event = msg.event ?? null; S.ended = !msg.event && !!msg.ended; S.schedule = null; render(); break;
     case 'presence': $('presence').textContent = `参加者 ${msg.members}人`; break;
     case 'error': say(msg.message); break;
   }
 }
-setInterval(() => { if (link) $('clock').textContent = jst(link.serverNow()).slice(0, 5); }, 1000);
 
 // 競りの最中に、スマホの画面が消えないようにする（対応している端末だけ。画面に戻ったら、取り直す）
 let wake = null;

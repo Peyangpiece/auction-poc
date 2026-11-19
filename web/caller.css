@@ -26,7 +26,7 @@ body { overflow: hidden; background: var(--ground); }
 .lot .state[data-st="preparing"]::before, .lot .state[data-st="preparing_warn"]::before { background: #ffd60a; }
 .lot__label { font-size: 15px; color: var(--board-ink-2); margin-top: clamp(0px, 1dvh, 8px); }
 .lot__price { font-size: clamp(30px, min(30cqh, 17cqw), 150px); line-height: 1; letter-spacing: -.02em; font-weight: 700; }
-.facts { list-style: none; padding: 0; margin: clamp(4px, 1.4dvh, 14px) 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.facts { list-style: none; padding: 0; margin: clamp(4px, 1.4dvh, 14px) 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .facts li { display: grid; gap: 2px; min-width: 0; }
 .facts span { font-size: 13px; color: var(--board-ink-2); }
 .facts b { font-size: clamp(17px, 2.6dvh, 24px); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -108,7 +108,7 @@ dialog p { white-space: pre-line; }
   .start__row { gap: 6px; }
   .start__row #setStart { padding: 8px 12px; }
   .lot .state[data-st] { font-size: 13px; padding: 3px 10px 3px 8px; }
-  .facts { grid-template-columns: .8fr .6fr 1.4fr; gap: 8px; }
+  .facts { gap: 8px; }
 }
 /* 価格の面が低いとき（小さいスマホ）: 品名は1行、見出しの小さな文字は省く */
 @container (max-height: 230px) {
@@ -155,3 +155,12 @@ dialog.sheet { background: var(--glass-tint-strong); }
 
 /* 価格の面の内側の余白: 高い画面では広く */
 @media (min-height: 700px) { .lot { padding: 24px 28px; } }
+
+/* 競りの時間外（報告書 87 章）: 画面の中央に、そのことと次の開催だけ。操作のボタンは出さない */
+.offhours { display: grid; align-content: center; justify-items: center; gap: 28px; padding: 24px 20px 12dvh; text-align: center; min-height: 0; }
+.offhours[hidden], .stage[hidden] { display: none; }
+.offhours__title { margin: 0; font-size: clamp(24px, 3.4dvh, 34px); font-weight: 700; letter-spacing: 0; color: var(--ink); text-wrap: balance; }
+.offhours__next { display: grid; gap: 6px; justify-items: center; padding: 20px 28px; border-radius: var(--r-lg); background: var(--board); min-width: min(320px, 100%); }
+.offhours__label { font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.offhours__date { font-size: clamp(28px, 4.4dvh, 44px); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.offhours__info { font-size: 15px; color: var(--ink-2); text-wrap: balance; }
