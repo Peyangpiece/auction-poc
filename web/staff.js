@@ -9,7 +9,6 @@ const dlg = $('#dlg');
 const panel = $('#panel');
 let me = null;
 let S_missing = []; // 公開の前に入れておく項目（「設定」の上に出す）
-let smsOn = false; // SMS を使う設定か（使わない本番では、SMS の制限の操作を出さない）
 let current = null;
 
 function openDialog(title, ...body) {
@@ -244,9 +243,7 @@ async function receptionPanel() {
             field('受け取り方法', 'receive', { options: [['', '選んでください'], ['pickup', '現地受け取り'], ['ship', '配送']] }),
             field('支払方法', 'payment', { options: [['', '選んでください'], ['cash', '当日現金'], ['transfer', '銀行振込']] })],
           async (d) => { const r = await api('POST', '/api/reception/join', d); if (r.ok) alertLine(`参加番号 ${r.paddle} を振りました。この番号の札を渡してください。`); return r; }, '参加番号を振る')), ' ',
-        smallBtn('会場の QR コード', () => qrDialog(res.event), 'btn-primary'),
-        // めったに使わない操作は「⋯」の中へ（SMS の制限は、SMS を使う設定のときだけ）
-        smsOn && moreMenu([smallBtn('SMS の制限を解く', smsDialog)]))),
+        smallBtn('会場の QR コード', () => qrDialog(res.event), 'btn-primary'))),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['参加番号', '名前', '参加', '受け取り・支払', '来場', ''], rows, '参加手続きを済ませた人は、まだいません。'),
   ];
@@ -403,20 +400,6 @@ async function feesPanel() {
   ];
 }
 
-// ------------------------------------------------------------ SMS の制限の解除（受付係もできる）
-function smsDialog() {
-  const form = el('form', { class: 'form', novalidate: true },
-    field('電話番号', 'phone', { type: 'tel', inputMode: 'tel', required: true }, '会場で本人を確かめたうえで、認証番号の送信の制限（1時間に5回）を解きます'),
-    el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
-    el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '制限を解く' })));
-  onSubmit(form, async (data) => {
-    const res = await api('POST', '/api/sms-limit/reset', data);
-    if (res.ok) { const m = $('.msg', form); m.classList.add('ok'); m.textContent = '制限を解きました'; form.reset(); return null; }
-    return res;
-  });
-  openDialog('SMS の制限を解く', form, el('div', { class: 'actions' }, closeBtn('閉じる')));
-  form.elements.phone.focus();
-}
 
 // ------------------------------------------------------------ スタッフ
 // メールアドレスを登録した（または、パスワードを決め直せるようにした）あとの知らせ
@@ -669,9 +652,6 @@ $('#backToLogin').addEventListener('click', () => { $('#setupForm').hidden = tru
   $('#toConsole').hidden = !['admin', 'auctioneer'].includes(me.role);
   $('#toCaller').hidden = me.role !== 'admin';
   $('#toMonitor').hidden = me.role === 'operator'; // 会場の大型モニターは、会場にいるスタッフが開く
-  // SMS を使わない設定（本番）のときは、「SMS の制限」を出さない
-  const terms = await api('GET', '/api/terms');
-  smsOn = terms.sms !== false;
   const keys = Object.keys(PANELS).filter((k) => PANELS[k][2].includes(me.role));
   $('#tabs').replaceChildren(...keys.map((k) => el('button', { type: 'button', role: 'tab', id: `tab-${k}`, 'aria-controls': 'panel', 'data-key': k, text: PANELS[k][0], onclick: () => leavePanel(() => { pendingNotice = null; show(k); }) })));
   show(keys.includes(location.hash.slice(1)) ? location.hash.slice(1) : keys[0]);

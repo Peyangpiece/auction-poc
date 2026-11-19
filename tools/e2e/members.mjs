@@ -61,7 +61,7 @@ try {
   await shot(admin, 'mvp-01-staff-login');
   await admin.waitForSelector('#tabs button');
   check((await admin.textContent('#who')).includes('主催者管理者'), '主催者管理者としてログインできる');
-  check((await admin.locator('#tabs button').count()) === 9, '主催者管理者には、9 の区分が出る（SMS の制限は、受付の「⋯」の中へ）');
+  check((await admin.locator('#tabs button').count()) === 9, '主催者管理者には、9 の区分が出る');
 
   // 設定
   await admin.click('#tabs [data-key=settings]');
@@ -101,10 +101,10 @@ try {
   check(true, '届出済みにすると、公開できる');
   await shot(admin, 'mvp-02-events');
 
-  // 進行役には、SMS の制限だけ（商品は、進行コンソールでその場で登録する）
+  // 進行役には、受付と未引き取りだけ（商品は、進行コンソールでその場で登録する）
   const auct = await staffLogin(auctAcc);
   await auct.waitForSelector('#tabs button');
-  check((await auct.locator('#tabs button').count()) === 2, '進行役の管理画面には、受付・未引き取りだけが出る（SMS の制限は、受付の「⋯」の中）');
+  check((await auct.locator('#tabs button').count()) === 2, '進行役の管理画面には、受付・未引き取りだけが出る');
 
   console.log('その場での登録（進行コンソール）');
   // 進行コンソールは、スタッフのログインで入る（合言葉つきの URL は使わない）

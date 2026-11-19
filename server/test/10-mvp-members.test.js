@@ -130,10 +130,9 @@ test('SMS の認証番号: 5分で切れる・誤り5回で無効・同じ番号
     // 送信は1時間に5回まで（ここまでで2回）
     for (let i = 0; i < 3; i++) assert.equal((await b.post('/api/register/start', { phone })).status, 200);
     assert.equal((await b.post('/api/register/start', { phone })).status, 429);
-    // スタッフが制限を解ける（受付係でもよい）
+    assert.match((await b.post('/api/register/start', { phone })).json.message, /1時間ほど待ってから/, '上限のときは、待つように案内する（スタッフが解く操作は、なくした。報告書 84 章）');
     const reception = await t.staffLogin('reception', 'uketsuke');
-    assert.equal((await reception.post('/api/sms-limit/reset', { phone })).status, 200);
-    assert.equal((await b.post('/api/register/start', { phone })).status, 200);
+    assert.equal((await reception.post('/api/sms-limit/reset', { phone })).status, 404, '制限を解く窓口は、もうない');
     // 1時間たてば、また送れる
     t.advance(61 * MIN);
     assert.equal((await b.post('/api/register/start', { phone })).status, 200);

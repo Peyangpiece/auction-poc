@@ -177,7 +177,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   async function sendOtp(phone) {
     const now = nowMs();
     const sent = db.prepare('SELECT COUNT(*) AS n FROM otp_sends WHERE phone = ? AND at > ?').get(phone, now - HOUR).n;
-    if (sent >= OTP_SENDS_PER_HOUR) throw new HttpError(429, '認証番号の送信が上限に達しました。1時間ほど待つか、会場の受付にお申し出ください');
+    if (sent >= OTP_SENDS_PER_HOUR) throw new HttpError(429, '認証番号の送信が上限（1時間に5回）に達しました。1時間ほど待ってから、もう一度お試しください');
     const code = newOtpCode();
     db.prepare('INSERT INTO otp_codes (phone, code_hash, expires_at, attempts) VALUES (?,?,?,0) ON CONFLICT(phone) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0')
       .run(phone, sha256(phone + ':' + code), now + OTP_TTL);
@@ -806,14 +806,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     audit(ctx, 'member.unsuspend', { target: `member:${id}`, before: { suspended: !!m.suspended }, after: { suspended: false } });
     return { ok: true };
   });
-  // SMS の送信の制限を解く（会場で本人を確かめたうえで。FR-AUTH-004）
-  route('POST', '/api/sms-limit/reset', (ctx, body) => {
-    needStaff(ctx, 'admin', 'auctioneer', 'reception');
-    const phone = phoneOf(body);
-    db.prepare('DELETE FROM otp_sends WHERE phone = ?').run(phone);
-    audit(ctx, 'sms.limit_reset', { target: `phone:${phone.slice(0, 3)}****${phone.slice(-2)}` });
-    return { ok: true };
-  });
+  // 認証番号の送信の制限を、スタッフが解く操作は、なくした（発注者の決定。報告書 84 章）。1時間たてば、また送れる
 
   // ------------------------------------------------------------ 開催（FR-EVT-001・002。主催者管理者だけ）
   const eventView = (e) => ({ id: e.id, title: e.title, startsAt: e.starts_at, endsAt: e.ends_at, venueName: e.venue_name, venueAddress: e.venue_address, highlights: e.highlights, notified: !!e.notified, status: e.status });
