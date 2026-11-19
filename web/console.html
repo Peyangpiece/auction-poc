@@ -74,6 +74,15 @@
       <p id="cmdMsg" role="alert"></p>
     </section>
 
+    <!-- オンライン参加者と同じ映像（左の列、進行中の品のすぐ下。操作のボタンを上に残す。IVS から再生。参加者と同じく数秒遅れて届く）。映像をつないでいる設定のときだけ出す（報告書 101 章） -->
+    <section class="viewbox" id="viewBox" aria-labelledby="viewTitle" hidden>
+      <div class="sechead"><h2 id="viewTitle">参加者に届いている映像</h2><button class="btn" type="button" id="viewSound" aria-pressed="false">音声を出す</button></div>
+      <div class="viewframe">
+        <video id="viewVideo" playsinline muted aria-label="オンライン参加者に届いている映像"></video>
+        <p class="viewoff" id="viewOff">映像は停止中です</p>
+      </div>
+      <p class="note">オンライン参加者の画面と同じ映像です。数秒遅れて届きます。会場では、音声はハウリングしないよう消したまま使ってください。</p>
+    </section>
     <section aria-labelledby="histTitle">
       <div class="sechead"><h2 id="histTitle">入札の履歴</h2><span class="count num" id="histCount">0件</span></div>
       <div class="tablewrap" id="histWrap" tabindex="0" aria-label="入札の履歴">

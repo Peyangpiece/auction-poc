@@ -131,6 +131,7 @@ function renderStream() {
   $('s_agent').textContent = s.agentConnected ? '接続中' : '未接続'; $('s_agent').dataset.on = s.agentConnected ? '1' : '';
   $('s_obs').textContent = s.obsActive === null ? '不明' : s.obsActive ? '配信中' : '停止'; $('s_obs').dataset.on = s.obsActive ? '1' : '';
   renderCameras(s);
+  renderView(s);
   // OBS の出力解像度（報告書 93 章）。決めた大きさ（既定 960×720）でないときは、理由と直し方を出す
   const v = s.agentConnected ? s.video : null;
   const px = (a) => (a ? `${a[0]}×${a[1]}` : '—');
@@ -141,6 +142,45 @@ function renderStream() {
     : v.state === 'base_aspect' ? `OBS の基本解像度（${px(v.base)}）の縦横の比が ${px(v.want)} と違うため、出力をそろえられません。OBS の「設定 → 映像」で、基本解像度を 4:3（例: 1440×1080）にしてください。`
     : '';
 }
+// ---- オンライン参加者と同じ映像（IVS のプレーヤーで再生。報告書 101 章）
+let viewPlayer = null, viewLoading = false, viewSound = false;
+function renderView(s) {
+  $('viewBox').hidden = s.mode === 'always-live' || !s.playbackUrl; // 映像をつないでいない設定では、枠ごと出さない
+  const live = !!s.live && !!s.playbackUrl && !document.hidden;
+  $('viewOff').hidden = !!s.live;
+  if (!s.live) $('viewOff').textContent = '映像は停止中です';
+  $('viewSound').hidden = !s.live;
+  if (live) startView(s.playbackUrl); else stopView();
+}
+async function startView(url) {
+  if (viewPlayer || viewLoading) return;
+  viewLoading = true;
+  try {
+    if (!window.IVSPlayer) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = S.playerUrl; sc.onload = res; sc.onerror = () => rej(new Error('映像の再生の部品を読み込めませんでした。通信を確かめてください')); document.head.appendChild(sc); });
+    if (!IVSPlayer.isPlayerSupported) throw new Error('このブラウザは、映像の再生に対応していません');
+    viewPlayer = IVSPlayer.create();
+    viewPlayer.attachHTMLVideoElement($('viewVideo'));
+    viewPlayer.setMuted(!viewSound);
+    viewPlayer.load(url);
+    Promise.resolve(viewPlayer.play()).catch(() => { viewSound = false; viewPlayer.setMuted(true); renderViewSound(); try { viewPlayer.play(); } catch {} });
+  } catch (err) {
+    $('viewOff').hidden = false; $('viewOff').textContent = err.message;
+  } finally { viewLoading = false; }
+}
+function stopView() {
+  if (!viewPlayer) return;
+  try { viewPlayer.pause(); viewPlayer.delete(); } catch {}
+  viewPlayer = null;
+}
+// 画面を裏にしているあいだは、映像を止める（通信と電池を使わない）。表に戻したら、また再生する
+document.addEventListener('visibilitychange', () => { if (S.stream) renderView(S.stream); });
+function renderViewSound() { $('viewSound').textContent = viewSound ? '音声を消す' : '音声を出す'; $('viewSound').setAttribute('aria-pressed', String(viewSound)); }
+$('viewSound').addEventListener('click', () => {
+  viewSound = !viewSound;
+  if (viewPlayer) { viewPlayer.setMuted(!viewSound); if (viewSound) { try { viewPlayer.play(); } catch {} } }
+  renderViewSound();
+});
+
 // 映すカメラの切り替え（報告書 92 章）。「カメラ: スマホ」なら「スマホ」と出す
 const camLabel = (name) => name.replace(/^カメラ[\s:：・]*/, '') || name;
 function renderCameras(s) {
@@ -272,6 +312,7 @@ function onMessage(msg, at) {
       S.event = msg.event ?? null; if (msg.sold) S.sold = msg.sold; renderEvent(); renderSold();
       if (msg.type === 'welcome') {
         log(`接続しました（${msg.name}）`);
+        S.playerUrl = msg.playerScriptUrl;
         document.querySelectorAll('[data-crash]').forEach((b) => { b.disabled = !msg.allowCrash; });
         // 障害の模擬は、検証用の環境でだけ出す（本番の進行役の画面には、強制終了のボタンを置かない）
         $('crashBox').hidden = !msg.allowCrash;
