@@ -723,6 +723,9 @@ $('#backToLogin').addEventListener('click', () => { $('#setupForm').hidden = tru
   me = state.staff;
   if (!me) { $('#login').hidden = false; $('#loginForm').elements.email.focus(); return; }
   if (me.role === 'caller') { location.replace('/caller.html'); return; }
+  // 「公開の前に入れておく項目」の帯は、画面を出す前に用意する（出したあとに差し込むと、中身が下にずれる。
+  // Safari では、ずれる途中の描き直しが残り、帯が切れて見えた。報告書 98 章）
+  if (me.role === 'admin') await releaseWarning();
   $('#app').hidden = false;
   $('#who').textContent = `${me.name}・${me.roleLabel}`;
   $('#myPassword').addEventListener('click', passwordDialog);
@@ -733,7 +736,6 @@ $('#backToLogin').addEventListener('click', () => { $('#setupForm').hidden = tru
   const keys = Object.keys(PANELS).filter((k) => PANELS[k][2].includes(me.role));
   $('#tabs').replaceChildren(...keys.map((k) => el('button', { type: 'button', role: 'tab', id: `tab-${k}`, 'aria-controls': 'panel', 'data-key': k, text: PANELS[k][0], onclick: () => leavePanel(() => { pendingNotice = null; show(k); }) })));
   show(keys.includes(location.hash.slice(1)) ? location.hash.slice(1) : keys[0]);
-  if (me.role === 'admin') releaseWarning();
 })();
 
 // 正式に公開する前に、埋めておくべきもの（規約類・返品特約の仮の文言・振込先）。主催者管理者に、上に出し続ける（報告書 80 章）
@@ -744,12 +746,15 @@ async function releaseWarning() {
     !legal.docs.terms.body && '利用規約', !legal.docs.privacy.body && 'プライバシーポリシー', !legal.docs.tokushoho.body && '特定商取引法に基づく表示',
     /【仮/.test(settings.returnPolicy ?? '') && '返品特約（仮の文言のまま）', !settings.bankAccount && '振込先', !settings.kobutsuLicense && '古物商の許可の表示',
   ].filter(Boolean);
-  $('#releaseWarn')?.remove();
   S_missing = missing; renderMissing();
-  if (!missing.length) return;
+  const text = `公開の前に、入れておく項目が ${missing.length} つあります`;
+  const now = $('#releaseWarn');
+  if (!missing.length) { now?.remove(); return; }
+  // すでに出ていれば、数だけを書き換える（消して入れ直さない。描き直しで帯がちらつかないように）
+  if (now) { now.querySelector('.notice__text').textContent = text; return; }
   // 1行だけ: 何件あるかと、直す場所への入口。中身は「設定」の上に出す（どのタブにも大きな赤字を出さない。報告書 83 章）
   $('#app').prepend(el('div', { class: 'notice', id: 'releaseWarn', role: 'status' }, el('span', { class: 'notice__icon', 'aria-hidden': 'true' }),
-    el('span', { text: `公開の前に、入れておく項目が ${missing.length} つあります` }),
+    el('span', { class: 'notice__text', text }),
     el('button', { class: 'textbtn', type: 'button', text: '設定を開く', onclick: () => leavePanel(() => { pendingNotice = null; show('settings'); }) })));
 }
 /** 「設定」の上に、まだ入っていない項目を並べる */
