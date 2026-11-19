@@ -19,6 +19,16 @@ import { clientIp } from './mvp/security.js';
 
 const config = loadConfig();
 const store = openDb(config.dbPath);
+// 配信エージェントの合言葉（報告書 94 章）。本番では GitHub の Secrets から渡す。
+// 入っていれば、これだけを配信エージェントとして登録し、ほかの合言葉（前の値・開発用）は使えなくする
+if (config.agentToken) {
+  if (config.agentToken.length < 32) console.error('[agent] POC_AGENT_TOKEN が短すぎます（32文字以上）。登録しません');
+  else store.db.transaction(() => {
+    const hash = hashToken(config.agentToken);
+    store.db.prepare("DELETE FROM staff WHERE role = 'agent' AND token_hash <> ?").run(hash);
+    if (!store.q.staffByToken.get(hash)) store.q.insertStaff.run('agent', '配信エージェント', hash);
+  })();
+}
 // 外の保存先への保存（Cloudflare など、置き場が消える環境だけ）
 const saver = config.persistUrl ? createSaver({ db: store.db, config }) : null;
 const metrics = new Metrics(config.metricsDir, { level: config.metricsLevel, fileMb: config.metricsFileMb, maxMb: config.metricsMaxMb });

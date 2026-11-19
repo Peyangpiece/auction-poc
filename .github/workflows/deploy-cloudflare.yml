@@ -40,6 +40,8 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       EVENTBRIDGE_SECRET: ${{ secrets.EVENTBRIDGE_SECRET }}
+      # 配信用PCの配信エージェントの合言葉（32文字以上の乱数。報告書 94 章）。映像をつなぐときに入れる
+      AGENT_TOKEN: ${{ secrets.AGENT_TOKEN }}
       WRANGLER: npx --yes wrangler@4.163.0
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +72,8 @@ jobs:
       - name: 映像（Amazon IVS）の設定を入れる（GitHub にあるときだけ）
         if: env.IVS_CHANNEL_ARN != '' && env.IVS_PLAYBACK_URL != '' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
         run: |
-          for name in IVS_CHANNEL_ARN IVS_PLAYBACK_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY EVENTBRIDGE_SECRET; do
+          if [ -n "$AGENT_TOKEN" ] && [ "${#AGENT_TOKEN}" -lt 32 ]; then echo "AGENT_TOKEN は、32文字以上にしてください"; exit 1; fi
+          for name in IVS_CHANNEL_ARN IVS_PLAYBACK_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY EVENTBRIDGE_SECRET AGENT_TOKEN; do
             value="$(printenv "$name" || true)"
             if [ -n "$value" ]; then printf '%s' "$value" | $WRANGLER secret put "$name"; fi
           done

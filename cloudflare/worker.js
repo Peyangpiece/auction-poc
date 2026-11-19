@@ -89,6 +89,8 @@ export class AuctionApp extends DurableObject {
           POC_IVS_MODE: 'aws', IVS_CHANNEL_ARN: e.IVS_CHANNEL_ARN, IVS_PLAYBACK_URL: e.IVS_PLAYBACK_URL, AWS_REGION: e.AWS_REGION || 'ap-northeast-1',
           AWS_ACCESS_KEY_ID: e.AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY: e.AWS_SECRET_ACCESS_KEY,
           ...(e.EVENTBRIDGE_SECRET ? { POC_EVENTBRIDGE_SECRET: e.EVENTBRIDGE_SECRET } : {}),
+          // 配信用PCの配信エージェントの合言葉（報告書 94 章）
+          ...(e.AGENT_TOKEN ? { POC_AGENT_TOKEN: e.AGENT_TOKEN } : {}),
         } : { POC_IVS_MODE: 'always-live' }),
         POC_PERSIST_URL: `http://${STORE_HOST}`,
         // お試し用: 認証番号を画面に出し、今日の開催を自動で作る（SMS がまだつながっていないため）

@@ -43,6 +43,8 @@ export function loadConfig(env = process.env) {
       env.IVS_PLAYER_SCRIPT_URL || 'https://player.live-video.net/1.58.0/amazon-ivs-player.min.js',
     // EventBridge の API destination から届く POST を確かめる合言葉（秘密。環境変数だけに置く）
     eventbridgeSecret: env.POC_EVENTBRIDGE_SECRET || '',
+    // 配信エージェントの合言葉（秘密。報告書 94 章）。入っていれば、起動のときに、この合言葉だけを配信エージェントとして登録する
+    agentToken: env.POC_AGENT_TOKEN || '',
 
     // 障害の模擬（P2-3、P2-5、進行コンソールの「サーバーの再起動」）を許すか。本番では必ず 0 にする。
     allowCrash: env.POC_ALLOW_CRASH === '1',

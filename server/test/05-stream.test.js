@@ -263,3 +263,35 @@ test('OBS の出力解像度を 960×720 にそろえる。配信中は止まっ
     assert.equal(obs4.state.video.outputWidth, 1280, 'ゆがむので、変えない');
   });
 });
+
+test('配信エージェントの合言葉を、設定（POC_AGENT_TOKEN）から登録する。ほかの合言葉は使えなくなる（報告書 94 章）', async () => {
+  const { WebSocket } = await import('ws');
+  const tryAgent = (url, token) => new Promise((resolve) => {
+    const ws = new WebSocket(url, { headers: { authorization: `Bearer ${token}` } });
+    ws.on('open', () => { ws.close(); resolve('open'); });
+    ws.on('unexpected-response', (_, res) => resolve(res.statusCode));
+    ws.on('error', () => resolve('error'));
+  });
+  const token = 'x'.repeat(16) + Math.random().toString(36).slice(2) + 'y'.repeat(16);
+  const ctx5 = makeEnv({ ...T, POC_AGENT_TOKEN: token });
+  const srv5 = await startServer(ctx5);
+  try {
+    assert.equal(await tryAgent(srv5.agentUrl, token), 'open', '設定の合言葉で、つながる');
+    assert.equal(await tryAgent(srv5.agentUrl, ctx5.tokens.agent), 401, '開発用の合言葉は、使えなくなる');
+    assert.equal(await tryAgent(srv5.agentUrl, 'wrong'), 401);
+  } finally { await srv5.stop(); }
+  // 合言葉を変えて起動し直すと、前の合言葉は使えない。短すぎる値は登録しない
+  const token2 = token.replace(/x/g, 'z');
+  ctx5.env.POC_AGENT_TOKEN = token2;
+  const srv6 = await startServer(ctx5);
+  try {
+    assert.equal(await tryAgent(srv6.agentUrl, token2), 'open');
+    assert.equal(await tryAgent(srv6.agentUrl, token), 401, '前の合言葉は、使えなくなる');
+  } finally { await srv6.stop(); }
+  ctx5.env.POC_AGENT_TOKEN = 'short';
+  const srv7 = await startServer(ctx5);
+  try {
+    assert.equal(await tryAgent(srv7.agentUrl, 'short'), 401, '32文字に満たない合言葉は、登録しない');
+    assert.equal(await tryAgent(srv7.agentUrl, token2), 'open', 'その場合は、前の登録のまま');
+  } finally { await srv7.stop(); cleanup(ctx5); }
+});
