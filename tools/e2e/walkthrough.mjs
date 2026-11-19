@@ -66,6 +66,8 @@ try {
   await con.click('#cameras [data-camera="カメラ: USB"]');
   await con.waitForFunction(() => document.querySelector('#cameras [data-camera="カメラ: USB"]')?.getAttribute('aria-pressed') === 'true');
   check((await text(con, 's_obs')) === '配信中' && (await text(con, 'status')).includes('受付中'), 'カメラを切り替えても、配信と競りは止まらない');
+  await con.waitForFunction(() => document.getElementById('s_video').textContent === '960×720');
+  check(true, 'OBS の出力解像度は、配信が止まっていたときに 960×720 にそろえてあり、進行コンソールに出る');
   await shot(con, 'console-camera');
 
   console.log('入札');

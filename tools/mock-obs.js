@@ -6,9 +6,9 @@
 import { WebSocketServer } from 'ws';
 
 // scenes は、OBS の画面の上から順（GetSceneList は、OBS と同じく逆の順で返す）
-export function startMockObs({ port = 4455, startDelayMs = 800, stopDelayMs = 300, scenes = ['カメラ: スマホ', 'カメラ: 無線', 'カメラ: USB', '休憩の画面'] } = {}) {
+export function startMockObs({ port = 4455, startDelayMs = 800, stopDelayMs = 300, scenes = ['カメラ: スマホ', 'カメラ: 無線', 'カメラ: USB', '休憩の画面'], video = {} } = {}) {
   const wss = new WebSocketServer({ port, host: '127.0.0.1' });
-  const state = { active: false, timer: null, scenes: [...scenes], current: scenes[0] ?? null };
+  const state = { active: false, timer: null, scenes: [...scenes], current: scenes[0] ?? null, video: { baseWidth: 1440, baseHeight: 1080, outputWidth: 1440, outputHeight: 1080, fpsNumerator: 30, fpsDenominator: 1, ...video } };
   const event = (eventType, eventData) => {
     const text = JSON.stringify({ op: 5, d: { eventType, eventIntent: 64, eventData } });
     for (const c of wss.clients) if (c.readyState === 1) c.send(text);
@@ -31,6 +31,13 @@ export function startMockObs({ port = 4455, startDelayMs = 800, stopDelayMs = 30
       else if (d.requestType === 'GetStreamStatus') responseData = { outputActive: state.active, outputReconnecting: false };
       else if (d.requestType === 'StartStream') setActive(true, startDelayMs);
       else if (d.requestType === 'StopStream') setActive(false, stopDelayMs);
+      else if (d.requestType === 'GetVideoSettings') responseData = { ...state.video };
+      else if (d.requestType === 'SetVideoSettings') {
+        // 本物の OBS と同じく、出力が動いている間は変えられない
+        if (state.active) return ws.send(JSON.stringify({ op: 7, d: { requestType: d.requestType, requestId: d.requestId, requestStatus: { result: false, code: 500, comment: 'Video settings cannot be changed while an output is active.' } } }));
+        Object.assign(state.video, d.requestData);
+        setTimeout(() => event('VideoSettingsChanged', { ...state.video }), 10);
+      }
       else if (d.requestType === 'GetSceneList') responseData = { currentProgramSceneName: state.current, scenes: [...state.scenes].reverse().map((sceneName, i) => ({ sceneName, sceneIndex: i })) };
       else if (d.requestType === 'SetCurrentProgramScene') {
         if (!state.scenes.includes(d.requestData?.sceneName)) return ws.send(JSON.stringify({ op: 7, d: { requestType: d.requestType, requestId: d.requestId, requestStatus: { result: false, code: 600, comment: 'No source was found' } } }));

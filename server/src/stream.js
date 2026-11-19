@@ -21,6 +21,7 @@ export class StreamControl extends EventEmitter {
     this.desired = null; // サーバーが望む配信の状態（'on' / 'off' / null=まだ指示していない）
     this.cameras = []; // OBS のカメラ（名前が「カメラ」で始まるシーン）。エージェントが知らせてくる（報告書 92 章）
     this.camera = null; // いま映しているシーン
+    this.video = null; // OBS の解像度 { base, output, want, state }（報告書 93 章）
 
     this.live = { poll: false, event: false, mock: false }; // 方法ごとの「LIVE かどうか」
     this.eventLiveAt = 0;
@@ -49,6 +50,7 @@ export class StreamControl extends EventEmitter {
       obsActive: this.obsActive,
       cameras: this.cameras,
       camera: this.camera,
+      video: this.video,
       desired: this.desired,
       waiting: !!this.waiting,
       autoStopMs: this.autoStopMs,
@@ -183,12 +185,13 @@ export class StreamControl extends EventEmitter {
       if (msg.type === 'agent_result') this.#onAgentResult(msg);
       else if (msg.type === 'agent_state') this.#setObsActive(msg.obsActive, 'agent_state', msg);
       else if (msg.type === 'agent_cameras') this.#setCameras(msg);
+      else if (msg.type === 'agent_video') this.#setVideo(msg);
       else if (msg.type === 'time') ws.send(JSON.stringify({ type: 'time', t0: msg.t0, ts: nowMs() }));
     });
     ws.on('close', () => {
       if (this.agent !== ws) return;
       this.agent = null;
-      this.cameras = []; this.camera = null; // 切れている間は、切り替えられない
+      this.cameras = []; this.camera = null; this.video = null; // 切れている間は、切り替えられない・分からない
       this.metrics.write('agent_disconnected', { name });
       for (const [id, p] of this.pending) {
         clearTimeout(p.timer);
@@ -212,6 +215,15 @@ export class StreamControl extends EventEmitter {
     if (JSON.stringify([cameras, camera]) === JSON.stringify([this.cameras, this.camera])) return;
     this.cameras = cameras; this.camera = camera;
     this.metrics.write('camera_state', { cameras, camera });
+    this.#publish();
+  }
+
+  #setVideo(msg) {
+    const pair = (a) => (Array.isArray(a) && a.length === 2 && a.every(Number.isFinite) ? [a[0], a[1]] : null);
+    const video = { base: pair(msg.base), output: pair(msg.output), want: pair(msg.want), state: ['ok', 'streaming', 'base_aspect'].includes(msg.state) ? msg.state : 'ok' };
+    if (JSON.stringify(video) === JSON.stringify(this.video)) return;
+    this.video = video;
+    this.metrics.write('obs_video', video);
     this.#publish();
   }
 

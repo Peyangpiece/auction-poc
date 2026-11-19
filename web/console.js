@@ -130,6 +130,15 @@ function renderStream() {
   $('s_agent').textContent = s.agentConnected ? '接続中' : '未接続'; $('s_agent').dataset.on = s.agentConnected ? '1' : '';
   $('s_obs').textContent = s.obsActive === null ? '不明' : s.obsActive ? '配信中' : '停止'; $('s_obs').dataset.on = s.obsActive ? '1' : '';
   renderCameras(s);
+  // OBS の出力解像度（報告書 93 章）。決めた大きさ（既定 960×720）でないときは、理由と直し方を出す
+  const v = s.agentConnected ? s.video : null;
+  const px = (a) => (a ? `${a[0]}×${a[1]}` : '—');
+  $('s_video').textContent = px(v?.output);
+  const off = v && v.want && (v.output?.[0] !== v.want[0] || v.output?.[1] !== v.want[1]);
+  $('videoWarn').textContent = !off ? ''
+    : v.state === 'streaming' ? `配信が止まったら、${px(v.want)} にそろえます。`
+    : v.state === 'base_aspect' ? `OBS の基本解像度（${px(v.base)}）の縦横の比が ${px(v.want)} と違うため、出力をそろえられません。OBS の「設定 → 映像」で、基本解像度を 4:3（例: 1440×1080）にしてください。`
+    : '';
 }
 // 映すカメラの切り替え（報告書 92 章）。「カメラ: スマホ」なら「スマホ」と出す
 const camLabel = (name) => name.replace(/^カメラ[\s:：・]*/, '') || name;

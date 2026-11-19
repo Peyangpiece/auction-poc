@@ -33,6 +33,8 @@ section > h2 { margin-bottom: 8px; }
 #cmdMsg:empty { display: none; }
 #idleWarn { margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--danger); }
 #idleWarn:empty { display: none; }
+#videoWarn { margin-top: 8px; font-size: 14px; }
+#videoWarn:empty { display: none; }
 .actions .push { margin-left: auto; }
 
 /* 表 */

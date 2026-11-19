@@ -26,7 +26,10 @@ const cfg = {
   logDir: process.env.AGENT_LOG_DIR || path.join(here, 'logs'),
   // カメラの切り替え（報告書 92 章）: OBS のシーンのうち、名前がこの言葉で始まるものを「カメラ」として進行コンソールに出す
   cameraPrefix: process.env.AGENT_CAMERA_PREFIX || 'カメラ',
+  // OBS の出力解像度（報告書 93 章）。IVS の視聴の料金を HD の区分に収めるため、既定は 960×720（4:3）。off で触らない
+  outputSize: (process.env.AGENT_OUTPUT_SIZE || '960x720').toLowerCase(),
 };
+const wantSize = (() => { const m = /^(\d{3,4})x(\d{3,4})$/.exec(cfg.outputSize); return m ? { w: Number(m[1]), h: Number(m[2]) } : null; })();
 if (!cfg.serverUrl || !cfg.token) {
   console.error('AGENT_SERVER_URL と AGENT_TOKEN を環境変数（または agent/.env）で指定してください。');
   process.exit(1);
@@ -59,6 +62,7 @@ async function connectObs() {
     obsVersion = { obs: v.obsVersion, obsWebSocket: v.obsWebSocketVersion, rpc: hello.negotiatedRpcVersion, platform: v.platform };
     log('obs_connected', obsVersion); // 【未検証】の確認用: OBS と obs-websocket のバージョンを記録する
     reportCameras();
+    ensureOutputSize();
     return true;
   } catch (err) {
     log('obs_connect_failed', { message: err.message, code: err.code });
@@ -77,8 +81,32 @@ obs.on('StreamStateChanged', (e) => {
   if (e.outputState === 'OBS_WEBSOCKET_OUTPUT_STARTED' || e.outputState === 'OBS_WEBSOCKET_OUTPUT_STOPPED') {
     sendToServer({ type: 'agent_state', obsActive: e.outputActive, obsConnected: true, at: now() });
   }
+  if (e.outputState === 'OBS_WEBSOCKET_OUTPUT_STOPPED') ensureOutputSize(); // 配信中にそろえられなかった分を、止まったときにそろえる
 });
 setInterval(() => { if (!obsConnected) connectObs(); }, 5000).unref();
+
+// ------------------------------------------------------------------ 出力解像度（報告書 93 章）
+// OBS につないだとき（と、配信が止まったとき）に、出力解像度を決めた大きさにそろえる。
+// ・配信中は変えない（OBS は、出力が動いている間は映像の設定を変えられない）。止まったときにそろえる
+// ・基本（キャンバス）解像度の縦横の比が違えば、変えない（映像がゆがむため）。進行コンソールに注意を出す
+async function ensureOutputSize() {
+  if (!obsConnected) return;
+  try {
+    let v = await obs.call('GetVideoSettings');
+    let state = 'ok';
+    if (wantSize && (v.outputWidth !== wantSize.w || v.outputHeight !== wantSize.h)) {
+      if (v.baseWidth * wantSize.h !== v.baseHeight * wantSize.w) state = 'base_aspect';
+      else if ((await obs.call('GetStreamStatus')).outputActive) state = 'streaming';
+      else {
+        await obs.call('SetVideoSettings', { outputWidth: wantSize.w, outputHeight: wantSize.h });
+        log('obs_output_size', { from: [v.outputWidth, v.outputHeight], to: [wantSize.w, wantSize.h] });
+        v = await obs.call('GetVideoSettings');
+      }
+    }
+    sendToServer({ type: 'agent_video', base: [v.baseWidth, v.baseHeight], output: [v.outputWidth, v.outputHeight], want: wantSize ? [wantSize.w, wantSize.h] : null, state, at: now() });
+  } catch (err) { log('obs_output_size_failed', { message: err.message }); }
+}
+obs.on('VideoSettingsChanged', () => ensureOutputSize());
 
 // ------------------------------------------------------------------ カメラ（OBS のシーン。報告書 92 章）
 // スマホ・無線カメラ・USB カメラは、OBS の中で、それぞれのシーンに入れておく。ここは、どのシーンを映すかを切り替えるだけ
@@ -185,6 +213,7 @@ function connectServer() {
     log('server_connected');
     syncClock();
     reportCameras();
+    ensureOutputSize();
   });
   ws.on('message', (raw) => {
     let msg;

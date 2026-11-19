@@ -226,3 +226,40 @@ test('カメラの切り替え: OBS の「カメラ」で始まるシーンを�
     await cleared;
   } finally { agent3.kill(); await obs3.close().catch(() => {}); await srv3.stop(); cleanup(ctx3); }
 });
+
+test('OBS の出力解像度を 960×720 にそろえる。配信中は止まってから。基本解像度の比が違えば変えずに知らせる（報告書 93 章）', async () => {
+  const run = async (video, check) => {
+    const ctx4 = makeEnv(T);
+    const srv4 = await startServer(ctx4);
+    const obs4 = startMockObs({ port: 0, startDelayMs: 100, stopDelayMs: 100, video });
+    await new Promise((r) => obs4.wss.on('listening', r));
+    const { auctioneer: A4 } = await connectAll(srv4, ctx4, 0);
+    const is = (pred, ms = 5000) => A4.waitFor((x) => x.type === 'stream' && x.stream.video && pred(x.stream.video), ms);
+    const agent4 = spawn('node', ['src/agent.js'], {
+      cwd: path.join(ROOT, 'agent'), stdio: 'ignore',
+      env: { ...process.env, AGENT_SERVER_URL: srv4.agentUrl, AGENT_TOKEN: ctx4.tokens.agent, OBS_URL: `ws://127.0.0.1:${obs4.wss.address().port}`, AGENT_LOG_DIR: path.join(ctx4.dataDir, 'agent-logs') },
+    });
+    try { await check({ A4, obs4, is }); } finally { agent4.kill(); await obs4.close(); await srv4.stop(); cleanup(ctx4); }
+  };
+  // 基本 1440×1080・出力 1440×1080 → 出力を 960×720 にする
+  await run({}, async ({ obs4, is }) => {
+    const v = await is((x) => x.output[0] === 960);
+    assert.deepEqual([v.stream.video.output, v.stream.video.base, v.stream.video.state], [[960, 720], [1440, 1080], 'ok']);
+    assert.deepEqual([obs4.state.video.outputWidth, obs4.state.video.outputHeight, obs4.state.video.baseWidth], [960, 720, 1440], '基本解像度は変えない');
+  });
+  // 配信中につながった → 止まるまで待って、止まったらそろえる
+  await run({}, async ({ A4, obs4, is }) => {
+    obs4.state.active = true;
+    await is((x) => x.state === 'streaming');
+    assert.equal(obs4.state.video.outputWidth, 1440, '配信中は変えない');
+    const done = is((x) => x.output[0] === 960);
+    await A4.cmd('stream_stop');
+    await done;
+  });
+  // 基本解像度が 16:9 → 変えずに知らせる
+  await run({ baseWidth: 1920, baseHeight: 1080, outputWidth: 1280, outputHeight: 720 }, async ({ obs4, is }) => {
+    const v = await is((x) => x.state === 'base_aspect');
+    assert.deepEqual(v.stream.video.output, [1280, 720]);
+    assert.equal(obs4.state.video.outputWidth, 1280, 'ゆがむので、変えない');
+  });
+});
