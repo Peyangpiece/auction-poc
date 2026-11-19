@@ -214,7 +214,17 @@ async function setupNav() {
     nav.replaceChildren(...items);
   }
   if (me.member) tabBar();
+  fillFooter();
   return me;
+}
+// サイトの下に、主催者の名称と古物商の許可を出す（古物営業法。設定にあるときだけ。報告書 96 章）
+async function fillFooter() {
+  const foot = $('.sitefoot p');
+  if (!foot) return;
+  const legal = await api('GET', '/api/legal');
+  if (!legal.ok) return;
+  if (legal.orgName) foot.textContent = legal.orgName;
+  if (legal.kobutsuLicense) foot.after(el('p', { class: 'sitefoot__license', text: `古物商許可　${legal.kobutsuLicense}` }));
 }
 
 // ---- 下のタブバー（スマートフォン）。会員の行き先は4つだけなので、いつも画面の下に出しておく

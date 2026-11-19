@@ -46,6 +46,7 @@ select.input { appearance: auto; background-color: var(--ground); color: var(--i
 .choice label:has(input:checked) { border-color: var(--action); border-width: 2px; padding: 7px 11px; color: var(--action); }
 .check { display: flex; align-items: flex-start; gap: 10px; font-weight: 700; cursor: pointer; min-height: 44px; padding: 8px 0; }
 .check .err { display: block; font-weight: 400; color: var(--danger); font-size: 13px; }
+.check .hint { display: block; font-weight: 400; color: var(--ink-2); font-size: 13px; margin-top: 2px; }
 .check input { width: 20px; height: 20px; margin: 3px 0 0; flex: none; }
 .msg { font-size: 14px; min-height: 22px; color: var(--danger); }
 .msg.ok { color: var(--ok); }
@@ -147,6 +148,7 @@ td .note { font-size: 12px; }
 /* ---- フッター（会社名と規約へのリンク） */
 .sitefoot { border-top: 1px solid var(--line); margin-top: 64px; padding: 24px 16px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; gap: 8px 32px; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--ink-2); max-width: 1080px; margin-inline: auto; }
 .sitefoot p { font-weight: 700; letter-spacing: 0; }
+.sitefoot .sitefoot__license { font-weight: 400; flex-basis: 100%; order: 3; }
 .sitefoot nav { display: flex; flex-wrap: wrap; gap: 4px 24px; }
 .sitefoot a { color: var(--ink-2); text-underline-offset: 4px; padding: 8px 0; }
 .sitefoot a:hover { color: var(--action); }

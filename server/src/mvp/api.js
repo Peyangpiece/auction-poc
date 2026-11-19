@@ -91,6 +91,10 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   if (!db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name = 'highlights'").get()) db.exec("ALTER TABLE events ADD COLUMN highlights TEXT NOT NULL DEFAULT ''");
   // 開催のお知らせメールを受け取るか（会員がマイページで切り替える。最初は受け取る）
   if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = 'event_mail'").get()) db.exec('ALTER TABLE member_accounts ADD COLUMN event_mail INTEGER NOT NULL DEFAULT 1');
+  // 開催のお知らせメールの受信の同意（特定電子メール法。報告書 96 章）: 同意した時刻と、どこで同意したか。配信を止めるリンクの合言葉
+  for (const [col, type] of [['event_mail_consent_at', 'REAL'], ['event_mail_consent_via', 'TEXT'], ['unsub_token', 'TEXT']]) {
+    if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = ?").get(col)) db.exec(`ALTER TABLE member_accounts ADD COLUMN ${col} ${type}`);
+  }
   // 開催のお知らせメールを送った記録（同じ開催の同じ会員に、2度送らない）
   db.exec('CREATE TABLE IF NOT EXISTS event_mails (event_id INTEGER NOT NULL, account_id INTEGER NOT NULL, at REAL NOT NULL, PRIMARY KEY (event_id, account_id))');
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
@@ -295,7 +299,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   const memberView = (m) => ({
     kind: m.kind, name: m.name, nameKana: m.name_kana, loginId: m.login_id ?? null, hasPassword: !!m.password_hash, phone: m.phone, phoneVerified: !!m.phone_verified, email: m.email, emailVerified: !!m.email_verified, address: m.address,
     postalCode: m.postal_code, prefecture: m.prefecture, address1: m.address1, address2: m.address2,
-    shipTo: m.ship_to, company: m.company, contactName: m.contact_name, billing: m.billing, suspended: !!billing.suspension(m.id), suspendedBy: billing.suspension(m.id), eventMail: m.event_mail !== 0,
+    shipTo: m.ship_to, company: m.company, contactName: m.contact_name, billing: m.billing, suspended: !!billing.suspension(m.id), suspendedBy: billing.suspension(m.id), eventMail: m.event_mail !== 0 && m.event_mail_consent_at !== null,
   });
   async function sendEmailVerification(ctx, member) {
     const token = randomToken();
@@ -389,6 +393,9 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(kind, name, phone, email, address, text(body.shipTo, 300) || null,
       kind === 'b2b' ? company : null, kind === 'b2b' ? contactName : null, kind === 'b2b' ? billing : null, kind === 'b2c' ? 1 : 0, now, now);
     if (body.agreed === true) db.prepare('UPDATE member_accounts SET agreed_at = ? WHERE id = ?').run(now, info.lastInsertRowid);
+    // 開催のお知らせメール: 登録の画面のチェック（最初は外してある）で、受け取ると選んだ人にだけ送る。同意の時刻と場所を残す（特定電子メール法）
+    if (body.eventMail === true) db.prepare("UPDATE member_accounts SET event_mail = 1, event_mail_consent_at = ?, event_mail_consent_via = 'register' WHERE id = ?").run(now, info.lastInsertRowid);
+    else db.prepare('UPDATE member_accounts SET event_mail = 0 WHERE id = ?').run(info.lastInsertRowid);
     db.prepare('UPDATE member_accounts SET name_kana = ?, postal_code = ?, prefecture = ?, address1 = ?, address2 = ? WHERE id = ?')
       .run(person.nameKana, person.postalCode, person.prefecture, person.address1, person.address2, info.lastInsertRowid);
     if (byEmail) db.prepare('UPDATE member_accounts SET email_verified = 1, phone_verified = 0 WHERE id = ?').run(info.lastInsertRowid);
@@ -435,8 +442,21 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const m = needMember(ctx);
     const on = body.on === true;
     db.prepare('UPDATE member_accounts SET event_mail = ?, updated_at = ? WHERE id = ?').run(on ? 1 : 0, nowMs(), m.id);
+    // 受け取ると切り替えたときは、同意の時刻と場所を残す（特定電子メール法）
+    if (on) db.prepare("UPDATE member_accounts SET event_mail_consent_at = ?, event_mail_consent_via = 'mypage' WHERE id = ?").run(nowMs(), m.id);
     audit(ctx, 'member.event_mail', { target: `member:${m.id}`, after: { on } });
     return { ok: true, eventMail: on };
+  });
+  // 開催のお知らせメールの配信を、ログインせずに止める（メールに載せたリンクから。特定電子メール法の受信拒否。報告書 96 章）
+  route('POST', '/api/unsubscribe', (ctx, body) => {
+    const t = String(body?.t ?? '');
+    const m = t.length >= 20 ? db.prepare('SELECT * FROM member_accounts WHERE unsub_token = ?').get(t) : null;
+    if (!m) throw new HttpError(404, 'このリンクは使えません。マイページの「個人情報の設定」から止めてください');
+    if (m.event_mail) {
+      db.prepare('UPDATE member_accounts SET event_mail = 0, updated_at = ? WHERE id = ?').run(nowMs(), m.id);
+      audit({ system: true }, 'member.event_mail', { target: `member:${m.id}`, after: { on: false, via: 'unsubscribe_link' } });
+    }
+    return { ok: true };
   });
   // 退会（FR-AUTH-014）。お支払いが済んでいない明細があるあいだは、退会できない。請求・取引・監査の記録は残す
   route('POST', '/api/my/withdraw', (ctx) => {
@@ -884,8 +904,18 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       'オンラインでも、会場でも参加できます。参加の手続きは、当日、ログインしてから行えます。',
       ...(site ? [`${site}/`] : []),
       '',
-      'このお知らせが不要な場合は、マイページの「個人情報の設定」で、受け取らない設定にできます。',
+      // 受信を拒否できること・その URL（特定電子メール法）。ログインせずに止められるリンクにする
+      'このお知らせの受信を止める（配信を停止する）ときは、次のページから手続きできます（ログインは不要です）。',
+      ...(site ? [`${String(site).replace(/\/+$/, "")}/unsubscribe.html?t=${unsubToken(a)}`] : ['マイページの「個人情報の設定」からも止められます。']),
     ] });
+  }
+  /** 配信を止めるリンクの合言葉（会員ごと。最初に送るときに作る） */
+  function unsubToken(a) {
+    if (a.unsub_token) return a.unsub_token;
+    const t = randomToken(18);
+    db.prepare('UPDATE member_accounts SET unsub_token = ? WHERE id = ?').run(t, a.id);
+    a.unsub_token = t;
+    return t;
   }
   // 送っている途中で、もう一度呼ばれたら（見回りと公開の操作が重なったとき）、走っている方の終わりを待つ
   let eventMailRun = null;
@@ -901,7 +931,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     for (const e of events) {
       const when = e.starts_at.slice(0, 10) === today ? '本日' : '明日';
       const subject = `【令和の競り】${when} ${jpDate(e.starts_at)} 開催のお知らせ`;
-      const targets = db.prepare(`SELECT * FROM member_accounts a WHERE a.event_mail = 1 AND a.approved_at IS NOT NULL AND a.rejected_at IS NULL AND a.withdrawn_at IS NULL AND a.suspended = 0
+      // 受け取ると同意した記録のある人だけ（特定電子メール法。同意の記録がない、前の版の会員には送らない）
+      const targets = db.prepare(`SELECT * FROM member_accounts a WHERE a.event_mail = 1 AND a.event_mail_consent_at IS NOT NULL AND a.approved_at IS NOT NULL AND a.rejected_at IS NULL AND a.withdrawn_at IS NULL AND a.suspended = 0
         AND NOT EXISTS (SELECT 1 FROM event_mails x WHERE x.event_id = ? AND x.account_id = a.id) ORDER BY a.id`).all(e.id);
       let count = 0;
       for (const a of targets) {
@@ -1156,13 +1187,15 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     needStaff(ctx, 'admin');
     // fixed: 原本の値で固定している項目（画面では変えられないようにする）。sealFixed: 印鑑も原本で固定
     const FIXED_NAME = { org_name: 'orgName', ...Object.fromEntries(Object.entries(BILLING_KEYS).map(([k, [key]]) => [key, k])) };
-    return { orgName: setting('org_name'), returnPolicy: setting('return_policy'), shippingNotice: setting('shipping_notice'), ...Object.fromEntries(Object.entries(BILLING_KEYS).map(([k, [key]]) => [k, setting(key)])),
+    return { orgName: setting('org_name'), kobutsuLicense: setting('kobutsu_license'), returnPolicy: setting('return_policy'), shippingNotice: setting('shipping_notice'), ...Object.fromEntries(Object.entries(BILLING_KEYS).map(([k, [key]]) => [k, setting(key)])),
       fixed: billing.fixedKeys().map((k) => FIXED_NAME[k]), sealFixed: billing.sealFixed() };
   });
   route('POST', '/api/settings', (ctx, body) => {
     needStaff(ctx, 'admin');
     const next = {
       org_name: String(body.orgName ?? '').trim().slice(0, 100),
+      // 古物商の許可の表示（古物営業法。例: 「〇〇県公安委員会　第000000000000号」）。サイトの下と競りの画面に出す（報告書 96 章）
+      ...(body.kobutsuLicense !== undefined ? { kobutsu_license: String(body.kobutsuLicense ?? '').trim().slice(0, 100) } : {}),
       return_policy: String(body.returnPolicy ?? '').trim().slice(0, 2000),
       shipping_notice: String(body.shippingNotice ?? '').trim().slice(0, 1000),
       ...Object.fromEntries(Object.entries(BILLING_KEYS).filter(([k]) => body[k] !== undefined).map(([k, [key, max]]) => [key, String(body[k] ?? '').trim().slice(0, max)])),
@@ -1178,6 +1211,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   const LEGAL = { terms: ['legal_terms', '利用規約'], tokushoho: ['legal_tokushoho', '特定商取引法に基づく表示'], privacy: ['legal_privacy', 'プライバシーポリシー'] };
   route('GET', '/api/legal', () => ({
     orgName: setting('org_name'),
+    kobutsuLicense: setting('kobutsu_license'),
     docs: Object.fromEntries(Object.entries(LEGAL).map(([k, [key, title]]) => [k, { title, body: setting(key) }])),
   }));
   route('POST', '/api/settings/legal', (ctx, body) => {

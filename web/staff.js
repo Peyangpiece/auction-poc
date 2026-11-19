@@ -585,6 +585,7 @@ async function settingsPanel() {
   const s = await api('GET', '/api/settings');
   const form = el('form', { class: 'form', novalidate: true },
     field('主催者の名称', 'orgName', { value: s.orgName, required: true }),
+    field('古物商の許可', 'kobutsuLicense', { value: s.kobutsuLicense, placeholder: '〇〇県公安委員会　第000000000000号' }, '許可をした公安委員会の名称と、許可証の番号。主催者の名称と一緒に、サイトの下と競りの画面に出します（古物営業法）'),
     field('返品特約の表示', 'returnPolicy', { value: s.returnPolicy, rows: 4, required: true }, 'トップページに表示します。弁護士の確認が済むまでは仮の文言です'),
     field('送料の表示', 'shippingNotice', { value: s.shippingNotice, rows: 3, required: true }, 'トップページに表示します'),
     el('h2', { class: 'subhead', text: '請求書に載せる内容' }),
@@ -741,7 +742,7 @@ async function releaseWarning() {
   if (!legal.ok || !settings.ok) return;
   const missing = [
     !legal.docs.terms.body && '利用規約', !legal.docs.privacy.body && 'プライバシーポリシー', !legal.docs.tokushoho.body && '特定商取引法に基づく表示',
-    /【仮/.test(settings.returnPolicy ?? '') && '返品特約（仮の文言のまま）', !settings.bankAccount && '振込先',
+    /【仮/.test(settings.returnPolicy ?? '') && '返品特約（仮の文言のまま）', !settings.bankAccount && '振込先', !settings.kobutsuLicense && '古物商の許可の表示',
   ].filter(Boolean);
   $('#releaseWarn')?.remove();
   S_missing = missing; renderMissing();

@@ -557,6 +557,8 @@ if (params.has('venue')) history.replaceState(null, '', location.pathname);
 // 買歩銭（落札額のほかにかかる手数料）は、入札の前と、入札画面の中の両方に出す
 const premiumText = (t) => (t.premiumRate > 0 ? `落札額のほかに、買歩銭（落札額の${t.premiumRate}%）がかかります。\n` : '');
 // 買歩銭は、価格の下に「込み」の金額で出す（文での説明は、参加手続きの画面にある）
+// 主催者の名称と古物商の許可（古物営業法。品を見せる画面に出す。報告書 96 章）
+getJson('/api/legal').then((l) => { if (l.status === 200 && l.kobutsuLicense) { $('kobutsu').textContent = `${l.orgName ?? ''}　古物商許可　${l.kobutsuLicense}`.trim(); $('kobutsu').hidden = false; } });
 getJson('/api/terms').then((t) => { if (t.status === 200) { S.premiumRate = Number(t.premiumRate) || 0; render(); } });
 const showPaddle = (title, p) => {
   venue = p.mode === 'venue';

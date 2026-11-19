@@ -58,7 +58,7 @@ try {
     await call('/api/register/start', { phone });
     const sms = fs.readFileSync(`${sys.dir}/data/outbox/outbox.ndjson`, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((m) => m.to === phone).at(-1).body;
     await call('/api/register/verify', { phone, code: /(\d{6})/.exec(sms)[1] });
-    await call('/api/register/complete', { kind: 'b2c', name: `検証 ${n}郎`, email: `fx${n}@example.com`, address: `東京都千代田区${n}`, adult: true, agreed: true });
+    await call('/api/register/complete', { kind: 'b2c', name: `検証 ${n}郎`, email: `fx${n}@example.com`, address: `東京都千代田区${n}`, adult: true, agreed: true, eventMail: true });
     const [name, value] = cookie.split('=');
     return [{ name, value, url: sys.base }];
   };
@@ -66,7 +66,7 @@ try {
   const c1 = await register(1);
   const my = await openAs(c1, `${sys.base}/mypage.html#profile`, { ...devices['iPhone 13'] });
   await my.waitForFunction(() => document.getElementById('eventMail').checked);
-  check(true, 'マイページに、開催のお知らせメールの切り替えが出る（最初は受け取る）');
+  check(true, 'マイページに、開催のお知らせメールの切り替えが出る（登録のときに受け取ると選んだ人はオン）');
   await my.click('#eventMail'); await my.waitForFunction(() => document.getElementById('notice').textContent.includes('止めました'));
   await my.reload(); await my.waitForTimeout(500);
   check(!(await my.isChecked('#eventMail')), '切り替えは保存される');

@@ -33,13 +33,13 @@ async function setup(env = {}) {
   const s = api.createStaff({ loginId: 'kanri', name: '管理の人', role: 'admin' });
   const admin = browser();
   assert.equal((await admin.post('/api/staff/login', { loginId: 'kanri', password: s.initialPassword, code: totp(s.totpSecret) })).status, 200);
-  const member = async (n) => {
+  const member = async (n, { eventMail = true } = {}) => {
     const phone = `0907777000${n}`;
     const b = browser();
     await b.post('/api/register/start', { phone });
     const sms = outbox().filter((m) => m.channel === 'sms' && m.to === phone).at(-1).body;
     await b.post('/api/register/verify', { phone, code: /(\d{6})/.exec(sms)[1] });
-    assert.equal((await b.post('/api/register/complete', { kind: 'b2c', name: `検証 ${n}郎`, email: `ev${n}@example.com`, address: `東京都千代田区${n}`, adult: true, agreed: true })).status, 200);
+    assert.equal((await b.post('/api/register/complete', { kind: 'b2c', name: `検証 ${n}郎`, email: `ev${n}@example.com`, address: `東京都千代田区${n}`, adult: true, agreed: true, eventMail })).status, 200);
     return Object.assign(b, { email: `ev${n}@example.com` });
   };
   const event = async (date, publish = true) => {
@@ -49,7 +49,7 @@ async function setup(env = {}) {
   };
   const mails = () => outbox().filter((m) => m.channel === 'email' && m.kind === 'event');
   return {
-    api, store, admin, member, event, mails,
+    api, store, admin, member, event, mails, base,
     at: (iso) => { now = Date.parse(iso); },
     close: async () => { await new Promise((r) => server.close(r)); store.db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); },
   };
@@ -59,7 +59,7 @@ test('前日に、受け取ると決めている会員へ1通ずつ送る。止�
   const t = await setup({ POC_SITE_URL: 'https://seri.example.jp/' });
   try {
     const a = await t.member(1), b = await t.member(2), c = await t.member(3);
-    assert.equal((await b.get('/api/me')).json.member.eventMail, true, '最初は受け取る');
+    assert.equal((await b.get('/api/me')).json.member.eventMail, true, '登録のときに受け取ると選んだ人は、受け取る');
     assert.deepEqual((await b.post('/api/my/event-mail', { on: false })).json.eventMail, false);
     assert.equal((await b.get('/api/me')).json.member.eventMail, false);
     assert.equal((await c.post('/api/my/withdraw')).status, 200);
@@ -76,7 +76,7 @@ test('前日に、受け取ると決めている会員へ1通ずつ送る。止�
     assert.match(sent[0].body, /会場: 検証会場（埼玉県◯◯市1-2-3）/);
     assert.match(sent[0].body, /・古い時計\n・漆の器/);
     assert.match(sent[0].body, /https:\/\/seri\.example\.jp\//, '設定のサイトの URL を載せる');
-    assert.match(sent[0].body, /受け取らない設定にできます/, '止め方を書く');
+    assert.match(sent[0].body, /受信を止める（配信を停止する）ときは、次のページから手続きできます（ログインは不要です）。\nhttps:\/\/seri\.example\.jp\/unsubscribe\.html\?t=[\w-]{20,}/, '受信を拒否できることと、その URL を書く（特定電子メール法）');
 
     assert.equal((await t.api.sendEventMails()).sent, 0, '同じ開催の同じ人には、2度送らない');
     t.at('2026-12-07T23:00:00Z');                              // 12-08 08:00（当日、開始の前）に受け取りを戻した人には、当日の朝に「本日」で送る
@@ -99,5 +99,50 @@ test('開始を過ぎた開催・公開していない開催には送らない�
     const [m] = t.mails();
     assert.ok(m, '送った');
     assert.match(m.body, /http:\/\/127\.0\.0\.1:\d+\//, '公開の操作をしたページの URL');
+  } finally { await t.close(); }
+});
+
+test('受信の同意（特定電子メール法）: 登録のときは最初は受け取らない。同意の時刻を残す。メールのリンクから、ログインせずに止められる（報告書 96 章）', async () => {
+  const t = await setup({ POC_SITE_URL: 'https://seri.example.jp' });
+  try {
+    const a = await t.member(1), b = await t.member(2, { eventMail: false });
+    assert.equal((await b.get('/api/me')).json.member.eventMail, false, 'チェックしなかった人は、受け取らない');
+    const row = (id) => t.store.db.prepare('SELECT event_mail, event_mail_consent_at, event_mail_consent_via FROM member_accounts WHERE email = ?').get(id);
+    assert.deepEqual([row(a.email).event_mail, row(a.email).event_mail_consent_via], [1, 'register']);
+    assert.ok(row(a.email).event_mail_consent_at > 0, '同意した時刻を残す');
+    assert.equal(row(b.email).event_mail_consent_at, null);
+    // 同意の記録がない会員（前の版で、最初から受け取る扱いだった人）には送らない
+    const c = await t.member(3);
+    t.store.db.prepare('UPDATE member_accounts SET event_mail_consent_at = NULL WHERE email = ?').run(c.email);
+    await t.event('2026-12-08');
+    await t.api.sendEventMails();
+    assert.deepEqual(t.mails().map((m) => m.to), [a.email], '同意した人にだけ送る');
+    // マイページで受け取ると切り替えると、同意の時刻と場所を残す
+    await b.post('/api/my/event-mail', { on: true });
+    assert.equal(row(b.email).event_mail_consent_via, 'mypage');
+    // メールのリンクから止める（ログインしていない人でも）
+    const token = /unsubscribe\.html\?t=([\w-]+)/.exec(t.mails()[0].body)[1];
+    assert.ok(!t.mails()[0].body.includes('seri.example.jp//'), 'URL の区切りが二重にならない');
+    const anon = (await fetch(`${t.base}/api/unsubscribe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ t: token }) }));
+    assert.equal(anon.status, 200);
+    assert.equal(row(a.email).event_mail, 0, '止まる');
+    assert.equal((await fetch(`${t.base}/api/unsubscribe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ t: 'x'.repeat(24) }) })).status, 404, '違う合言葉は断る');
+    assert.equal((await fetch(`${t.base}/api/unsubscribe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ t: '' }) })).status, 404);
+  } finally { await t.close(); }
+});
+
+test('古物商の許可の表示（古物営業法）: 主催者管理者が設定で入れると、だれでも見られる規約の情報に載る（報告書 96 章）', async () => {
+  const t = await setup();
+  try {
+    const before = await (await fetch(`${t.base}/api/legal`)).json();
+    assert.ok(!before.kobutsuLicense, '入れる前は、出さない');
+    const s = (await t.admin.get('/api/settings')).json;
+    assert.equal((await t.admin.post('/api/settings', { orgName: s.orgName, returnPolicy: s.returnPolicy, shippingNotice: s.shippingNotice, kobutsuLicense: '〇〇県公安委員会　第000000000000号' })).status, 200);
+    const after = await (await fetch(`${t.base}/api/legal`)).json();
+    assert.equal(after.kobutsuLicense, '〇〇県公安委員会　第000000000000号');
+    assert.equal(after.orgName, s.orgName);
+    // ほかの項目だけを直す操作では、消えない
+    await t.admin.post('/api/settings', { orgName: s.orgName, returnPolicy: s.returnPolicy, shippingNotice: s.shippingNotice });
+    assert.equal((await (await fetch(`${t.base}/api/legal`)).json()).kobutsuLicense, '〇〇県公安委員会　第000000000000号');
   } finally { await t.close(); }
 });

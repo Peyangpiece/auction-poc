@@ -74,7 +74,7 @@ let dirty = false;
 forms.profile.addEventListener('input', () => { dirty = true; });
 window.addEventListener('beforeunload', (ev) => { if (dirty) ev.preventDefault(); });
 onSubmit(forms.profile, async (data) => {
-  const res = await api('POST', '/api/register/complete', { ...data, adult: data.adult === '1', agreed: data.agreed === '1' });
+  const res = await api('POST', '/api/register/complete', { ...data, adult: data.adult === '1', agreed: data.agreed === '1', eventMail: data.eventMail === '1' });
   // 入札画面（会場の QR コードなど）から来た人は、登録のあと入札画面の参加手続きへ進める（FR-AUTH-007）
   if (res.ok) dirty = false;
   // 承認待ち: ログインはまだできない。受け付けたことと、このあとの流れを伝える
