@@ -88,6 +88,7 @@ function render() {
   $('histCount').textContent = `${S.history.filter((h) => h.valid).length}件`;
 
   const busy = [...S.lots.values()].some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status));
+  $('homeLink').hidden = busy;
   // 出品一覧は、表ではなく行の一覧（1行目に番号と品名、2行目に価格と状態）。押せるのは、待機中の品の「開始」と「…」の除外だけ。
   // ほかの品が進行中のあいだは、押せないボタンを並べない（「進行中の品を締めると、開始できます」と一度だけ出す）
   const items = [...S.lots.values()];

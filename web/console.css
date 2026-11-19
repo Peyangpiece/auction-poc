@@ -5,6 +5,11 @@
 .brand__name { font-size: 20px; }
 .meta { display: flex; align-items: baseline; gap: 24px; color: var(--ink-2); font-size: 14px; }
 .meta b { color: var(--ink); }
+/* トップページへ戻る（競りの最中は出さない） */
+.homelink { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; align-self: center; font-size: 15px; font-weight: 500; color: var(--action); text-decoration: none; }
+.homelink[hidden] { display: none; }
+.homelink:hover { text-decoration: underline; text-underline-offset: 4px; }
+.homelink svg { width: 10px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 #clock { font-family: var(--digits); font-weight: 600; font-size: 24px; letter-spacing: 0; color: var(--ink); min-width: 8.2ch; text-align: right; font-variant-numeric: tabular-nums; }
 main { display: grid; gap: 40px; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); align-items: start; padding-top: 24px; padding-bottom: 48px; }
 .col { display: grid; gap: 32px; min-width: 0; align-content: start; }

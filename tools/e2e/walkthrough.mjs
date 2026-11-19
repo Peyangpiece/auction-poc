@@ -53,10 +53,12 @@ try {
   await con.waitForSelector('#b_next:not([hidden])');
   check((await text(con, 'b_next')).includes('No.1'), '板の下に「No.1 を開始」が出る');
   await shot(con, 'console-waiting');
+  check(await con.isVisible('#homeLink'), '競りの前は、進行コンソールに「ホーム」が出る');
   await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('配信準備中'));
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
   check((await text(con, 's_obs')) === '配信中', '競りを始めると、配信が自動で始まる');
+  check(await con.isHidden('#homeLink'), '競りの最中は、「ホーム」を出さない（誤って画面を離れないように）');
   check((await con.isHidden('#b_next')) && (await con.isVisible('#b_close')) && (await con.isVisible('#b_urikiri')), '受付中は「締め」「うりきり」「中断」が出る（うりきりは、ランプが消えている品だけ）');
 
   console.log('カメラの切り替え');
