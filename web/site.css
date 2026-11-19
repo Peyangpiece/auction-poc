@@ -173,7 +173,7 @@ td .note { font-size: 12px; }
 
 /* ログインの画面の、控えめな案内（会員登録がお済みでない方） */
 .aside.small { font-size: 13px; }
-.aside .textbtn { padding: 8px 0; }
+.aside .textbtn { padding: 8px 0; min-height: 44px; }
 
 /* ==== アプリらしい型（国内のアプリの画面例を参考にした: 色のついた地に白いカード、下のタブバー、行の一覧、認証番号の欄） ==== */
 /* 地に薄い色を敷き、まとまりごとに白いカードに載せる（区切り線の代わりに、面で分ける） */
@@ -356,6 +356,7 @@ th { font-size: 12px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; 
 .aside a, .text a { text-decoration: none; font-weight: 600; }
 .aside a:hover, .text a:hover { text-decoration: underline; }
 .aside .textbtn, .form .textbtn { text-decoration: none; color: var(--action); font-weight: 600; }
+.aside .textbtn:hover, .form .textbtn:hover, .textlink:hover { text-decoration: underline; text-underline-offset: 4px; } /* 押せることが、マウスでも分かるように */
 
 
 /* ==== トップとマイページ（Apple の公式アプリの水準に合わせた見直し） ==== */
@@ -449,3 +450,9 @@ table .btn-primary:hover:not(:disabled) { background: var(--tint-2); color: var(
 }
 /* 下から出るシート（マイページの編集など）も、濃いめのガラス */
 @media (max-width: 640px) { dialog.wide { border-radius: 24px 24px 0 0; } }
+
+/* 指で使う端末では、表の中の小さなボタンも 44px にする（パソコンのマウスでは、いまの大きさのまま。報告書 82 章） */
+@media (pointer: coarse) { td.act .btn { min-height: 44px; } }
+/* 管理のタブの読み込み中: すぐ終わるときは見えないよう、少し遅れて薄くする */
+#panel { transition: opacity .2s var(--ease) 0s; }
+#panel[aria-busy="true"] { opacity: .45; transition-delay: .15s; }

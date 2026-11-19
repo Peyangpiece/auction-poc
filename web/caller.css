@@ -7,7 +7,7 @@ body { overflow: hidden; background: var(--ground); }
 .bar__role { font-size: 15px; font-weight: 600; color: var(--ink-2); }
 .bar__meta { display: flex; align-items: center; gap: 16px; font-size: 15px; color: var(--ink-2); }
 /* 中断は、上の帯に小さく置く（親指から遠い所。締め・開始と押しまちがえないように）。中断中は、いちばん下の大きなボタンが「再開」になる */
-.barbtn { min-height: 40px; padding: 4px 16px; font-size: 15px; }
+.barbtn { min-height: 44px; padding: 4px 16px; font-size: 15px; } /* 指で押せる大きさ（44px）。報告書 82 章 */
 .barbtn[hidden] { display: none; }
 
 .stage { min-height: 0; display: grid; gap: clamp(10px, 2dvh, 20px); padding: clamp(12px, 2.4dvh, 24px) 20px; grid-template-rows: minmax(0, 1fr) auto; max-width: 1100px; width: 100%; margin: 0 auto; }
@@ -133,6 +133,7 @@ dialog.sheet[open] { animation: sheet-in .28s var(--ease); }
 .sheet__err:empty { display: none; }
 .sheet__go { grid-area: auto; width: 100%; min-height: 96px; } /* 画面の「締め」と同じ見た目。置き場所の指定（grid-area）は引き継がない */
 .textbtn { appearance: none; border: 0; background: none; padding: 12px; min-height: 44px; font: 600 17px/1.3 var(--font); color: var(--action); cursor: pointer; justify-self: center; }
+.textbtn:hover { text-decoration: underline; text-underline-offset: 4px; }
 
 /* ==== リキッドグラス（報告書 77 章） ==== */
 /* 上の帯と、開始値のシートはガラス。価格の面と操作のボタンは、不透明のまま（読みやすさと、押す場所の分かりやすさを優先） */

@@ -132,7 +132,7 @@ const step = (dir) => {
 };
 $('stepDown').addEventListener('click', () => step(-1));
 $('stepUp').addEventListener('click', () => step(1));
-$('startInput').addEventListener('input', () => { S.editing = true; setInput(parseAmount($('startInput').value)); render(); });
+$('startInput').addEventListener('input', () => { S.editing = true; const n = parseAmount($('startInput').value); setKeepCaret($('startInput'), n === null ? '' : n.toLocaleString('ja-JP')); render(); });
 $('startInput').addEventListener('focus', () => { S.editing = true; $('startInput').select(); });
 $('startForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -206,7 +206,7 @@ function syncSheet() {
   if (dlg.open && (!pending || dlg.dataset.lot !== String(lot.id))) dlg.close(); // ほかの所で始まった・決まったら閉じる
   if (pending && !S.sheetShownFor.has(lot.id) && !$('dlg').open) { S.sheetShownFor.add(lot.id); openSheet(lot); }
 }
-$('sheetInput').addEventListener('input', () => { const n = parseAmount($('sheetInput').value); $('sheetInput').value = n === null ? '' : n.toLocaleString('ja-JP'); $('sheetMsg').textContent = ''; });
+$('sheetInput').addEventListener('input', () => { const n = parseAmount($('sheetInput').value); setKeepCaret($('sheetInput'), n === null ? '' : n.toLocaleString('ja-JP')); $('sheetMsg').textContent = ''; });
 $('sheetLater').addEventListener('click', () => $('startSheet').close());
 $('sheetForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();

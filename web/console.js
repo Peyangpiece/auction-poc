@@ -3,7 +3,8 @@
 const $ = (id) => document.getElementById(id);
 const S = { lots: new Map(), focus: null, history: [], stream: null, comments: [], event: null, sold: [] };
 // 一覧は、いちばん下を見ているときだけ新しい行に追従する
-function follow(el, update) { const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24; update(); if (atEnd) el.scrollTop = el.scrollHeight; }
+// 末尾を見ていたら、更新のあとも末尾を見せる。末尾へ送るのは、描き直しのあとの1回だけ（読み取りと書き込みを交互にしない。報告書 82 章）
+function follow(el, update) { const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24; update(); if (atEnd) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; }); }
 function renderComments() {
   follow($('comments'), () => $('comments').replaceChildren(...S.comments.map((c) => {
     const li = document.createElement('li');
@@ -138,14 +139,21 @@ setInterval(() => {
   setText('offset', link.offset.toFixed(1)); setText('rtt', link.rtt?.toFixed(1) ?? '0');
 }, 50);
 
+const ACTION_TEXT = {
+  start: '開始', start_without_video: '映像なしで開始', back_to_waiting: '待機に戻す', close: '締め', suspend: '中断', resume: '再開', cancel: '取りやめ', exclude: '除外',
+  create_lot: '品を追加', proxy_bid: '代理入札', proxy_cancel: '代理入札の取り消し', hide_comment: 'コメントを非表示', event_break: '休憩に入る', event_end: '開催終了',
+  stream_start: '配信を開始', stream_stop: '配信を停止', stream_status: '配信の状態の問い合わせ', mark: '測定の印', crash: '強制終了（模擬）',
+};
 async function cmd(action, extra = {}, msgId = 'cmdMsg') {
   const reqId = ++link.reqId, sent = localNow();
   const res = await link.request(reqId, { type: 'cmd', reqId, action, ...extra, clientSentAt: sent, clientSentAtCorrected: sent + link.offset });
   // うまくいかなかった操作は、記録の欄だけでなく、操作した場所のすぐ下にも理由を出す（代理入札は、代理入札の欄の下）
   $(msgId).textContent = !res ? '通信が切れました。つながり直したあとの表示で、操作が通ったかを確かめてください' : res.ok ? '' : res.message;
-  if (!res) log(`${action}: 応答なし`);
-  else if (!res.ok) log(`${action}: 拒否（${res.message}）`);
-  else log(`${action}: OK${res.status ? `（${STATE_LABEL[res.status]}${res.reason === 'reserve_not_met' ? '・最低落札額に届かず' : ''} ${res.paddle ?? ''} ${res.amount ? yen(res.amount) : ''}）` : ''} ${Math.round(res.clientRecvAt - sent)}ms`);
+  // 操作の記録は、読める言葉で（内部の名前のままにしない。報告書 82 章）。かかった時間は、検証用の設定のときだけ
+  const name = ACTION_TEXT[action] ?? action;
+  if (!res) log(`${name}: 応答なし`);
+  else if (!res.ok) log(`${name}: できませんでした（${res.message}）`);
+  else log(`${name}${res.status ? `（${STATE_LABEL[res.status]}${res.reason === 'reserve_not_met' ? '・最低落札額に届かず' : ''}${res.paddle ? ` ${res.paddle}番` : ''}${res.amount ? ` ${yen(res.amount)}` : ''}）` : ''}${S.dev ? ` ${Math.round(res.clientRecvAt - sent)}ms` : ''}`);
   return res;
 }
 // 確認と理由の入力は、ブラウザ標準の prompt / confirm ではなく、画面の中のダイアログで行う
@@ -256,7 +264,7 @@ function onMessage(msg, at) {
       S.lots.set(msg.lotId, msg.lot); render(); break;
     case 'stream': {
       const p = S.stream; S.stream = msg.stream;
-      if (p && p.live !== msg.stream.live) log(`IVS: ${msg.stream.live ? 'LIVE になった' : 'LIVE でなくなった'}`);
+      if (p && p.live !== msg.stream.live) log(`配信: ${msg.stream.live ? '映像が届きはじめました' : '映像が止まりました'}`);
       if (p && p.obsActive !== msg.stream.obsActive) log(`OBS: ${msg.stream.obsActive ? '配信開始' : '配信停止'}`);
       if (p && p.agentConnected !== msg.stream.agentConnected) log(`配信エージェント: ${msg.stream.agentConnected ? '接続' : '切断'}`);
       renderStream(); break;

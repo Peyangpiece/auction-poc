@@ -239,7 +239,7 @@ details[open] > summary::before { transform: rotate(45deg); }
 /* 上の帯: 画面の上に留まり、下の中身がうっすら透ける */
 .brandbar { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--ground) 86%, transparent); backdrop-filter: saturate(180%) blur(16px); -webkit-backdrop-filter: saturate(180%) blur(16px); box-shadow: 0 1px 0 var(--line); }
 .brandbar > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; margin: 0 auto; }
-.brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; color: var(--ink); text-decoration: none; }
+.brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; min-height: 44px; color: var(--ink); text-decoration: none; }
 /* ロゴ（会社のシンボル＋毛筆の「令和の競り」）。暗い画面では、白い文字の版に切り替える */
 .brand__logo { display: block; height: 42px; width: auto; }
 .brand picture { display: block; }
@@ -295,7 +295,10 @@ dialog::backdrop { background: rgb(0 0 0 / .22); }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   :root { --glass-tint: var(--ground); --glass-tint-strong: var(--ground); --glass-filter: none; }
   .brandbar, .glass, .glass-strong, dialog { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .tabbar { background: var(--ground) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; } /* 下のタブバーも、不透明に（報告書 82 章） */
 }
+/* マウスで使う画面では、ページの端での引っぱり（はね返り）をしない */
+@media (pointer: fine) { html { overscroll-behavior: none; } }
 @media (prefers-contrast: more) {
   :root { --glass-edge: inset 0 0 0 1px var(--edge); }
 }

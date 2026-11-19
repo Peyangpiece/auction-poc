@@ -6,6 +6,16 @@ const yen = (n) => (n === null || n === undefined ? '' : '¥' + yenFmt.format(n)
 const dateFmt = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 const $ = (sel, root = document) => root.querySelector(sel);
 // 2026-11-23 → 11月23日（月）。年が今年でなければ、年も付ける
+/** 入力中に区切り（, や -）を付け直しても、カーソルを、同じ数字のあとに戻す（末尾へ飛ばない。報告書 82 章） */
+function setKeepCaret(input, text) {
+  const at = input.selectionStart ?? input.value.length;
+  const digitsBefore = input.value.slice(0, at).replace(/[^0-9０-９]/g, '').length;
+  input.value = text;
+  if (document.activeElement !== input) return;
+  let pos = 0, seen = 0;
+  while (pos < text.length && seen < digitsBefore) { if (/[0-9]/.test(text[pos])) seen++; pos++; }
+  try { input.setSelectionRange(pos, pos); } catch { /* 選べない種類の欄 */ }
+}
 const jpDay = (d) => {
   if (!d) return '';
   const [y, m, dd] = d.slice(0, 10).split('-').map(Number);
@@ -19,6 +29,7 @@ const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.s
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
+    if (v === false && k in node && typeof node[k] === 'boolean') { node[k] = false; continue; } // spellcheck: false など
     if (v === null || v === undefined || v === false) continue;
     if (k === 'class') node.className = v;
     else if (k === 'text') node.textContent = v;
@@ -68,7 +79,8 @@ function onSubmit(form, handler) {
         if (!target) continue;
         target.setAttribute('aria-invalid', 'true');
         const err = target.closest('.field, fieldset, .check')?.querySelector('.err');
-        if (err) err.textContent = text;
+        // 欄ごとの誤りは、読み上げの知らせ（alert）にせず、欄の説明としてつなぐ。知らせは、フォームの1行だけ（一度に何個も鳴らない。報告書 82 章）
+        if (err) { err.textContent = text; err.id ||= `err-${Math.random().toString(36).slice(2, 8)}`; if (!(target.getAttribute('aria-describedby') ?? '').includes(err.id)) target.setAttribute('aria-describedby', `${target.getAttribute('aria-describedby') ?? ''} ${err.id}`.trim()); }
         first ??= target;
       }
       if (msg) msg.textContent = res.message ?? 'うまくいきませんでした。やり直してください';
@@ -85,7 +97,7 @@ function field(label, name, props = {}, hint = '') {
   if (props.value !== undefined && props.value !== null) input.value = props.value;
   // 説明の小さな文字は出さない（発注者の指示。報告書 78 章）。短い書き方の見本だけ、入力欄の中の薄い文字にする
   if (hint && !input.placeholder && !input.value && hint.length <= 24 && !/[。、]/.test(hint)) input.placeholder = hint;
-  return el('label', { class: 'field' }, label, input, el('span', { class: 'err', role: 'alert' }));
+  return el('label', { class: 'field' }, label, input, el('span', { class: 'err' }));
 }
 
 const PREFECTURES = '北海道 青森県 岩手県 宮城県 秋田県 山形県 福島県 茨城県 栃木県 群馬県 埼玉県 千葉県 東京都 神奈川県 新潟県 富山県 石川県 福井県 山梨県 長野県 岐阜県 静岡県 愛知県 三重県 滋賀県 京都府 大阪府 兵庫県 奈良県 和歌山県 鳥取県 島根県 岡山県 広島県 山口県 徳島県 香川県 愛媛県 高知県 福岡県 佐賀県 長崎県 熊本県 大分県 宮崎県 鹿児島県 沖縄県'.split(' ');
@@ -95,7 +107,7 @@ const mark = (required) => el('span', { class: required ? 'req' : 'opt', text: r
 /** ラベル・印・補足・入力欄・エラーをまとめた1欄 */
 function labeled(label, required, input, hint = '') {
   if (hint && !input.placeholder && !input.value && hint.length <= 24 && !/[。、]/.test(hint)) input.placeholder = hint;
-  return el('label', { class: 'field' }, el('span', { class: 'field__label' }, label, mark(required)), input, el('span', { class: 'err', role: 'alert' }));
+  return el('label', { class: 'field' }, el('span', { class: 'field__label' }, label, mark(required)), input, el('span', { class: 'err' }));
 }
 
 /**
@@ -126,7 +138,7 @@ function personFields(m = {}) {
   let last7 = '';
   zip.addEventListener('input', async () => {
     const code = zip.value.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/\D/g, '').slice(0, 7);
-    zip.value = code.length > 3 ? `${code.slice(0, 3)}-${code.slice(3)}` : code;
+    setKeepCaret(zip, code.length > 3 ? `${code.slice(0, 3)}-${code.slice(3)}` : code);
     if (code.length !== 7 || code === last7) { if (code.length !== 7) last7 = ''; return; }
     last7 = code;
     zipNote.textContent = '住所を調べています…';

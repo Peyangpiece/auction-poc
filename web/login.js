@@ -32,8 +32,8 @@ onSubmit(phoneForm, async (data) => {
   const res = await api('POST', '/api/login/start', { id: phone });
   if (res.ok) {
     $('#sentTo').textContent = res.via === 'email'
-      ? `確認済みのアドレスであれば、${phone} に認証番号を送りました。届かない場合は、携帯電話の番号でお試しください`
-      : `登録済みの番号であれば、${phone} に認証番号を送りました`;
+      ? `確認済みのアドレスであれば、${phone} に認証番号を送りました。5分以内に入力してください。届かない場合は、携帯電話の番号でお試しください`
+      : `登録済みの番号であれば、${phone} に認証番号を送りました。5分以内に入力してください`;
     if (res.devCode) $('#sentTo').textContent += `　【お試し用】認証番号 ${res.devCode}`;
     phoneForm.hidden = true;
     codeForm.hidden = false;
@@ -63,5 +63,6 @@ $('#resend').addEventListener('click', async (ev) => {
   if (after === '/bidder.html') for (const link of document.querySelectorAll('a[href="/register.html"]')) link.href = '/register.html?next=bidder';
   const me = await setupNav();
   if (me.member) location.replace(after);
-  else pwForm.elements.loginId.focus();
+  // 開いてすぐの欄へのフォーカスは、広い画面だけ（スマホでは、キーボードが急に出て、画面の上半分が隠れるため。報告書 82 章）
+  else if (matchMedia('(min-width: 641px)').matches) pwForm.elements.loginId.focus();
 })();

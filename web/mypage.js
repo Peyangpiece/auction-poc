@@ -97,7 +97,6 @@ function answerOffer(o, answer) {
       ? el('p', { text: `お支払い ${yen(o.payable)}（落札額 ${yen(o.amount)}＋買歩銭 ${yen(o.premium)}）。承諾すると、請求書をお送りします。取り消しはできません。` })
       : el('p', { text: '辞退すると、この品は落札できません。取り消しはできません。' }),
     msg, el('div', { class: 'actions' }, cancel, ok));
-  dlg.setAttribute('aria-labelledby', 'dlgTitle');
   dlg.showModal();
   cancel.focus();
 }
@@ -129,15 +128,15 @@ $('#editBtn').addEventListener('click', () => {
   const corp = m.kind === 'b2b';
   const form = el('form', { class: 'form', novalidate: true },
     corp && field('会社名', 'company', { value: m.company, required: true }),
-    corp && field('担当者名', 'contactName', { value: m.contactName, required: true }),
-    corp && field('請求先', 'billing', { value: m.billing, rows: 2, required: true, autocomplete: 'off' }),
-    field('メールアドレス', 'email', { value: m.email, type: 'email', required: true, autocomplete: 'email' }, '変えると、新しいアドレスに確認のメールを送ります'),
+    corp && field('担当者名', 'contactName', { value: m.contactName, required: true, autocomplete: 'name' }),
+    corp && field('請求先', 'billing', { value: m.billing, rows: 2, required: true, autocomplete: 'billing street-address' }),
+    field('メールアドレス', 'email', { value: m.email, type: 'email', inputMode: 'email', spellcheck: false, required: true, autocomplete: 'email' }, '変えると、新しいアドレスに確認のメールを送ります'),
     ...personFields(m),
-    field('配送先', 'shipTo', { value: m.shipTo ?? '', rows: 2, autocomplete: 'off' }, '住所と違う場合だけ'),
+    field('配送先', 'shipTo', { value: m.shipTo ?? '', rows: 2, autocomplete: 'shipping street-address' }, '住所と違う場合だけ'),
     el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '保存する' }), el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() })));
   onSubmit(form, async (data) => { const res = await api('POST', '/api/my/profile', data); if (res.ok) location.reload(); return res; });
-  dlg.replaceChildren(el('h2', { text: '登録内容の変更' }), form);
+  dlg.replaceChildren(el('h2', { id: 'dlgTitle', text: '登録内容の変更' }), form);
   dlg.showModal();
 });
 // ---- パスワードの変更（ログイン ID は、発行されたものを使い続ける。まだ無い人は、ここで決める）
@@ -156,13 +155,13 @@ function openPassword(reset = false) {
     if (res.ok) { dlg.close(); profile = res.member; $('#notice').textContent = 'パスワードを保存しました。次からは、ログイン ID とこのパスワードで、ログインできます。'; $('#pwBtn').textContent = 'パスワードを変更する'; }
     return res;
   });
-  dlg.replaceChildren(el('h2', { text: m.hasPassword ? 'パスワードの変更' : 'ログイン ID とパスワードを決める' }), form);
+  dlg.replaceChildren(el('h2', { id: 'dlgTitle', text: m.hasPassword ? 'パスワードの変更' : 'ログイン ID とパスワードを決める' }), form);
   dlg.showModal();
 }
 $('#pwBtn').addEventListener('click', () => openPassword(false));
 $('#withdrawBtn').addEventListener('click', () => {
   const msg = el('p', { class: 'msg', role: 'alert' });
-  dlg.replaceChildren(el('h2', { text: '退会しますか？' }),
+  dlg.replaceChildren(el('h2', { id: 'dlgTitle', text: '退会しますか？' }),
     el('p', { text: '退会すると、ログインできなくなります。お取引の記録は、法令で定められた期間、保管します。' }), msg,
     el('div', { class: 'actions' },
       el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() }),

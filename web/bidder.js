@@ -9,7 +9,8 @@ const store = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } ca
 const S = { lots: new Map(), focus: null, paddle: null, history: [], stream: null, wasHighest: false, playerUrl: null, shownPrice: null, rendered: 0,
   mode: 'bid', comments: [], cmtMax: 20, lockUntil: 0, connected: false, sound: false };
 // 一覧は、いちばん下を見ているときだけ新しい行に追従する（読み返している途中で勝手に動かさない）
-function follow(el, update) { const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24; update(); if (atEnd) el.scrollTop = el.scrollHeight; }
+// 末尾を見ていたら、更新のあとも末尾を見せる。末尾へ送るのは、描き直しのあとの1回だけ（読み取りと書き込みを交互にしない。報告書 82 章）
+function follow(el, update) { const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 24; update(); if (atEnd) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; }); }
 let link, audioCtx = null, wakeLock = null, player = null, playerLoading = false;
 
 // ---- 文言（FR-BID-012）
@@ -450,7 +451,7 @@ function celebrateWin(msg) {
 const parseAmount = (text) => { const d = String(text ?? '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/[^0-9]/g, ''); return d ? Number(d) : null; };
 const setAmount = (n) => { $('bidAmount').value = n === null ? '' : n.toLocaleString('ja-JP'); };
 // 入力のたびに、数字だけにして、3桁ごとに区切る（全角の数字も直す）
-$('bidAmount').addEventListener('input', () => { S.amountTouched = true; setAmount(parseAmount($('bidAmount').value)); if ($('msg').dataset.kind === 'ng') say(''); });
+$('bidAmount').addEventListener('input', () => { S.amountTouched = true; const n = parseAmount($('bidAmount').value); setKeepCaret($('bidAmount'), n === null ? '' : n.toLocaleString('ja-JP')); if ($('msg').dataset.kind === 'ng') say(''); });
 $('bidAmount').addEventListener('focus', () => {
   $('bidAmount').select();
 });
@@ -527,7 +528,7 @@ new ResizeObserver(() => {
   document.body.style.paddingBottom = fixed ? `${Math.ceil($('board').getBoundingClientRect().height) + 24}px` : '';
 }).observe($('board'));
 setInterval(() => {
-  if (!link) return;
+  if (!link || $('devInfo').hidden || !$('devInfo').open) return; // 検証用の情報を開いているときだけ書く（電池の無駄を避ける。報告書 82 章）
   $('clock').textContent = jst(link.serverNow());
   $('offset').textContent = link.offset.toFixed(1); $('rtt').textContent = link.rtt?.toFixed(1) ?? '0';
 }, 50);

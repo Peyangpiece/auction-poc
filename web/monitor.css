@@ -1,5 +1,6 @@
 /* 会場の大型モニター（FR-CON-007）: 遠くからでも読めるように、黒の地に、白い大きな数字と少ない要素だけを出す。
    色は使わない（ブランドはロゴで伝える）。いちばん新しいものを白、ほかを灰色にして、明るさの差で読ませる */
+:root { color-scheme: dark; } /* 共通の light dark より優先する（モニターは、いつも暗い地） */
 body { --mute: #a1a1a8; --sep: #38383a; background: #000; color: #fff; min-height: 100dvh; display: grid; grid-template-rows: auto 1fr; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 2vh 3vw; border-bottom: 1px solid var(--sep); }
 header img { height: clamp(48px, 9vh, 96px); width: auto; }

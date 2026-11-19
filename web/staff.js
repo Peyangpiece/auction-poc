@@ -11,7 +11,7 @@ let me = null;
 let current = null;
 
 function openDialog(title, ...body) {
-  dlg.replaceChildren(el('h2', { text: title }), ...body.filter(Boolean));
+  dlg.replaceChildren(el('h2', { id: 'dlgTitle', text: title }), ...body.filter(Boolean));
   if (!dlg.open) dlg.showModal();
 }
 const closeBtn = (text = '閉じる') => el('button', { class: 'btn', type: 'button', text, onclick: () => dlg.close() });
@@ -181,7 +181,9 @@ const RECV = { pickup: '現地受け取り', ship: '配送' };
 async function receptionPanel() {
   const res = await api('GET', '/api/reception');
   if (!res.ok) return [el('p', { class: 'msg', text: res.message })];
-  if (!res.event) return [el('p', { class: 'empty', text: '本日の開催はありません。' })];
+  // 開催がない日: 次にすることへの道を出す（開催を作れるのは主催者管理者だけ。報告書 82 章）
+  if (!res.event) return [el('div', { class: 'empty' }, el('p', { text: '本日の開催はありません。' }),
+    me.role === 'admin' && smallBtn('開催を開く', () => leavePanel(() => { pendingNotice = null; show('events'); })))];
   const waiting = res.participants.filter((p) => p.mode === 'venue' && !p.checkedIn).length;
   const rows = res.participants.map((p) => el('tr', {},
     el('td', { class: 'n paddle', text: String(p.paddle) }),
@@ -329,7 +331,7 @@ async function billingPanel() {
 async function pickupPanel() {
   const res = await api('GET', '/api/billing/pickup');
   return [table(['落札者', '品', '消し込み', '受け取り期限'], res.lines.map((l) => el('tr', {},
-      el('td', { class: 'dyn', text: l.name }), el('td', { class: 'dyn', text: l.label }), el('td', { class: 'n', text: l.clearedOn }),
+      el('td', { class: 'dyn', text: l.name }), el('td', { class: 'dyn', text: l.label }), el('td', { class: 'n', text: jpDay(l.clearedOn) }),
       el('td', {}, el('span', { class: l.pickupLate ? 'warn' : 'n', text: `${jpDay(l.pickupBy)}${l.pickupLate ? '（期限を過ぎています）' : ''}` })))), '未引き取りの品はありません。')];
 }
 let feeMonth = null;
@@ -349,7 +351,7 @@ async function feesPanel() {
       el('dt', { text: '請求額' }), el('dd', { class: 'n paddle', text: yen(f.total) })),
     el('h2', { class: 'subhead', text: '根拠になる明細' }),
     table(['品', '税込落札額', '支払方法', '消し込みの日', '返金・取り消し'], f.details.map((d) => el('tr', {},
-      el('td', { class: 'dyn', text: d.label }), el('td', { class: 'n', text: yen(Math.abs(d.amount)).replace('¥', d.amount < 0 ? '−¥' : '¥') }), el('td', { text: d.method ?? '' }), el('td', { class: 'n', text: d.clearedOn }), el('td', { text: d.note }))), 'この月の明細はありません。'),
+      el('td', { class: 'dyn', text: d.label }), el('td', { class: 'n', text: yen(Math.abs(d.amount)).replace('¥', d.amount < 0 ? '−¥' : '¥') }), el('td', { text: d.method ?? '' }), el('td', { class: 'n', text: jpDay(d.clearedOn) }), el('td', { text: d.note }))), 'この月の明細はありません。'),
     el('h2', { class: 'subhead', text: '長く未払いのままの明細（期限の翌日から30日以上）' }),
     table(['落札者', '品', '金額', '期限', '督促', '引き渡し'], long.lines.map((l) => el('tr', {},
       el('td', { class: 'dyn', text: l.name }), el('td', { class: 'dyn', text: l.label }), el('td', { class: 'n', text: yen(l.amount) }), el('td', { class: 'n', text: jpDay(l.invoice.dueDate) }),
@@ -481,7 +483,7 @@ async function settingsPanel() {
     field('送料の表示', 'shippingNotice', { value: s.shippingNotice, rows: 3, required: true }, 'トップページに表示します'),
     el('h2', { class: 'subhead', text: '請求書に載せる内容' }),
     field('住所', 'orgAddress', { value: s.orgAddress, rows: 2 }, '郵便番号から。改行できます'),
-    el('div', { class: 'grid2' }, field('電話番号', 'orgTel', { value: s.orgTel }), field('メールアドレス', 'orgEmail', { value: s.orgEmail })),
+    el('div', { class: 'grid2' }, field('電話番号', 'orgTel', { value: s.orgTel, type: 'tel', inputMode: 'tel' }), field('メールアドレス', 'orgEmail', { value: s.orgEmail, type: 'email', spellcheck: false })),
     field('適格請求書発行事業者の登録番号', 'invoiceRegNo', { value: s.invoiceRegNo }, 'T から始まる番号'),
     field('振込先の口座', 'bankAccount', { value: s.bankAccount }),
     el('h2', { class: 'subhead', text: '印鑑（請求書に押す）' }),
@@ -568,8 +570,11 @@ async function show(key) {
   // 開いているタブを URL に載せる（読み込み直しても、同じタブに戻る。URL を人に渡せる）
   if (location.hash.slice(1) !== key) history.replaceState(null, '', `#${key}`);
   for (const b of $('#tabs').children) { b.setAttribute('aria-selected', String(b.dataset.key === key)); b.tabIndex = b.dataset.key === key ? 0 : -1; }
+  // 読み込みのあいだは、前のタブの中身を薄くして、読み込み中だと分かるようにする（報告書 82 章）
+  panel.setAttribute('aria-busy', 'true');
   const nodes = await PANELS[key][1]();
   if (current !== key) return;
+  panel.removeAttribute('aria-busy');
   panel.replaceChildren(...nodes.filter(Boolean));
   // ダイアログで実行すると、開いたボタンは描き直しで消える。フォーカスが行き場を失ったら、パネルへ戻す（報告書 81 章）
   if (!document.activeElement || document.activeElement === document.body) panel.focus({ preventScroll: true });

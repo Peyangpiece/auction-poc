@@ -29,8 +29,9 @@ function drawUpcoming() {
     const [yy, mm, dd] = e.startsAt.slice(0, 10).split('-').map(Number);
     const w = WEEK[new Date(Date.UTC(yy, mm - 1, dd)).getUTCDay()];
     return el('li', {},
-      el('span', { class: 'datechip', 'aria-label': `${mm}月${dd}日（${w}）` },
-        el('small', { text: `${mm}月` }), el('b', { class: 'digits', text: String(dd) }), el('small', { text: w })),
+      // 日付の札: 見た目の3段は読み上げず、ひと続きの日付を読ませる（span に aria-label は付けられないため。報告書 82 章）
+      el('span', { class: 'datechip' }, el('span', { class: 'sr-only', text: `${mm}月${dd}日（${w}）` }),
+        el('small', { 'aria-hidden': 'true', text: `${mm}月` }), el('b', { class: 'digits', 'aria-hidden': 'true', text: String(dd) }), el('small', { 'aria-hidden': 'true', text: w })),
       el('span', { class: 'nextlist__main' },
         el('b', { text: e.title }),
         el('span', { class: 'digits', text: `${hm(e.startsAt)} 〜 ${hm(e.endsAt)}　${e.venueName}` })));

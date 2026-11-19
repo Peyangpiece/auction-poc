@@ -1,5 +1,15 @@
 // 検証用の画面の共通部品（本番には引き継がない）: 接続、再接続、時刻合わせ。
 'use strict';
+/** 入力中に区切り（, や -）を付け直しても、カーソルを、同じ数字のあとに戻す（末尾へ飛ばない。報告書 82 章） */
+function setKeepCaret(input, text) {
+  const at = input.selectionStart ?? input.value.length;
+  const digitsBefore = input.value.slice(0, at).replace(/[^0-9０-９]/g, '').length;
+  input.value = text;
+  if (document.activeElement !== input) return;
+  let pos = 0, seen = 0;
+  while (pos < text.length && seen < digitsBefore) { if (/[0-9]/.test(text[pos])) seen++; pos++; }
+  try { input.setSelectionRange(pos, pos); } catch { /* 選べない種類の欄 */ }
+}
 
 // 金額と時刻は Intl で整形する（金額は全桁をそのまま表示する。隠さない・並べ替えない）
 const yenFmt = new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY' });
@@ -50,6 +60,8 @@ function overlayAction(code, page) {
 /** 接続の状態を、画面いっぱいの帯で出す。行き先があれば、ボタンを付ける */
 function showOverlay(up, why, code, page) {
   document.getElementById('overlay').style.display = up ? 'none' : 'flex';
+  // 帯を出しているあいだは、後ろの画面に Tab で移れないようにする（押しても通らない操作に、迷い込まないように。報告書 82 章）
+  for (const node of document.body.children) if (node.id !== 'overlay' && node.id !== 'gate' && !['SCRIPT', 'DIALOG'].includes(node.tagName)) node.inert = !up;
   const text = document.getElementById('overlayText');
   text.textContent = why ?? '再接続中…';
   let a = document.getElementById('overlayAction');
