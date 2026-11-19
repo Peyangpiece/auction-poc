@@ -408,8 +408,9 @@ try {
   check(true, '手数料の集計: 対象 10,000円 → 手数料 500円 ＋ 消費税 50円');
   await shot(admin, 'mvp-27-fees', { fullPage: true });
 
-  await con.fill('#resumeAt', '13:00');
-  await con.click('#breakForm button[type=submit]');
+  await con.click('#b_break'); // 次の開始予定の時刻は、押したときのダイアログで聞く
+  await con.fill('#dlgReason', '13:00');
+  await con.click('#dlgOk');
   await guest.waitForFunction(() => document.getElementById('eventNote').textContent.includes('13:00'));
   await con.waitForFunction(() => document.getElementById('evPhase').textContent.includes('休憩中'));
   check(true, '休憩に入ると、参加者の画面に再開の予定時刻が出る');

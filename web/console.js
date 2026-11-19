@@ -45,7 +45,7 @@ function render() {
   // 板の案内は、進行役の判断に要ることだけ: 締めたらどうなるか、結果、配信が始まらないとき
   $('result').textContent = !lot ? (next ? '' : '品を追加してください')
     : st === 'sold' ? `${lot.highestPaddle}番 落札`
-    : st === 'unsold' ? '流札'
+    : st === 'unsold' ? '' // 流札は、状態の札に出ている（同じ言葉を2度出さない）
     : st === 'open' ? (lot.urikiri && lot.currentPrice !== null ? `締めると ${lot.highestPaddle}番が落札` : '締めると流札')
     : st === 'preparing_warn' ? '配信が始まりません（60秒経過）'
     : '';
@@ -69,7 +69,8 @@ function render() {
     if (!h.valid) tr.className = 'void';
     // 代理入札には「代理」と出す（FR-BID-008）
     const state = cell(h.valid ? '' : '無効');
-    tr.append(cell(h.seq, 'num'), cell(jst(h.received_at), 'num'), cell(`${h.paddle}番${h.proxy ? '（代理）' : ''}`, 'num'), cell(yen(h.amount), 'digits amt'), state);
+    // 受付の順は、行の並びで分かるので、受付連番の列は出さない。千分の一秒は、検証用の設定のときだけ（報告書 88 章）
+    tr.append(cell(S.dev ? jst(h.received_at) : jst(h.received_at).slice(0, 8), 'num'), cell(`${h.paddle}番${h.proxy ? '（代理）' : ''}`, 'num'), cell(yen(h.amount), 'digits amt'), state);
     // 取り消せるのは、いちばん新しい有効な入札が代理入札で、まだ締めていないときだけ（FR-CON-006）
     if (h.proxy && h.valid && h === lastValid && (st === 'open' || st === 'suspended')) {
       const b = document.createElement('button');
@@ -157,17 +158,20 @@ async function cmd(action, extra = {}, msgId = 'cmdMsg') {
   return res;
 }
 // 確認と理由の入力は、ブラウザ標準の prompt / confirm ではなく、画面の中のダイアログで行う
-function ask({ title, body, needReason = false, okLabel = '実行する', danger = false }) {
+function ask({ title, body, needReason = false, okLabel = '実行する', danger = false, input = null }) {
   return new Promise((resolve) => {
     const dlg = $('dlg');
     $('dlgTitle').textContent = title; $('dlgBody').textContent = body; $('dlgError').textContent = '';
-    $('dlgReasonWrap').style.display = needReason ? 'grid' : 'none'; $('dlgReason').value = '';
+    // 理由の欄は、ほかの入力（休憩の再開予定の時刻など）にも使う
+    $('dlgReasonWrap').style.display = needReason ? 'grid' : 'none'; $('dlgReason').value = input?.value ?? '';
+    $('dlgReasonLabel').textContent = input?.label ?? '理由（必須）'; $('dlgReason').type = input?.type ?? 'text';
+    $('dlgReason').placeholder = input ? '' : '例: 商品の取り違え';
     $('dlgOk').textContent = okLabel; $('dlgOk').className = danger ? 'btn btn-danger' : 'btn btn-primary';
     const done = (value) => { $('dlgForm').onsubmit = null; $('dlgCancel').onclick = null; dlg.oncancel = null; dlg.close(); resolve(value); };
     $('dlgForm').onsubmit = (ev) => {
       ev.preventDefault();
       const reason = $('dlgReason').value.trim();
-      if (needReason && !reason) { $('dlgError').textContent = '理由を入力してください。'; $('dlgReason').focus(); return; }
+      if (needReason && !reason) { $('dlgError').textContent = input ? `${input.label}を入力してください。` : '理由を入力してください。'; $('dlgReason').focus(); return; }
       done({ reason });
     };
     $('dlgCancel').onclick = () => done(null);
@@ -306,7 +310,10 @@ function renderSold() {
   }));
   $('soldCount').textContent = `${S.sold.length}件`;
 }
-$('breakForm').addEventListener('submit', (ev) => { ev.preventDefault(); cmd('event_break', { resumeAt: $('resumeAt').value }); });
+$('b_break').addEventListener('click', async () => {
+  const ans = await ask({ title: '休憩に入りますか？', body: '参加者の画面と会場モニターに、再開の予定を出します。', okLabel: '休憩に入る', needReason: true, input: { label: '次の開始予定', type: 'time' } });
+  if (ans) cmd('event_break', { resumeAt: ans.reason });
+});
 $('b_end').addEventListener('click', async () => {
   const waiting = [...S.lots.values()].filter((l) => l.status === 'waiting').length;
   const ans = await ask({ title: '開催を終了しますか？', body: `取り消せません。待機中の品（${waiting}件）は「未実施」になり、配信を停止します。`, okLabel: '開催を終了する', danger: true });

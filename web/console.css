@@ -76,8 +76,8 @@ details .stack { display: grid; gap: 8px; justify-items: start; margin-top: 8px;
 .eventbar[hidden] { display: none; }
 .eventbar > div { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; min-height: 48px; }
 .eventbar b { font-size: 17px; }
-.eventbar .inline { margin-top: 0; }
-.eventbar .inline .field { flex: 0 0 140px; }
+.evacts { display: flex; gap: 8px; align-items: center; }
+.evacts #b_end { margin-left: 16px; } /* 休憩と押し間違えないように、少し離す */
 #evWarn { color: var(--danger); font-weight: 700; font-size: 14px; }
 #evWarn:empty { display: none; }
 /* ---- 緊急用の代理入札 */

@@ -37,11 +37,11 @@
         <span class="state" id="evPhase"></span>
         <span id="evWarn" role="status"></span>
       </div>
-      <form class="inline" id="breakForm">
-        <label class="field">次の開始予定<input class="input num" id="resumeAt" type="time" required></label>
-        <button class="btn" type="submit">休憩に入る</button>
+      <!-- 次の開始予定の時刻は、「休憩に入る」を押したときだけ聞く（ふだんは使わない欄を出さない）。開催終了は、離して置く（報告書 88 章） -->
+      <div class="evacts">
+        <button class="btn" id="b_break" type="button">休憩に入る…</button>
         <button class="btn btn-danger" id="b_end" type="button">開催終了…</button>
-      </form>
+      </div>
     </section>
     <section aria-label="進行中の品">
       <div class="board" id="board">
@@ -74,7 +74,7 @@
     <section aria-labelledby="histTitle">
       <div class="sechead"><h2 id="histTitle">入札の履歴</h2><span class="count num" id="histCount">0件</span></div>
       <div class="tablewrap" id="histWrap" tabindex="0" aria-label="入札の履歴">
-        <table><thead><tr><th scope="col">受付連番</th><th scope="col">受付時刻</th><th scope="col">参加番号</th><th scope="col">入札額</th><th scope="col"><span class="sr-only">状態</span></th></tr></thead><tbody id="history"></tbody></table>
+        <table><thead><tr><th scope="col">受付時刻</th><th scope="col">参加番号</th><th scope="col">入札額</th><th scope="col"><span class="sr-only">状態</span></th></tr></thead><tbody id="history"></tbody></table>
       </div>
     </section>
 
@@ -164,7 +164,7 @@
   <form method="dialog" id="dlgForm">
     <h2 id="dlgTitle"></h2>
     <p id="dlgBody"></p>
-    <label class="field" id="dlgReasonWrap" >理由（必須）<input class="input" id="dlgReason" name="reason" autocomplete="off" placeholder="例: 商品の取り違え"></label>
+    <label class="field" id="dlgReasonWrap"><span id="dlgReasonLabel">理由（必須）</span><input class="input" id="dlgReason" name="reason" autocomplete="off" placeholder="例: 商品の取り違え"></label>
     <p class="error" id="dlgError" role="alert"></p>
     <div class="actions">
       <button class="btn" type="button" id="dlgCancel">やめる</button>
