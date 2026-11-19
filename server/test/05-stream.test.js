@@ -237,7 +237,7 @@ test('OBS の出力解像度を 960×720 にそろえる。配信中は止まっ
     const is = (pred, ms = 5000) => A4.waitFor((x) => x.type === 'stream' && x.stream.video && pred(x.stream.video), ms);
     const agent4 = spawn('node', ['src/agent.js'], {
       cwd: path.join(ROOT, 'agent'), stdio: 'ignore',
-      env: { ...process.env, AGENT_SERVER_URL: srv4.agentUrl, AGENT_TOKEN: ctx4.tokens.agent, OBS_URL: `ws://127.0.0.1:${obs4.wss.address().port}`, AGENT_LOG_DIR: path.join(ctx4.dataDir, 'agent-logs') },
+      env: { ...process.env, AGENT_SERVER_URL: srv4.agentUrl, AGENT_TOKEN: ctx4.tokens.agent, OBS_URL: `ws://127.0.0.1:${obs4.wss.address().port}`, AGENT_LOG_DIR: path.join(ctx4.dataDir, 'agent-logs'), AGENT_VIDEO_POLL_MS: '200' },
     });
     try { await check({ A4, obs4, is }); } finally { agent4.kill(); await obs4.close(); await srv4.stop(); cleanup(ctx4); }
   };
@@ -261,6 +261,19 @@ test('OBS の出力解像度を 960×720 にそろえる。配信中は止まっ
     const v = await is((x) => x.state === 'base_aspect');
     assert.deepEqual(v.stream.video.output, [1280, 720]);
     assert.equal(obs4.state.video.outputWidth, 1280, 'ゆがむので、変えない');
+  });
+  // つないだあとで、OBS の画面で映像の設定が手で変えられた（OBS は、そのことを知らせない）→ 読みにいって気づく
+  await run({}, async ({ obs4, is }) => {
+    await is((x) => x.output[0] === 960 && x.state === 'ok');
+    Object.assign(obs4.state.video, { baseWidth: 1920, baseHeight: 1080, outputWidth: 1096, outputHeight: 616 });
+    const v = await is((x) => x.state === 'base_aspect');
+    assert.deepEqual([v.stream.video.base, v.stream.video.output], [[1920, 1080], [1096, 616]]);
+    assert.equal(obs4.state.video.outputWidth, 1096, 'ゆがむので、変えない');
+    // 基本解像度を 4:3 に戻すと、出力をそろえ直す
+    Object.assign(obs4.state.video, { baseWidth: 1440, baseHeight: 1080 });
+    const v2 = await is((x) => x.state === 'ok' && x.output[0] === 960);
+    assert.deepEqual(v2.stream.video.output, [960, 720]);
+    assert.deepEqual([obs4.state.video.outputWidth, obs4.state.video.outputHeight], [960, 720]);
   });
 });
 

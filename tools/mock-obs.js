@@ -35,8 +35,8 @@ export function startMockObs({ port = 4455, startDelayMs = 800, stopDelayMs = 30
       else if (d.requestType === 'SetVideoSettings') {
         // 本物の OBS と同じく、出力が動いている間は変えられない
         if (state.active) return ws.send(JSON.stringify({ op: 7, d: { requestType: d.requestType, requestId: d.requestId, requestStatus: { result: false, code: 500, comment: 'Video settings cannot be changed while an output is active.' } } }));
+        // 本物の OBS（obs-websocket 5.x）と同じく、映像の設定が変わったことは知らせない
         Object.assign(state.video, d.requestData);
-        setTimeout(() => event('VideoSettingsChanged', { ...state.video }), 10);
       }
       else if (d.requestType === 'GetSceneList') responseData = { currentProgramSceneName: state.current, scenes: [...state.scenes].reverse().map((sceneName, i) => ({ sceneName, sceneIndex: i })) };
       else if (d.requestType === 'SetCurrentProgramScene') {

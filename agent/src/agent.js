@@ -28,6 +28,8 @@ const cfg = {
   cameraPrefix: process.env.AGENT_CAMERA_PREFIX || 'カメラ',
   // OBS の出力解像度（報告書 93 章）。IVS の視聴の料金を HD の区分に収めるため、既定は 960×720（4:3）。off で触らない
   outputSize: (process.env.AGENT_OUTPUT_SIZE || '960x720').toLowerCase(),
+  // OBS の映像の設定を読みにいく間隔。obs-websocket 5.x には、映像の設定が変わったことを知らせる仕組みがないため
+  videoPollMs: Number(process.env.AGENT_VIDEO_POLL_MS || 3000),
 };
 const wantSize = (() => { const m = /^(\d{3,4})x(\d{3,4})$/.exec(cfg.outputSize); return m ? { w: Number(m[1]), h: Number(m[2]) } : null; })();
 if (!cfg.serverUrl || !cfg.token) {
@@ -86,9 +88,11 @@ obs.on('StreamStateChanged', (e) => {
 setInterval(() => { if (!obsConnected) connectObs(); }, 5000).unref();
 
 // ------------------------------------------------------------------ 出力解像度（報告書 93 章）
-// OBS につないだとき（と、配信が止まったとき）に、出力解像度を決めた大きさにそろえる。
+// OBS につないだとき（と、配信が止まったとき、OBS の画面で映像の設定が変えられたとき）に、出力解像度を決めた大きさにそろえる。
 // ・配信中は変えない（OBS は、出力が動いている間は映像の設定を変えられない）。止まったときにそろえる
 // ・基本（キャンバス）解像度の縦横の比が違えば、変えない（映像がゆがむため）。進行コンソールに注意を出す
+let lastVideoKey = null; // 最後に確かめた映像の設定（基本・出力の解像度）
+const videoKey = (v) => `${v.baseWidth}x${v.baseHeight}/${v.outputWidth}x${v.outputHeight}`;
 async function ensureOutputSize() {
   if (!obsConnected) return;
   try {
@@ -103,10 +107,25 @@ async function ensureOutputSize() {
         v = await obs.call('GetVideoSettings');
       }
     }
+    lastVideoKey = videoKey(v);
     sendToServer({ type: 'agent_video', base: [v.baseWidth, v.baseHeight], output: [v.outputWidth, v.outputHeight], want: wantSize ? [wantSize.w, wantSize.h] : null, state, at: now() });
   } catch (err) { log('obs_output_size_failed', { message: err.message }); }
 }
-obs.on('VideoSettingsChanged', () => ensureOutputSize());
+// obs-websocket 5.x には、映像の設定が変わったことを知らせる仕組み（イベント）がない。
+// そのため、OBS の「設定 → 映像」が手で変えられても気づけるよう、決まった間隔で読みにいき、変わっていたら確かめ直す
+let videoPolling = false;
+setInterval(async () => {
+  if (!obsConnected || videoPolling || lastVideoKey === null) return;
+  videoPolling = true;
+  try {
+    const v = await obs.call('GetVideoSettings');
+    if (videoKey(v) !== lastVideoKey) {
+      log('obs_video_changed', { from: lastVideoKey, to: videoKey(v) });
+      await ensureOutputSize();
+    }
+  } catch { /* つながっていない間は、次の回に任せる */ }
+  finally { videoPolling = false; }
+}, cfg.videoPollMs).unref();
 
 // ------------------------------------------------------------------ カメラ（OBS のシーン。報告書 92 章）
 // スマホ・無線カメラ・USB カメラは、OBS の中で、それぞれのシーンに入れておく。ここは、どのシーンを映すかを切り替えるだけ
