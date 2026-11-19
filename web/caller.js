@@ -25,7 +25,7 @@ const WORKING = ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'];
 function offHours() { return S.connected && (S.ended || !S.event) && ![...S.lots.values()].some((l) => WORKING.includes(l.status)); }
 async function renderOffHours() {
   const off = offHours();
-  $('offhours').hidden = !off; $('main').hidden = off;
+  $('offhours').hidden = !off; $('main').hidden = off; $('homeLink').hidden = !off;
   if (!off) return;
   $('suspend').hidden = true;
   $('offTitle').textContent = S.ended ? '本日の競りは終了しました' : '本日の競りはありません';

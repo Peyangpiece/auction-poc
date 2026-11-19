@@ -9,6 +9,10 @@ body { overflow: hidden; background: var(--ground); }
 /* 中断は、上の帯に小さく置く（親指から遠い所。締め・開始と押しまちがえないように）。中断中は、いちばん下の大きなボタンが「再開」になる */
 .barbtn { min-height: 44px; padding: 4px 16px; font-size: 15px; } /* 指で押せる大きさ（44px）。報告書 82 章 */
 .barbtn[hidden] { display: none; }
+/* トップページへ戻る（競りの時間外だけ） */
+.homelink { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; font-size: 17px; font-weight: 500; color: var(--action); text-decoration: none; }
+.homelink[hidden] { display: none; }
+.homelink svg { width: 12px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 
 .stage { min-height: 0; display: grid; gap: clamp(10px, 2dvh, 20px); padding: clamp(12px, 2.4dvh, 24px) 20px; grid-template-rows: minmax(0, 1fr) auto; max-width: 1100px; width: 100%; margin: 0 auto; }
 .controls { display: grid; gap: clamp(8px, 1.6dvh, 16px); min-width: 0; }
@@ -158,7 +162,7 @@ dialog.sheet { background: var(--glass-tint-strong); }
 
 /* 競りの時間外（報告書 87 章）: 画面の中央に、そのことと次の開催だけ。操作のボタンは出さない */
 .offhours { display: grid; align-content: center; justify-items: center; gap: 28px; padding: 24px 20px 12dvh; text-align: center; min-height: 0; }
-.offhours[hidden], .stage[hidden] { display: none; }
+.offhours[hidden], .stage[hidden], .offhours__next[hidden] { display: none; } /* 次の開催がないときは、枠ごと出さない */
 .offhours__title { margin: 0; font-size: clamp(24px, 3.4dvh, 34px); font-weight: 700; letter-spacing: 0; color: var(--ink); text-wrap: balance; }
 .offhours__next { display: grid; gap: 6px; justify-items: center; padding: 20px 28px; border-radius: var(--r-lg); background: var(--board); min-width: min(320px, 100%); }
 .offhours__label { font-size: 14px; font-weight: 600; color: var(--ink-2); }

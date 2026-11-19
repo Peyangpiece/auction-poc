@@ -21,7 +21,8 @@
 <div class="app">
   <header class="bar">
     <!-- 役割の名前と時計は出さない（本人は分かっている。時刻はスマホの上に出ている。報告書 87 章） -->
-    <span class="bar__meta"><span id="presence">参加者 0人</span></span>
+    <!-- 競りの時間外だけ、トップページへ戻る道を出す（競りの最中は、誤って押して画面を離れないように出さない） -->
+    <span class="bar__meta"><a class="homelink" id="homeLink" href="/" hidden><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg>ホーム</a><span id="presence">参加者 0人</span></span>
     <button class="btn barbtn" type="button" id="suspend" hidden>中断</button>
   </header>
 
