@@ -404,7 +404,8 @@ dialog .actions > :is(.btn-primary, .btn-danger) { order: 2; }
 @media (min-width: 900px) {
   #app:not([hidden]) { display: grid; grid-template-columns: 200px minmax(0, 1fr); column-gap: 36px; align-items: start; }
   #app > .toolbar, #app > #releaseWarn { grid-column: 1 / -1; }
-  #tabs { grid-column: 1; flex-direction: column; position: sticky; top: 84px; gap: 2px; overflow: visible; margin: 0; }
+  #app > .side { grid-column: 1; position: sticky; top: 84px; display: grid; gap: 20px; }
+  #tabs { flex-direction: column; gap: 2px; overflow: visible; margin: 0; }
   #tabs button { width: 100%; text-align: left; min-height: 40px; padding: 8px 12px; border-radius: 8px; background: none; font-size: 15px; font-weight: 500; }
   #tabs button:hover { background: var(--ground-alt); }
   #tabs button[aria-selected="true"] { background: var(--tint-2); color: var(--action); font-weight: 600; }
@@ -456,3 +457,57 @@ table .btn-primary:hover:not(:disabled) { background: var(--tint-2); color: var(
 /* 管理のタブの読み込み中: すぐ終わるときは見えないよう、少し遅れて薄くする */
 #panel { transition: opacity .2s var(--ease) 0s; }
 #panel[aria-busy="true"] { opacity: .45; transition-delay: .15s; }
+
+/* ---- 管理（報告書 83 章: 引き算）
+   左の列: 区分 → ほかの画面 → 自分。上の帯の見出しと3つの大きなボタンは、なくした */
+.side .screens { display: grid; gap: 2px; padding-top: 16px; border-top: 1px solid var(--line); }
+.side .screens a { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 8px 12px; border-radius: 8px; color: var(--ink-2); text-decoration: none; font-size: 15px; }
+.side .screens a::after { content: '↗'; color: var(--ink-3); font-size: 13px; }
+.side .screens a:hover { background: var(--ground-alt); color: var(--ink); }
+.side .screens a[hidden] { display: none; }
+.side .me { display: grid; gap: 0; padding: 0 12px; font-size: 13px; color: var(--ink-2); }
+.side .me .textbtn { justify-self: start; padding: 10px 0; min-height: 44px; font-size: 13px; }
+@media (max-width: 899px) {
+  /* 狭い画面: 区分の札の列のあとに、ほかの画面を小さく。自分の名前は、いちばん下 */
+  /* 左の列をほどいて、区分 → ほかの画面 → 中身 → 自分（いちばん下）の順に並べる */
+  #app:not([hidden]) { display: grid; gap: 12px; }
+  .side { display: contents; }
+  #releaseWarn { order: 0; margin-bottom: 4px; }
+  .side #tabs { order: 1; margin-bottom: 0; }
+  .side .screens { order: 2; }
+  #panel { order: 3; margin-top: 8px; }
+  .side .me { order: 4; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .side .screens { display: flex; gap: 4px 16px; flex-wrap: wrap; padding-top: 0; border-top: 0; }
+  .side .screens a { min-height: 44px; padding: 0; font-size: 14px; gap: 4px; }
+  .side .me { display: flex; flex-wrap: wrap; align-items: center; gap: 0 12px; padding-left: 0; padding-right: 0; }
+}
+/* 公開の前の知らせ: 1行だけ */
+#releaseWarn { margin-bottom: 24px; }
+#releaseWarn .textbtn { padding: 0; min-height: 0; font-weight: 600; color: var(--action); text-decoration: none; }
+.missing { padding: 12px 16px; margin-bottom: 20px; border-radius: var(--r); background: color-mix(in srgb, #ff9f0a 12%, var(--ground)); font-size: 15px; }
+.missing ul { margin: 6px 0 0; padding-left: 1.2em; }
+.missing[hidden] { display: none; }
+/* 行の操作: 主な1つ ＋「⋯」 */
+td.act { white-space: nowrap; }
+.more__btn { min-width: 40px; padding-inline: 10px !important; font-size: 18px !important; letter-spacing: .05em; line-height: 1; }
+.more__btn--text { font-size: 14px !important; letter-spacing: 0; }
+.more__btn--text::after { content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 8px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.more { position: fixed; inset: auto; margin: 0; min-width: 200px; max-width: min(320px, calc(100vw - 16px)); padding: 6px; border: 0; border-radius: 12px; background: var(--ground); color: var(--ink); box-shadow: var(--shadow-2); }
+.more:popover-open { display: grid; gap: 2px; }
+.more .more__item { display: flex; justify-content: flex-start; width: 100%; min-height: 40px; margin: 0 !important; padding: 8px 12px; border: 0; border-radius: 8px; background: none; box-shadow: none; color: var(--ink); font-size: 15px; font-weight: 500; text-align: left; text-decoration: none; white-space: nowrap; }
+.more .more__item:hover, .more .more__item:focus-visible { background: var(--ground-alt); }
+.more .more__item.btn-danger { color: var(--danger); background: none; }
+.more .more__item.btn-primary { color: var(--action); background: none; }
+@media (pointer: coarse) { .more .more__item { min-height: 44px; } }
+.toolbar__acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* 契約で決める項目は、畳む */
+.fold { margin-top: 24px; border-top: 1px solid var(--line); }
+.fold > summary { cursor: pointer; padding: 14px 0; font-weight: 600; color: var(--ink-2); list-style: none; display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: ''; width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform .15s var(--ease); }
+.fold[open] > summary::before { transform: rotate(45deg); }
+/* 原本で固定した値（配るときの設定）は、入力欄ではなく、ただの文字として見せる */
+.form .input[readonly] { border-color: transparent; background: none; padding-left: 0; box-shadow: none; resize: none; color: var(--ink); }
+/* 記録の「内容」 */
+.auditdetail summary { cursor: pointer; color: var(--action); font-size: 13px; font-weight: 600; min-height: 32px; display: inline-flex; align-items: center; }
+.auditdetail p { margin: 4px 0 0; font-size: 13px; color: var(--ink-2); }

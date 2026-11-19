@@ -21,6 +21,15 @@ const makeStaff = (id, name, role) => {
   return { id, password: /仮のパスワード: (\S+)/.exec(text)[1], secret: /認証アプリの鍵: (\S+)/.exec(text)[1] };
 };
 const outbox = () => fs.readFileSync(path.join(dataDir, 'outbox', 'outbox.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+// 一覧の行の操作を押す。見えていなければ、その行の「⋯」を開いてから押す
+const rowAction = async (page, rowText, label) => {
+  const row = page.locator(`#panel tr:has-text("${rowText}")`);
+  await row.first().locator('td.act').waitFor();
+  const direct = row.locator(`td.act > button:has-text("${label}")`);
+  if (await direct.count()) return direct.first().click();
+  await row.locator('td.act .more__btn').click();
+  await page.locator(`.more:popover-open >> text=${label}`).click();
+};
 const lastCode = () => /認証番号は (\d{6})/.exec(outbox().filter((m) => m.channel === 'sms').at(-1).body)[1];
 
 // 参加できるのは開催の当日だけなので、開催日は今日（日本時間）にする
@@ -52,7 +61,7 @@ try {
   await shot(admin, 'mvp-01-staff-login');
   await admin.waitForSelector('#tabs button');
   check((await admin.textContent('#who')).includes('主催者管理者'), '主催者管理者としてログインできる');
-  check((await admin.locator('#tabs button').count()) === 10, '主催者管理者には、10 の画面が出る');
+  check((await admin.locator('#tabs button').count()) === 9, '主催者管理者には、9 の区分が出る（SMS の制限は、受付の「⋯」の中へ）');
 
   // 設定
   await admin.click('#tabs [data-key=settings]');
@@ -95,7 +104,7 @@ try {
   // 進行役には、SMS の制限だけ（商品は、進行コンソールでその場で登録する）
   const auct = await staffLogin(auctAcc);
   await auct.waitForSelector('#tabs button');
-  check((await auct.locator('#tabs button').count()) === 3, '進行役の管理画面には、受付・未引き取り・SMS の制限だけが出る');
+  check((await auct.locator('#tabs button').count()) === 2, '進行役の管理画面には、受付・未引き取りだけが出る（SMS の制限は、受付の「⋯」の中）');
 
   console.log('その場での登録（進行コンソール）');
   // 進行コンソールは、スタッフのログインで入る（合言葉つきの URL は使わない）
@@ -291,7 +300,7 @@ try {
   await guest.waitForFunction(() => document.getElementById('gateWait').textContent.includes('札'));
   check((await guest.textContent('#gateEvent')).includes('参加番号2') && (await guest.isHidden('#enter')), '参加番号 2 が振られ、来場確認までは入れない');
   await shot(guest, 'mvp-18-venue-wait');
-  await admin.click('#panel >> text=更新');
+  await admin.click('#tabs [data-key=reception]'); // 受付は、ひらき直すか 15 秒ごとに読み直す（「更新」のボタンはなくした）
   await admin.waitForSelector('#panel >> text=確認待ち 1 人');
   await shot(admin, 'mvp-19-reception');
   await admin.click('#panel td.act >> text=来場を確認');
@@ -308,7 +317,7 @@ try {
   check(true, '進行コンソールに、会場とオンラインの人数が出る');
   await shot(guest, 'mvp-20-venue-bidder', { fullPage: true });
   // オンライン参加の人を、受付で会場参加に切り替える
-  await admin.click('#panel >> text=更新');
+  await admin.click('#tabs [data-key=reception]');
   await admin.click('#panel td.act >> text=会場参加に切り替え');
   await admin.click('#dlg button[type=submit]');
   await admin.waitForFunction(() => document.querySelector('#dlg .msg')?.textContent.includes('支払方法'));
@@ -425,7 +434,7 @@ try {
 
   // 会員の停止と、記録
   await admin.click('#tabs [data-key=members]');
-  await admin.click('#panel tr:has-text("検証 太郎") td.act >> text=停止');
+  await rowAction(admin, '検証 太郎', '停止'); // 操作が3つ以上の行では「⋯」の中
   await admin.fill('#dlg [name=reason]', '検証のための停止');
   await admin.click('#dlg button[type=submit]');
   await admin.waitForSelector('#panel .warn');
@@ -462,8 +471,7 @@ try {
   await guest.waitForFunction(() => document.getElementById('facts')?.textContent.includes('7-8-9'));
   check(true, '会員が、登録内容を変えられる');
   await admin.click('#tabs [data-key=staff]');
-  await admin.waitForSelector('#panel td.act >> text=再発行');
-  await admin.click('#panel tr:has-text("shinko") td.act >> text=再発行');
+  await rowAction(admin, 'shinko', '再発行'); // 操作が3つ以上の行では「⋯」の中
   // 再発行は、本人のログインを切るので、確かめてから（報告書 80 章）。最初のフォーカスは「やめる」
   await admin.waitForSelector('#dlg[open] >> text=再発行しますか');
   check(await admin.evaluate(() => document.activeElement?.textContent === 'やめる'), 'スタッフの再発行は、何が無効になるかを書いて確かめる（最初のフォーカスは「やめる」）');

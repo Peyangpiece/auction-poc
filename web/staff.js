@@ -8,6 +8,8 @@ const toMonitor = new URLSearchParams(location.search).get('next') === 'monitor'
 const dlg = $('#dlg');
 const panel = $('#panel');
 let me = null;
+let S_missing = []; // 公開の前に入れておく項目（「設定」の上に出す）
+let smsOn = false; // SMS を使う設定か（使わない本番では、SMS の制限の操作を出さない）
 let current = null;
 
 function openDialog(title, ...body) {
@@ -23,7 +25,39 @@ function table(heads, rows, empty) {
     el('thead', {}, el('tr', {}, heads.map((h, i) => (h ? el('th', { scope: 'col', text: h }) : el('th', { scope: 'col' }, el('span', { class: 'sr-only', text: i === 0 ? '選択' : '操作' })))))),
     el('tbody', {}, rows)));
 }
-const act = (...buttons) => el('td', { class: 'act' }, buttons);
+// 行の操作が3つ以上あるときは、主な1つ（紺のボタン）だけを見せ、ほかは「⋯」の中にまとめる（ボタンが縦に積み上がらないように。報告書 83 章）
+let menuSeq = 0;
+function moreMenu(items) {
+  const id = `more${++menuSeq}`;
+  const pop = el('div', { class: 'more', id, popover: 'auto', role: 'menu' }, items);
+  const btn = el('button', { class: 'btn more__btn', type: 'button', 'aria-label': 'ほかの操作', 'aria-haspopup': 'menu', 'aria-expanded': 'false', text: '⋯' });
+  btn.setAttribute('popovertarget', id);
+  pop.addEventListener('toggle', (ev) => {
+    const open = ev.newState === 'open';
+    btn.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    // ボタンのすぐ下、右端をそろえて出す（画面の下にはみ出すときは、上に）
+    const r = btn.getBoundingClientRect();
+    const below = r.bottom + 4 + pop.offsetHeight <= innerHeight - 8;
+    pop.style.top = `${below ? r.bottom + 4 : Math.max(8, r.top - 4 - pop.offsetHeight)}px`;
+    pop.style.left = `${Math.max(8, Math.min(r.right - pop.offsetWidth, innerWidth - pop.offsetWidth - 8))}px`;
+    pop.querySelector('button, a')?.focus();
+  });
+  for (const it of items) { it.setAttribute('role', 'menuitem'); it.classList.add('more__item'); it.addEventListener('click', () => pop.hidePopover()); }
+  pop.addEventListener('keydown', (ev) => {
+    const all = [...pop.querySelectorAll('.more__item')]; const i = all.indexOf(document.activeElement);
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); all[(i + (ev.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length]?.focus(); }
+  });
+  return [btn, pop];
+}
+/** 「書き出す」のように、名前のあるボタンから開く一覧 */
+function exportMenu(items) { const [btn, pop] = moreMenu(items); btn.textContent = '書き出す'; btn.removeAttribute('aria-label'); btn.classList.add('more__btn--text'); return el('span', {}, btn, pop); }
+const act = (...buttons) => {
+  const list = buttons.flat().filter(Boolean);
+  if (list.length <= 2) return el('td', { class: 'act' }, list); // 2つまでは、そのまま並べる
+  const main = list.find((b) => b.classList.contains('btn-primary')) ?? null;
+  return el('td', { class: 'act' }, main, moreMenu(list.filter((b) => b !== main)));
+};
 const smallBtn = (text, onclick, cls = '') => el('button', { class: `btn ${cls}`, type: 'button', text, onclick });
 /** 理由を聞いてから実行する、取り消しにくい操作 */
 function askReason(title, label, required, run, okText = '実行する', danger = true) {
@@ -40,6 +74,13 @@ function askReason(title, label, required, run, okText = '実行する', danger 
   form.elements.reason.focus();
 }
 
+// 受付は、ひらいているあいだ 15 秒ごとに読み直す（「更新」のボタンをなくした。報告書 83 章）。
+// 操作の途中（ダイアログ・一覧のメニューを開いている、欄に書いている）は読み直さない
+setInterval(() => {
+  if (current !== 'reception' || document.hidden || dlg.open || document.querySelector('.more:popover-open')) return;
+  if (document.activeElement !== panel && panel.contains(document.activeElement)) return; // キーボードで一覧を操作している途中も、読み直さない
+  show('reception');
+}, 15000);
 // 設定・規約類に入れたまま、ほかのタブに移ると、入力が消える。移る前に確かめる（報告書 81 章）
 let unsaved = false;
 panel.addEventListener('input', (ev) => { if (current === 'settings' && ev.target.closest('form')) unsaved = true; });
@@ -151,8 +192,8 @@ async function membersPanel() {
   const waiting = res.members.filter((m) => !m.approved && !m.withdrawn).length;
   const rows = res.members.map((m) => el('tr', {},
     el('td', { class: 'n', text: String(m.id) }),
-    el('td', { class: 'dyn' }, m.kind === 'b2b' ? `${m.company}　${m.contactName}` : m.name),
-    el('td', { text: m.kind === 'b2b' ? '法人' : '個人' }),
+    // 区分の列はなくし、法人のときだけ名前の横に印を付ける（ほとんどが個人のため。報告書 83 章）
+    el('td', { class: 'dyn' }, m.kind === 'b2b' ? [`${m.company}　${m.contactName}`, ' ', el('span', { class: 'tag', text: '法人' })] : m.name),
     el('td', { text: m.loginId ?? '' }),
     el('td', { class: 'n', text: telFmt(m.phone) }),
     el('td', { class: 'dyn', text: m.email + (m.emailVerified ? '' : '（未確認）') }),
@@ -172,7 +213,7 @@ async function membersPanel() {
       : !m.withdrawn && m.suspendedBy !== 'unpaid' && smallBtn('停止', () => askReason(`会員 ${m.id} を停止`, '停止の理由', true, (reason) => api('POST', `/api/members/${m.id}/suspend`, { reason }), '停止する'), 'btn-danger'))));
   return [el('p', { class: 'msg', id: 'line', role: 'alert' }),
     waiting ? el('div', { class: 'banner', role: 'status' }, el('span', { text: `承認待ちの会員登録が ${waiting} 件あります。承認すると、ログイン ID とパスワードが、本人へメールで送られます。` })) : null,
-    table(['会員番号', '名前', '区分', 'ログイン ID', '電話番号', 'メール', '状態', ''], rows, '会員はまだいません。')];
+    table(['会員番号', '名前', 'ログイン ID', '電話番号', 'メール', '状態', ''], rows, '会員はまだいません。')];
 }
 
 // ------------------------------------------------------------ 受付: 来場確認（FR-MODE-002・004）と、会場の QR コード
@@ -197,13 +238,15 @@ async function receptionPanel() {
   return [
     el('div', { class: 'toolbar' },
       el('p', { class: 'dyn', text: `${res.event.title}　確認待ち ${waiting} 人` }),
-      el('div', {}, smallBtn('更新', () => show('reception')), ' ',
+      el('div', { class: 'toolbar__acts' },
         smallBtn('参加手続きを代わりに行う', () => askForm('参加手続きを、代わりに行う', '',
           [field('会員の電話番号', 'phone', { type: 'tel', inputMode: 'tel', required: true }),
             field('受け取り方法', 'receive', { options: [['', '選んでください'], ['pickup', '現地受け取り'], ['ship', '配送']] }),
             field('支払方法', 'payment', { options: [['', '選んでください'], ['cash', '当日現金'], ['transfer', '銀行振込']] })],
           async (d) => { const r = await api('POST', '/api/reception/join', d); if (r.ok) alertLine(`参加番号 ${r.paddle} を振りました。この番号の札を渡してください。`); return r; }, '参加番号を振る')), ' ',
-        smallBtn('会場の QR コード', () => qrDialog(res.event), 'btn-primary'))),
+        smallBtn('会場の QR コード', () => qrDialog(res.event), 'btn-primary'),
+        // めったに使わない操作は「⋯」の中へ（SMS の制限は、SMS を使う設定のときだけ）
+        smsOn && moreMenu([smallBtn('SMS の制限を解く', smsDialog)]))),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['参加番号', '名前', '参加', '受け取り・支払', '来場', ''], rows, '参加手続きを済ませた人は、まだいません。'),
   ];
@@ -309,10 +352,11 @@ async function billingPanel() {
             field('方法', 'method', { options: [['transfer', '振込'], ['cash', '現金']] }), field('理由', 'reason', { rows: 2, required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/refund`, { ...d, amount: Number(d.amount) }), '記録する'))));
   });
   const nodes = [
-    el('div', { class: 'toolbar' }, el('div', { class: 'exports' }, settleBtn, isAdmin() && el('span', { class: 'exports__label', text: '書き出す:' }),
-        isAdmin() && el('a', { class: 'btn btn-quiet', href: '/api/billing/shipping.csv', text: '配送の一覧（CSV）' }),
-        isAdmin() && el('a', { class: 'btn btn-quiet', href: `/api/billing/ledger.csv?month=${res.today.slice(0, 7)}`, text: '帳簿用の記録（CSV）' }),
-        isAdmin() && el('a', { class: 'btn btn-quiet', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（Excel）' }))),
+    // 書き出しは、月に一度ほどの作業なので、ひとつの「書き出す」の中にまとめる（報告書 83 章）
+    el('div', { class: 'toolbar' }, el('div', { class: 'toolbar__acts' }, settleBtn), isAdmin() && exportMenu([
+      el('a', { class: 'btn', href: '/api/billing/shipping.csv', text: '配送の一覧（CSV）' }),
+      el('a', { class: 'btn', href: `/api/billing/ledger.csv?month=${res.today.slice(0, 7)}`, text: '帳簿用の記録（CSV）' }),
+      el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（Excel）' })])),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['', '参加番号', '落札者・品', '金額', '受け取り・支払', '状態', ''], rows, '落札した品は、まだありません。'),
   ];
@@ -360,7 +404,7 @@ async function feesPanel() {
 }
 
 // ------------------------------------------------------------ SMS の制限の解除（受付係もできる）
-function smsPanel() {
+function smsDialog() {
   const form = el('form', { class: 'form', novalidate: true },
     field('電話番号', 'phone', { type: 'tel', inputMode: 'tel', required: true }, '会場で本人を確かめたうえで、認証番号の送信の制限（1時間に5回）を解きます'),
     el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
@@ -370,7 +414,8 @@ function smsPanel() {
     if (res.ok) { const m = $('.msg', form); m.classList.add('ok'); m.textContent = '制限を解きました'; form.reset(); return null; }
     return res;
   });
-  return [el('div', { class: 'narrowcol' }, form)];
+  openDialog('SMS の制限を解く', form, el('div', { class: 'actions' }, closeBtn('閉じる')));
+  form.elements.phone.focus();
 }
 
 // ------------------------------------------------------------ スタッフ
@@ -385,7 +430,7 @@ async function staffPanel() {
   const rows = res.staff.map((s) => el('tr', {},
     el('td', { class: 'dyn', text: s.email ?? `${s.loginId}（ログイン ID）` }), el('td', { class: 'dyn', text: s.name }), el('td', { text: s.roleLabel }),
     el('td', { text: !s.active ? '停止' : s.ready ? '利用中' : 'パスワードの登録待ち' }),
-    act(s.active && smallBtn(s.email ? 'パスワードを決め直せるようにする' : '再発行', () => confirmDo(
+    act(s.active && smallBtn(s.email ? 'パスワードの再設定' : '再発行', () => confirmDo(
         s.email ? `${s.name}さんのパスワードを消しますか？` : `${s.name}さんのパスワードと認証アプリを再発行しますか？`,
         s.email ? `いまのパスワードは使えなくなり、ログイン中の画面もすべて切れます。${s.email} に、パスワードを決め直す案内を送ります。` : 'いまのパスワードと認証アプリは使えなくなり、ログイン中の画面もすべて切れます。',
         s.email ? 'パスワードを消す' : '再発行する',
@@ -398,7 +443,7 @@ async function staffPanel() {
         '停止の前と同じパスワードで、またログインできるようになります。', '停止を解く',
         () => api('POST', `/api/staff/accounts/${s.id}/reactivate`)), 'btn-primary'))));
   return [
-    el('div', { class: 'toolbar' }, smallBtn('パスワードを変える', passwordDialog), smallBtn('スタッフのメールアドレスを登録', staffDialog, 'btn-primary')),
+    el('div', { class: 'toolbar' }, el('span'), smallBtn('スタッフを登録', staffDialog, 'btn-primary')),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['メールアドレス', '名前', '役割', '状態', ''], rows, ''),
   ];
@@ -440,7 +485,8 @@ function passwordDialog() {
 function sealBox(fixed = false) {
   const preview = el('img', { class: 'seal', alt: '登録してある印鑑', width: 96, height: 96, hidden: true });
   const note = el('p', { class: 'note', text: '登録されていません。' });
-  const refresh = () => { preview.onload = () => { preview.hidden = false; note.textContent = '登録済みです。'; }; preview.onerror = () => { preview.hidden = true; note.textContent = '登録されていません。'; }; preview.src = `/api/settings/seal?${Date.now()}`; };
+  // 「登録を消す」は、登録してあるときだけ出す（報告書 83 章）
+  const refresh = () => { preview.onload = () => { preview.hidden = false; note.textContent = '登録済みです。'; const d = $('#sealDelete'); if (d) d.hidden = false; }; preview.onerror = () => { preview.hidden = true; note.textContent = '登録されていません。'; const d = $('#sealDelete'); if (d) d.hidden = true; }; preview.src = `/api/settings/seal?${Date.now()}`; };
   const input = el('input', { type: 'file', accept: 'image/png,image/jpeg', class: 'sr-only', id: 'sealInput' });
   input.addEventListener('change', async () => {
     const file = input.files[0];
@@ -455,7 +501,7 @@ function sealBox(fixed = false) {
   // 原本の印鑑で固定しているときは、ここでは変えられない（配るときの設定で変える）
   if (fixed) { preview.onload = () => { preview.hidden = false; note.textContent = '原本の印鑑を押します（配るときの設定で固定しています）。'; }; return el('div', { class: 'sealbox' }, preview, el('div', {}, note)); }
   return el('div', { class: 'sealbox' }, preview, el('div', {}, note, input, el('label', { class: 'btn', htmlFor: 'sealInput', text: '画像を選ぶ' }), ' ',
-    el('button', { class: 'btn', type: 'button', text: '登録を消す', onclick: () => confirmDo('印鑑の画像を消しますか？', 'これから出す請求書には、印鑑が押されなくなります。', '消す',
+    el('button', { class: 'btn', type: 'button', id: 'sealDelete', hidden: true, text: '登録を消す', onclick: () => confirmDo('印鑑の画像を消しますか？', 'これから出す請求書には、印鑑が押されなくなります。', '消す',
       () => api('POST', '/api/settings/seal', { image: null }), { danger: true, then: async () => refresh() }) })));
 }
 // 規約類（利用規約・特定商取引法に基づく表示・プライバシーポリシー）の文面
@@ -490,6 +536,8 @@ async function settingsPanel() {
     sealBox(!!s.sealFixed),
     el('h2', { class: 'subhead', text: '買歩銭' }),
     field('買歩銭の割合（%）', 'buyerPremiumRate', { value: s.buyerPremiumRate, inputMode: 'numeric' }, '落札者が、落札額に上乗せして払う手数料。変えても、すでに落札した品の金額は変わりません'),
+    // 契約で一度決めれば変えない項目は、畳んでおく（ふだんの設定の画面を短くする。報告書 83 章）
+    el('details', { class: 'fold' }, el('summary', { text: '契約で決める項目（違約金・遅延損害金・手数料）' }),
     el('h2', { class: 'subhead', text: '違約金・遅延損害金' }),
     el('div', { class: 'grid2' },
       field('解除の違約金（法人。落札額の %）', 'penaltyRateB2b', { value: s.penaltyRateB2b, inputMode: 'decimal' }),
@@ -499,7 +547,7 @@ async function settingsPanel() {
     el('h2', { class: 'subhead', text: '手数料の集計' }),
     el('div', { class: 'grid2' },
       field('消費税の扱い', 'feeTaxMode', { options: [['exclusive', '外税（手数料に消費税を足す）'], ['inclusive', '内税（手数料に含む）']], value: s.feeTaxMode || 'exclusive' }),
-      field('最低保証額（円）', 'feeMinimum', { value: s.feeMinimum, inputMode: 'numeric' }, '未定なら空のまま')),
+      field('最低保証額（円）', 'feeMinimum', { value: s.feeMinimum, inputMode: 'numeric' }, '未定なら空のまま'))),
     el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '保存する' })));
   for (const name of s.fixed ?? []) { const input = form.elements[name]; if (input) { input.readOnly = true; input.setAttribute('aria-readonly', 'true'); } }
@@ -509,7 +557,7 @@ async function settingsPanel() {
     if (res.ok) { const m = $('.msg', form); m.classList.add('ok'); m.textContent = '保存しました'; return null; }
     return res;
   });
-  return [el('div', { class: 'narrowcol' }, form, await legalBox())];
+  return [el('div', { class: 'narrowcol' }, el('div', { class: 'missing', id: 'missingList', hidden: true }), form, await legalBox())];
 }
 
 // ------------------------------------------------------------ 記録（監査ログ・知らせ）
@@ -542,12 +590,21 @@ function auditText(raw) {
 }
 async function auditPanel() {
   const [audit, notices] = await Promise.all([api('GET', '/api/audit'), api('GET', '/api/notices')]);
-  const who = (e) => (e.actor_kind === 'staff' ? `スタッフ ${e.actor_id}` : e.actor_kind === 'member' ? `会員 ${e.actor_id}` : e.actor_kind === 'system' ? 'システム' : '');
+  // 誰が: スタッフは名前で（主催者管理者のときだけ、一覧から引ける）
+  const staffNames = me.role === 'admin' ? new Map(((await api('GET', '/api/staff/accounts')).staff ?? []).map((x) => [x.id, x.name])) : new Map();
+  const who = (e) => (e.actor_kind === 'staff' ? staffNames.get(e.actor_id) ?? `スタッフ ${e.actor_id}` : e.actor_kind === 'member' ? `会員 ${e.actor_id}` : e.actor_kind === 'system' ? 'システム' : '');
+  // 変わる前と後の値は、ふだんは見ないので、「内容」を押したときだけ出す（列を3つ減らす。報告書 83 章）
+  const detail = (e) => {
+    const before = auditText(e.before), after = auditText(e.after);
+    if (!before && !after && !e.reason) return '';
+    return el('details', { class: 'auditdetail' }, el('summary', { text: e.reason ? `理由: ${e.reason}` : '内容' }),
+      before && el('p', { text: `前: ${before}` }), after && el('p', { text: `後: ${after}` }));
+  };
   return [
     (notices.notices ?? []).length ? el('div', { class: 'banner', role: 'alert' }, el('span', { text: `送信に失敗した知らせが ${notices.notices.length} 件あります（SMS・メール）。` })) : null,
-    table(['日時', '操作', '誰が', '対象', '前', '後', '理由'], audit.entries.map((e) => el('tr', {},
-      el('td', { class: 'n', text: dateFmt.format(e.at) }), el('td', { text: AUDIT_TEXT[e.type] ?? e.type }), el('td', { text: who(e) }), el('td', { text: targetText(e.target) }),
-      el('td', { class: 'dyn', text: auditText(e.before) }), el('td', { class: 'dyn', text: auditText(e.after) }), el('td', { class: 'dyn', text: e.reason ?? '' }))), '記録はまだありません。'),
+    table(['日時', '操作', '誰が', '対象', ''], audit.entries.map((e) => el('tr', {},
+      el('td', { class: 'n', text: dateFmt.format(e.at) }), el('td', { text: AUDIT_TEXT[e.type] ?? e.type }), el('td', { class: 'dyn', text: who(e) }), el('td', { text: targetText(e.target) }),
+      el('td', { class: 'dyn' }, detail(e)))), '記録はまだありません。'),
   ];
 }
 
@@ -556,12 +613,11 @@ const PANELS = {
   reception: ['受付', receptionPanel, ['admin', 'auctioneer', 'reception']],
   billing: ['請求', billingPanel, ['admin', 'reception']],
   pickup: ['未引き取り', pickupPanel, ['admin', 'auctioneer', 'reception']],
-  fees: ['手数料', feesPanel, ['admin', 'operator']],
   events: ['開催', eventsPanel, ['admin']],
   members: ['会員', membersPanel, ['admin']],
-  sms: ['SMS の制限', smsPanel, ['admin', 'auctioneer', 'reception']],
   staff: ['スタッフ', staffPanel, ['admin']],
   settings: ['設定', settingsPanel, ['admin']],
+  fees: ['手数料', feesPanel, ['admin', 'operator']],
   audit: ['記録', auditPanel, ['admin', 'operator']],
 };
 async function show(key) {
@@ -576,6 +632,7 @@ async function show(key) {
   if (current !== key) return;
   panel.removeAttribute('aria-busy');
   panel.replaceChildren(...nodes.filter(Boolean));
+  if (key === 'settings') renderMissing();
   // ダイアログで実行すると、開いたボタンは描き直しで消える。フォーカスが行き場を失ったら、パネルへ戻す（報告書 81 章）
   if (!document.activeElement || document.activeElement === document.body) panel.focus({ preventScroll: true });
   panel.setAttribute('aria-labelledby', `tab-${key}`);
@@ -606,14 +663,16 @@ $('#backToLogin').addEventListener('click', () => { $('#setupForm').hidden = tru
   if (!me) { $('#login').hidden = false; $('#loginForm').elements.email.focus(); return; }
   if (me.role === 'caller') { location.replace('/caller.html'); return; }
   $('#app').hidden = false;
-  $('#who').textContent = `${me.name}（${me.roleLabel}）`;
+  $('#who').textContent = `${me.name}・${me.roleLabel}`;
+  $('#myPassword').addEventListener('click', passwordDialog);
   // 競りの進行は、主催者管理者と進行役（8.14）
   $('#toConsole').hidden = !['admin', 'auctioneer'].includes(me.role);
   $('#toCaller').hidden = me.role !== 'admin';
   $('#toMonitor').hidden = me.role === 'operator'; // 会場の大型モニターは、会場にいるスタッフが開く
   // SMS を使わない設定（本番）のときは、「SMS の制限」を出さない
   const terms = await api('GET', '/api/terms');
-  const keys = Object.keys(PANELS).filter((k) => PANELS[k][2].includes(me.role) && !(k === 'sms' && terms.sms === false));
+  smsOn = terms.sms !== false;
+  const keys = Object.keys(PANELS).filter((k) => PANELS[k][2].includes(me.role));
   $('#tabs').replaceChildren(...keys.map((k) => el('button', { type: 'button', role: 'tab', id: `tab-${k}`, 'aria-controls': 'panel', 'data-key': k, text: PANELS[k][0], onclick: () => leavePanel(() => { pendingNotice = null; show(k); }) })));
   show(keys.includes(location.hash.slice(1)) ? location.hash.slice(1) : keys[0]);
   if (me.role === 'admin') releaseWarning();
@@ -628,9 +687,17 @@ async function releaseWarning() {
     /【仮/.test(settings.returnPolicy ?? '') && '返品特約（仮の文言のまま）', !settings.bankAccount && '振込先',
   ].filter(Boolean);
   $('#releaseWarn')?.remove();
+  S_missing = missing; renderMissing();
   if (!missing.length) return;
-  $('#tabs').before(el('div', { class: 'banner', id: 'releaseWarn', role: 'status' },
-    el('span', { class: 'warn', text: `まだ入っていません: ${missing.join('・')}。会員に見える画面と請求書に出るため、公開の前に入れてください。` }),
-    smallBtn('設定を開く', () => leavePanel(() => { pendingNotice = null; show('settings'); }))));
+  // 1行だけ: 何件あるかと、直す場所への入口。中身は「設定」の上に出す（どのタブにも大きな赤字を出さない。報告書 83 章）
+  $('#app').prepend(el('div', { class: 'notice', id: 'releaseWarn', role: 'status' }, el('span', { class: 'notice__icon', 'aria-hidden': 'true' }),
+    el('span', { text: `公開の前に、入れておく項目が ${missing.length} つあります` }),
+    el('button', { class: 'textbtn', type: 'button', text: '設定を開く', onclick: () => leavePanel(() => { pendingNotice = null; show('settings'); }) })));
+}
+/** 「設定」の上に、まだ入っていない項目を並べる */
+function renderMissing() {
+  const box = $('#missingList'); if (!box) return;
+  box.hidden = !S_missing.length;
+  box.replaceChildren(el('b', { text: '公開の前に入れておく項目' }), el('ul', {}, S_missing.map((m) => el('li', { text: m }))));
 }
 tabKeys($('#tabs'));

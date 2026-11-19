@@ -44,8 +44,17 @@
   </form>
 </section>
 <section id="app" hidden>
-  <div class="toolbar"><div class="pagehead"><h1>管理</h1><p id="who"></p></div><div><a class="btn" id="toMonitor" href="/monitor.html" hidden>会場モニターを開く</a> <a class="btn" id="toCaller" href="/caller.html" hidden>オークショニア画面を開く</a> <a class="btn btn-primary" id="toConsole" href="/console.html" hidden>進行コンソールを開く</a></div></div>
-  <div class="tabs" role="tablist" id="tabs"></div>
+  <h1 class="sr-only">管理</h1>
+  <!-- 左の列: 区分、ほかの画面への入口、自分のアカウント（上の帯の大きなボタンと見出しは、なくした。報告書 83 章） -->
+  <div class="side">
+    <div class="tabs" role="tablist" id="tabs" aria-label="管理の区分"></div>
+    <nav class="screens" aria-label="ほかの画面">
+      <a id="toConsole" href="/console.html" hidden>進行コンソール</a>
+      <a id="toCaller" href="/caller.html" hidden>オークショニア画面</a>
+      <a id="toMonitor" href="/monitor.html" hidden>会場モニター</a>
+    </nav>
+    <div class="me"><span id="who"></span><button class="textbtn" type="button" id="myPassword">パスワードを変える</button></div>
+  </div>
   <div id="panel" role="tabpanel" tabindex="-1"></div>
 </section>
 <dialog class="wide" id="dlg" aria-labelledby="dlgTitle"></dialog>
