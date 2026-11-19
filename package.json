@@ -24,6 +24,7 @@
     "better-sqlite3": "^13.2.0",
     "exceljs": "^4.4.0",
     "jp-zipcode-lookup": "^0.3.5",
+    "jsqr": "1.4.0",
     "pdfkit": "^0.20.2",
     "qrcode": "^1.5.4",
     "ws": "^8.23.0"

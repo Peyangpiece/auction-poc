@@ -7,6 +7,21 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { boot, chromium, devices, check, ROOT } from './lib.mjs';
 import { totp } from '../../server/src/mvp/security.js';
+import Database from 'better-sqlite3';
+import QRCode from 'qrcode';
+
+// QR コードを映した疑似のカメラ映像（Chromium の --use-file-for-fake-video-capture が読む Y4M 形式。白地に黒の1枚）
+function writeQrVideo(file, text) {
+  const W = 640, H = 480, mods = QRCode.create(text, { errorCorrectionLevel: 'M' }).modules;
+  const cell = Math.floor(Math.min(W, H) * 0.7 / mods.size), x0 = (W - cell * mods.size) >> 1, y0 = (H - cell * mods.size) >> 1;
+  const y = Buffer.alloc(W * H, 235);
+  for (let r = 0; r < mods.size; r++) for (let c = 0; c < mods.size; c++) {
+    if (!mods.get(r, c)) continue;
+    for (let dy = 0; dy < cell; dy++) y.fill(16, (y0 + r * cell + dy) * W + x0 + c * cell, (y0 + r * cell + dy) * W + x0 + (c + 1) * cell);
+  }
+  const uv = Buffer.alloc((W / 2) * (H / 2), 128);
+  fs.writeFileSync(file, Buffer.concat([Buffer.from(`YUV4MPEG2 W${W} H${H} F10:1 Ip A1:1 C420jpeg\n`), Buffer.from('FRAME\n'), y, uv, uv]));
+}
 
 const shotsArg = process.argv.indexOf('--shots');
 const shots = shotsArg > 0 ? path.resolve(process.argv[shotsArg + 1]) : null;
@@ -299,14 +314,40 @@ try {
   await guest.click('#join button[type=submit]');
   await guest.waitForFunction(() => document.getElementById('gateWait').textContent.includes('札'));
   check((await guest.textContent('#gateEvent')).includes('参加番号2') && (await guest.isHidden('#enter')), '参加番号 2 が振られ、来場確認までは入れない');
+  await guest.waitForFunction(() => { const i = document.getElementById('checkinQr'); return !i.hidden && i.complete && i.naturalWidth > 0; });
+  check(true, '来場確認を待つ画面に、受付で見せる QR コードが出る');
   await shot(guest, 'mvp-18-venue-wait');
   await admin.click('#tabs [data-key=reception]'); // 受付は、ひらき直すか 15 秒ごとに読み直す（「更新」のボタンはなくした）
   await admin.waitForSelector('#panel >> text=確認待ち 1 人');
   await shot(admin, 'mvp-19-reception');
-  await admin.click('#panel td.act >> text=来場を確認');
-  await admin.waitForSelector('#panel >> text=確認待ち 0 人');
+  // 受付係のスマホで、参加者の QR コードを読み取る（カメラは、QR コードを映した疑似の映像。報告書 91 章）
+  const camFile = path.join(sys.dir, 'checkin.y4m');
+  const db = new Database(path.join(sys.dir, 'data', 'auction.db'), { readonly: true });
+  writeQrVideo(camFile, 'reiwa-checkin:' + db.prepare('SELECT checkin_code FROM members WHERE paddle_no = 2 AND account_id IS NOT NULL ORDER BY id DESC').get().checkin_code);
+  db.close();
+  const camBrowser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${camFile}`] });
+  try {
+    const desk = await (await camBrowser.newContext(devices['Pixel 7'])).newPage();
+    desk.on('pageerror', (e) => errors.push(`scan: ${e.message}`));
+    await desk.goto(sys.base + '/staff.html');
+    await desk.fill('#loginForm [name=email]', adminAcc.id);
+    await desk.fill('#loginForm [name=password]', adminAcc.password);
+    await desk.click('#loginForm button[type=submit]');
+    await desk.click('#tabs [data-key=reception]');
+    await desk.click('#panel >> text=QR コードを読み取る');
+    await desk.waitForSelector('#dlg .scanwho', { timeout: 15000 });
+    check((await desk.textContent('#dlg .scanwho')).includes('参加番号 2') && (await desk.textContent('#dlg .scanwho')).includes('会場 花子'), '受付のスマホで QR コードを読み取ると、参加番号と名前が出る');
+    check((await guest.isHidden('#enter')), '読み取っただけでは、来場確認にしない（受付係が本人と見比べてから押す）');
+    await shot(desk, 'mvp-19b-reception-scan');
+    await desk.click('#dlg >> text=来場を確認');
+    await desk.waitForSelector('#dlg .scandone');
+    check((await desk.textContent('#dlg .scandone')).includes('札を渡して'), '来場を確認すると、札を渡すよう出る');
+    await desk.click('#dlg >> text=閉じる');
+    await desk.waitForSelector('#panel >> text=確認待ち 0 人');
+    check(await desk.evaluate(() => !document.querySelector('video')?.srcObject?.active), '閉じると、カメラを止める');
+  } finally { await camBrowser.close(); }
   await guest.waitForSelector('#enter:not([hidden])', { timeout: 15000 });
-  check(true, '受付係が来場を確認すると、本人の画面が自動で進めるようになる');
+  check(await guest.isHidden('#checkinQr'), '受付係が来場を確認すると、本人の画面が自動で進めるようになる（QR コードは消える）');
   await guest.click('#enter');
   await guest.waitForFunction(() => document.getElementById('bid').textContent === '入札');
   check(await guest.isDisabled('#showVideo'), '会場参加の画面には、映像を出さない');

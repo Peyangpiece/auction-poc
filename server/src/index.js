@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { loadConfig } from './config.js';
@@ -168,6 +169,7 @@ const SECURITY_HEADERS = {
   ...(config.csp === 'off' ? {} : { 'content-security-policy': CSP }),
 };
 const startedAt = nowMs();
+const JSQR_FILE = createRequire(import.meta.url).resolve('jsqr/dist/jsQR.js');
 
 const server = http.createServer((req, res) => {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
@@ -188,7 +190,10 @@ const server = http.createServer((req, res) => {
     return res.writeHead(302, { location: '/login.html', 'cache-control': 'no-store' }).end();
   }
   const name = url.pathname === '/' ? 'index.html' : path.basename(url.pathname);
-  const file = path.join(config.webDir, name);
+  // QR コードの読み取りの部品（jsQR）は、入れたパッケージから直接返す（受付の画面だけが、読み取るときに読み込む。報告書 91 章）
+  const file = name === 'jsqr.js' ? JSQR_FILE : path.join(config.webDir, name);
+  // カメラは、受付の画面（QR コードの読み取り）だけに許す。ほかの画面は、これまでどおり使わせない
+  if (name === 'staff.html') res.setHeader('permissions-policy', 'camera=(self), microphone=(), geolocation=(), payment=()');
   fs.readFile(file, (err, body) => {
     if (err) {
       // 画面を開こうとした場合（.html か、拡張子なし）は、案内のページを返す。部品（画像・スクリプトなど）は短い返事だけ

@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS members (
   payment TEXT,                           -- 支払方法: transfer（銀行振込）/ cash（当日現金）（FR-PAY-009）
   mode TEXT NOT NULL DEFAULT 'online',    -- 参加モード（FR-MODE-001）。会場参加は MVP の 4
   joined_at REAL,
-  checked_in_at REAL                      -- 会場参加の来場確認（受付係が確かめた時刻。FR-MODE-002）
+  checked_in_at REAL,                     -- 会場参加の来場確認（受付係が確かめた時刻。FR-MODE-002）
+  checkin_code TEXT                       -- 来場確認の QR コードの中身（参加者ごとの乱数。受付係がスマホで読み取る。報告書 91 章）
 );
 CREATE TABLE IF NOT EXISTS staff (
   id INTEGER PRIMARY KEY,
@@ -111,6 +112,7 @@ function migrate(db) {
   if (!has('members', 'account_id')) todo.push(['members', 'id, paddle_no, name, token_hash']);
   if (!has('lots', 'event_id')) todo.push(['lots', 'id, lot_no, title, start_price, unit_override, reserve_price, status, prep_from, no_video, current_bid_seq, close_seq, winner_bid_seq, updated_at']);
   if (has('members', 'account_id') && !has('members', 'checked_in_at')) db.exec('ALTER TABLE members ADD COLUMN checked_in_at REAL');
+  if (has('members', 'account_id') && !has('members', 'checkin_code')) db.exec('ALTER TABLE members ADD COLUMN checkin_code TEXT');
   if (!has('bids', 'proxy_by')) db.exec('ALTER TABLE bids ADD COLUMN proxy_by TEXT');
   if (!has('lots', 'start_pending')) db.exec('ALTER TABLE lots ADD COLUMN start_pending INTEGER NOT NULL DEFAULT 0');
   if (!has('lots', 'urikiri_on')) db.exec('ALTER TABLE lots ADD COLUMN urikiri_on INTEGER NOT NULL DEFAULT 0');

@@ -332,3 +332,6 @@ body.outbid .board { box-shadow: var(--glass-edge), inset 0 0 0 2px var(--board-
   .board, .wincard { background: var(--board); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .cmtlayer #comments li, .cmttoast, #sound { background: rgb(0 0 0 / .8); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
+/* 来場確認の QR コード。暗い画面でも読み取れるよう、白地のまま出す（報告書 91 章） */
+#gate .checkinqr { display: block; justify-self: center; width: min(240px, 70vw); height: auto; aspect-ratio: 1; background: #fff; border-radius: 12px; padding: 8px; box-shadow: 0 0 0 1px var(--line, rgba(0, 0, 0, .12)); }
+#gate .checkinqr[hidden] { display: none; }

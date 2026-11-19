@@ -254,6 +254,46 @@ test('会場参加: QR コード → 参加手続き（当日現金も選べる�
   } finally { await t.end(); }
 });
 
+test('来場確認の QR コード: 本人の画面に出し、受付係が読み取って参加者を探す（報告書 91 章）', async () => {
+  const t = await setup();
+  try {
+    const a = await t.register('09055550001', '検証 一郎');
+    const b = await t.register('09055550002', '検証 二郎');
+    await t.publishEvent('本日の競り');
+    const made = (await t.staff.post('/api/staff/accounts', { loginId: 'uketsuke', name: '受付 三郎', role: 'reception' })).json;
+    const reception = browser(t.srv.httpUrl);
+    await reception.post('/api/staff/login', { loginId: 'uketsuke', password: made.initialPassword, code: totp(made.totpSecret) });
+    const venueCode = new URL((await reception.get('/api/reception')).json.event.venueUrl).searchParams.get('venue');
+
+    assert.equal((await a.get('/api/my/checkin-qr')).status, 409, '参加手続きの前は、出さない');
+    await a.post('/api/join', { receive: 'pickup', payment: 'cash', venueCode });
+    await b.post('/api/join', { receive: 'ship', payment: 'transfer' });
+    assert.equal((await b.get('/api/my/checkin-qr')).status, 409, 'オンライン参加には、出さない');
+    const qr = await a.get('/api/my/checkin-qr');
+    assert.equal(qr.status, 200);
+    assert.match(qr.json.qrSvg, /^<svg/);
+    assert.equal(qr.json.paddle, 1);
+    const again = await a.get('/api/my/checkin-qr');
+    assert.equal(again.json.qrSvg, qr.json.qrSvg, '同じ開催の中では、同じコード');
+
+    // QR の中身（読み取った文字）を、データベースから取り出して使う
+    const db = new Database(path.join(t.ctx.dataDir, 'auction.db'), { readonly: true });
+    const code = 'reiwa-checkin:' + db.prepare('SELECT checkin_code FROM members WHERE paddle_no = 1 AND account_id IS NOT NULL').get().checkin_code;
+    db.close();
+    assert.ok(code.length > 'reiwa-checkin:'.length + 10, '中身は、推し量れない長さの乱数');
+    assert.ok(!code.includes('検証') && !/:1$/.test(code), '名前や参加番号は入れない');
+    assert.equal((await a.post('/api/reception/scan', { code })).status, 401, '会員は、読み取りの窓口を使えない');
+    assert.equal((await reception.post('/api/reception/scan', { code: 'https://example.com/' })).status, 404, '来場確認のコードでなければ、断る');
+    assert.equal((await reception.post('/api/reception/scan', { code: 'reiwa-checkin:wrong' })).status, 404);
+    const hit = await reception.post('/api/reception/scan', { code });
+    assert.equal(hit.status, 200);
+    assert.deepEqual([hit.json.paddle, hit.json.name, hit.json.mode, hit.json.checkedIn, hit.json.payment], [1, '検証 一郎', 'venue', false, 'cash']);
+    assert.equal((await a.get('/api/participation')).json.checkedIn, false, '読み取っただけでは、来場確認にしない（受付係が名前を見てから押す）');
+    assert.equal((await reception.post(`/api/reception/${hit.json.id}/checkin`)).status, 200);
+    assert.equal((await reception.post('/api/reception/scan', { code })).json.checkedIn, true, '2回目に読むと、確認済みと分かる');
+  } finally { await t.end(); }
+});
+
 test('オンライン参加から会場参加への変更は、受付係が来場を確認したときだけ。支払方法を選び直す（FR-MODE-004、FR-PAY-002）', async () => {
   const t = await setup();
   try {

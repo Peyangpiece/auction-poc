@@ -936,7 +936,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const now = activeEvent();
     return { today, todayEvent: now ? pub(now) : null, events: events.map(pub) };
   });
-  const participant = (accountId, eventId) => db.prepare('SELECT id, paddle_no, name, account_id, event_id, receive, payment, mode, checked_in_at FROM members WHERE account_id = ? AND event_id = ?').get(accountId, eventId) ?? null;
+  const participant = (accountId, eventId) => db.prepare('SELECT id, paddle_no, name, account_id, event_id, receive, payment, mode, checked_in_at, checkin_code FROM members WHERE account_id = ? AND event_id = ?').get(accountId, eventId) ?? null;
   const RECEIVE = { pickup: '現地受け取り', ship: '配送' };
   const PAYMENT = { transfer: '銀行振込', cash: '当日現金' };
   /** 会場の QR コードの合言葉が、いまの開催のものか（FR-MODE-002） */
@@ -1052,6 +1052,33 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const event = activeEvent();
     if (!event) throw new HttpError(404, '本日の開催はありません');
     return { svg: await QRCode.toString(venueUrl(ctx, ensureVenueCode(event)), { type: 'svg', errorCorrectionLevel: 'M', margin: 2 }) };
+  });
+  // 来場確認の QR コード（報告書 91 章）。会場参加で来場確認を待っている本人に出し、受付係がスマホで読み取る。
+  // 中身は参加者ごとの乱数だけ（名前や番号は入れない）。読み取って来場を確認できるのは、受付のログインだけ
+  const CHECKIN_PREFIX = 'reiwa-checkin:';
+  route('GET', '/api/my/checkin-qr', async (ctx) => {
+    const member = needMember(ctx);
+    const event = activeEvent();
+    const p = event ? participant(member.id, event.id) : null;
+    if (!p || p.mode !== 'venue') throw new HttpError(409, '会場参加の手続きが済んでいません');
+    let code = p.checkin_code;
+    if (!code) { code = randomToken(12); db.prepare('UPDATE members SET checkin_code = ? WHERE id = ?').run(code, p.id); }
+    return { paddle: p.paddle_no, qrSvg: await QRCode.toString(CHECKIN_PREFIX + code, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 }) };
+  });
+  // 受付係が読み取った QR コードから、参加者を探す（来場の確認は、画面で名前を見てから押す）
+  route('POST', '/api/reception/scan', (ctx, body) => {
+    needStaff(ctx, 'admin', 'auctioneer', 'reception');
+    const event = activeEvent();
+    if (!event) throw new HttpError(409, '本日の開催はありません');
+    const text = String(body?.code ?? '');
+    if (!text.startsWith(CHECKIN_PREFIX)) throw new HttpError(404, 'このQRコードは、来場確認のコードではありません。参加者の入札画面に出ているコードを読み取ってください');
+    const r = db.prepare(`SELECT m.id, m.paddle_no, m.mode, m.receive, m.payment, m.checked_in_at, a.kind, a.name, a.company, a.contact_name
+      FROM members m JOIN member_accounts a ON a.id = m.account_id WHERE m.event_id = ? AND m.checkin_code = ?`).get(event.id, text.slice(CHECKIN_PREFIX.length));
+    if (!r) throw new HttpError(404, 'この参加者は、本日の開催に見つかりません。本日の入札画面に出ているコードか、確かめてください');
+    return {
+      id: r.id, paddle: r.paddle_no, mode: r.mode, receive: r.receive, payment: r.payment, checkedIn: r.mode === 'venue' && !!r.checked_in_at,
+      name: r.kind === 'b2b' ? `${r.company}　${r.contact_name}` : r.name,
+    };
   });
   // 参加手続きを、受付で代わりに行う（会員登録は済んでいるが、端末で手続きできない人。FR-CON-005 の代理入札の前提にもなる）
   route('POST', '/api/reception/join', (ctx, body) => {

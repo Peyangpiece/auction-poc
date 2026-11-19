@@ -247,7 +247,8 @@ async function receptionPanel() {
             field('受け取り方法', 'receive', { options: [['', '選んでください'], ['pickup', '現地受け取り'], ['ship', '配送']] }),
             field('支払方法', 'payment', { options: [['', '選んでください'], ['cash', '当日現金'], ['transfer', '銀行振込']] })],
           async (d) => { const r = await api('POST', '/api/reception/join', d); if (r.ok) alertLine(`参加番号 ${r.paddle} を振りました。この番号の札を渡してください。`); return r; }, '参加番号を振る')), ' ',
-        smallBtn('会場の QR コード', () => qrDialog(res.event), 'btn-primary'))),
+        smallBtn('会場の QR コード', () => qrDialog(res.event)), ' ',
+        smallBtn('QR コードを読み取る', scanDialog, 'btn-primary'))),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     (() => { const t = table(['参加番号', '名前', '状態', '受け取り・支払', ''], rows, '参加手続きを済ませた人は、まだいません。'); t.classList.add('reclist'); return t; })(),
   ];
@@ -266,6 +267,78 @@ function switchDialog(p) {
     return res;
   });
   openDialog('会場参加に切り替え', form);
+}
+// 来場確認の QR コードを、受付のスマホのカメラで読み取る（報告書 91 章）。
+// 読み取ったら名前と参加番号を出し、受付係が本人と見比べてから「来場を確認」を押す。終わると、そのまま次の人を読み取る
+let jsQRLoad = null;
+const loadJsQR = () => (jsQRLoad ??= new Promise((resolve, reject) => {
+  const s = el('script', { src: '/jsqr.js' });
+  s.onload = () => resolve(window.jsQR);
+  s.onerror = () => { jsQRLoad = null; reject(new Error('load')); };
+  document.head.append(s);
+}));
+async function scanDialog() {
+  const video = el('video', { class: 'scanvideo', playsInline: true, muted: true, 'aria-hidden': 'true' });
+  const say = el('p', { class: 'scanhint', role: 'status', text: 'カメラを準備しています…' });
+  const result = el('div', { class: 'scanresult', 'aria-live': 'polite' });
+  const canvas = document.createElement('canvas');
+  const ctx2d = canvas.getContext('2d', { willReadFrequently: true });
+  let stream = null, timer = 0, busy = false, done = 0, last = { code: '', at: 0 };
+  const stop = () => { clearTimeout(timer); timer = 0; stream?.getTracks().forEach((t) => t.stop()); stream = null; };
+  openDialog('QR コードを読み取る', say, el('div', { class: 'scanbox' }, video), result,
+    el('div', { class: 'actions' }, closeBtn()));
+  dlg.addEventListener('close', () => { stop(); if (done) show('reception'); }, { once: true });
+  const fail = (text) => { stop(); say.textContent = text; video.hidden = true; };
+  let jsQR;
+  try { jsQR = await loadJsQR(); } catch { return fail('読み取りの準備ができませんでした。通信の状態を確かめて、開き直してください。一覧からも確認できます。'); }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  } catch (e) {
+    return fail(e?.name === 'NotAllowedError'
+      ? 'カメラの使用が許可されていません。ブラウザの設定でこのサイトのカメラを許可してから、もう一度開いてください。一覧からも確認できます。'
+      : 'カメラを使えませんでした。ほかのアプリがカメラを使っていないか確かめてください。一覧からも確認できます。');
+  }
+  if (!dlg.open) return stop(); // 準備の間に閉じられた
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+  say.textContent = '参加者の入札画面の QR コードを、枠の中に入れてください';
+  const next = (ms = 150) => { if (stream) timer = setTimeout(tick, ms); };
+  const tick = async () => {
+    if (!stream || busy || video.readyState < 2) return next();
+    const scale = Math.min(1, 640 / video.videoWidth);
+    canvas.width = Math.round(video.videoWidth * scale); canvas.height = Math.round(video.videoHeight * scale);
+    ctx2d.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const hit = jsQR(ctx2d.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height, { inversionAttempts: 'dontInvert' });
+    // 同じコードが枠に残っていても、続けて何度も読まない
+    if (!hit?.data || (hit.data === last.code && Date.now() - last.at < 5000)) return next();
+    last = { code: hit.data, at: Date.now() };
+    busy = true;
+    navigator.vibrate?.(30);
+    const r = await api('POST', '/api/reception/scan', { code: hit.data });
+    busy = false;
+    showHit(r);
+    next(400);
+  };
+  const showHit = (r) => {
+    if (!r.ok) { result.replaceChildren(el('p', { class: 'msg', text: r.message })); return; }
+    const head = el('p', { class: 'scanwho' }, el('b', { class: 'n', text: `参加番号 ${r.paddle}` }), el('span', { class: 'dyn', text: r.name }));
+    if (r.mode !== 'venue') {
+      result.replaceChildren(head, el('p', { class: 'msg', text: 'オンライン参加になっています。会場参加にするときは、一覧の「会場参加にする」から切り替えてください。' }));
+      return;
+    }
+    if (r.checkedIn) { result.replaceChildren(head, el('p', { class: 'note', text: '来場確認済みです。' })); return; }
+    const msg = msgLine();
+    const ok = el('button', { class: 'btn btn-primary', type: 'button', text: '来場を確認', onclick: async () => {
+      ok.disabled = true;
+      const c = await api('POST', `/api/reception/${r.id}/checkin`);
+      if (!c.ok) { ok.disabled = false; msg.textContent = c.message; return; }
+      done++;
+      result.replaceChildren(head, el('p', { class: 'scandone', text: `来場を確認しました。参加番号 ${r.paddle} の札を渡してください。` }));
+    } });
+    result.replaceChildren(head, el('p', { class: 'note', text: `${RECV[r.receive]}・${PAY[r.payment]}。本人か確かめてから押してください。` }), ok, msg);
+    ok.focus();
+  };
+  next(0);
 }
 function qrDialog(event) {
   openDialog('会場の QR コード',

@@ -565,8 +565,14 @@ const showPaddle = (title, p) => {
   $('join').hidden = true;
   // 会場参加は、受付係の来場確認が済むまで入れない（FR-MODE-002）。確認されたら、自動で進めるようになる
   if (!p.checkedIn) {
-    $('gateWait').textContent = `受付で、参加番号 ${p.paddle} の札を受け取ってください`;
+    $('gateWait').textContent = '受付で、この画面を見せてください。来場を確認して、参加番号の札をお渡しします';
     $('enter').hidden = true;
+    // 来場確認の QR コード（受付係がスマホで読み取る。報告書 91 章）。出せないときは、参加番号を伝えれば受付の一覧から確認できる
+    getJson('/api/my/checkin-qr').then((r) => {
+      if (r.status !== 200 || !r.qrSvg || venue === false) return;
+      $('checkinQr').src = 'data:image/svg+xml;base64,' + btoa(r.qrSvg);
+      $('checkinQr').hidden = false;
+    });
     const timer = setInterval(async () => {
       const now = await getJson('/api/participation');
       if (now.status === 200 && now.checkedIn) { clearInterval(timer); showPaddle(title, now); }
@@ -584,6 +590,7 @@ const showPaddle = (title, p) => {
     return;
   }
   $('toOnline').hidden = true;
+  $('checkinQr').hidden = true;
   $('gateWait').textContent = '';
   $('enter').hidden = false; ready = true;
 };
