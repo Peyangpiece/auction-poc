@@ -164,8 +164,11 @@ function renderHistory() {
   $('count').textContent = `${S.history.filter((h) => h.valid).length}件`;
 }
 function renderStream() {
-  const show = $('showVideo').checked && !venue;
+  // 配信が設定されていない（映像の再生先がない）ときは、映像の枠ごと出さない（「映像を準備しています」が出続けるだけになるため。報告書 86 章）
+  const streaming = !!S.stream?.playbackUrl || (!!S.stream && S.stream.mode !== 'always-live'); // always-live は「配信を使わない」設定
+  const show = $('showVideo').checked && !venue && streaming;
   $('videoBox').style.display = show ? 'block' : 'none';
+  document.querySelector('main').classList.toggle('novideo', !show);
   const live = !!S.stream?.live && !!S.stream?.playbackUrl;
   $('break').style.display = live ? 'none' : 'flex';
   $('breakTitle').textContent = S.stream?.live ? '映像を準備しています' : '映像は停止中です';

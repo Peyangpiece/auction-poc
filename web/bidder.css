@@ -68,6 +68,8 @@ body.outbid .price { color: var(--board-ng); }
 .board.lead #bid[aria-disabled="true"]::after { content: ''; order: -1; flex: none; width: 20px; height: 20px; border-radius: 50%;
   background: var(--action) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 10.5l3 3 6-7' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 20px no-repeat; }
 .board.won .board-result { font-size: 20px; color: var(--board-ink); }
+/* 落札したあとは、ランプ（うりきり・最高入札）を出さない。「あなたが落札しました」と状態の札で伝わっているため（報告書 86 章） */
+.board.won .lamps { display: none; }
 .board.won:has(#msg:not(:empty)) #result { display: block; }
 .paylink { background: var(--action); border-color: var(--action); color: var(--action-ink); width: 100%; justify-content: center; text-align: center; font-size: 17px; font-weight: 600; min-height: 48px; display: flex; align-items: center; text-decoration: none; }
 .paylink[hidden] { display: none; }
@@ -81,7 +83,7 @@ body.outbid .price { color: var(--board-ng); }
 #msg[data-kind="hint"] { color: var(--board-ink-2); font-weight: 500; }
 /* 入札ボタンは、主のボタン（紺の塗り）。画面でいちばん押すところ */
 #bid { width: 100%; background: var(--action); border-color: var(--action); color: var(--action-ink); font-weight: 600; white-space: normal; min-width: 0; }
-#bid:hover:not(:disabled) { background: var(--action-hover); border-color: var(--action-hover); color: var(--action-ink); }
+#bid:hover:not([aria-disabled="true"]) { background: var(--action-hover); border-color: var(--action-hover); color: var(--action-ink); }
 /* 押せないあいだ（最高入札者・待機・中断・送信中）は、ボタンの形をやめて、状態の文字として出す */
 #bid[aria-disabled="true"] { opacity: 1; cursor: default; transform: none; background: transparent; border-color: transparent; box-shadow: none; color: var(--board-ink-2); font-size: 16px; font-weight: 600; }
 #bid:focus-visible { outline-color: var(--action); }
@@ -154,7 +156,11 @@ details dd { overflow-wrap: anywhere; }
   #videoBox { grid-column: 1; grid-row: 1; }
   .side { display: grid; gap: 24px; min-width: 0; align-content: start; grid-column: 2; grid-row: 1 / span 2; }
   .cmt { grid-column: 1; grid-row: 2; }
-  .finewrap { grid-column: 1; grid-row: 3; } /* パソコン: 注意書きは、コメントの欄の下（Tab で進む順と同じ） */
+  .finewrap { grid-column: 1; grid-row: 3; }
+  /* 映像の枠がないとき: 左の列は、コメントから始める（上に空きを残さない） */
+  main.novideo { grid-template-rows: auto 1fr; }
+  main.novideo .cmt { grid-row: 1; }
+  main.novideo .finewrap { grid-row: 2; align-self: start; } /* パソコン: 注意書きは、コメントの欄の下（Tab で進む順と同じ） */
   .board { position: relative; padding: 16px; gap: 12px; border-radius: var(--r-lg); }
   .board > * { max-width: none; }
   .board:has(#msg:not(:empty)) #result { display: block; }
@@ -275,8 +281,6 @@ details dd { overflow-wrap: anywhere; }
   .lotline #boardNo { font-size: 20px; font-weight: 600; color: var(--board-ink-2); }
   .lotline #boardNo:empty { display: none; }
   .lotname { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 22px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
-  .lotlabel { font-size: 13px; font-weight: 600; color: var(--board-ink-2); letter-spacing: 0; }
-  .board:not(.haslot) .lotlabel { display: none; }
   .board.idle .lotline { border-bottom: 0; padding-bottom: 0; }
 }
 @media (min-width: 960px) { .lotline #boardNo { font-size: 24px; } .lotname { font-size: 26px; } }
