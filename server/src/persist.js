@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
+import Database from 'better-sqlite3';
 
 const gzip = promisify(zlib.gzip); // 圧縮は、別の糸で行う（競りの最中に、入札の処理を止めない）
 
@@ -61,6 +62,10 @@ export async function restore(config, { retries = 20, waitMs = 1500, log = conso
     for (const ext of ['', '-wal', '-shm']) fs.rmSync(config.dbPath + ext, { force: true });
     fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
     fs.writeFileSync(config.dbPath, plain);
+    // 中身が壊れていないかを確かめる（壊れていたら、次の控えを試す。本番運用の評価 A9）
+    let healthy = false;
+    try { const d = new Database(config.dbPath, { readonly: true }); healthy = d.pragma('quick_check', { simple: true }) === 'ok'; d.close(); } catch { healthy = false; }
+    if (!healthy) { log(`【注意】保存先のデータベース（${rel}）が壊れています。次の控えを試します`); continue; }
     if (rel !== DB_KEY) log(`【注意】日ごとの控え（${rel}）から戻しました。それより後の書き込みは、入っていません`);
     count++;
     break;

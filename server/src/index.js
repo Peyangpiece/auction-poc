@@ -208,7 +208,9 @@ const server = http.createServer((req, res) => {
     let db = true;
     try { store.db.prepare('SELECT 1').get(); } catch { db = false; }
     res.statusCode = db ? 200 : 503;
-    return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, busy: auction.snapshot().lots.some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status)) || ['running', 'break'].includes(api.eventState()?.phase), errors: errorCount, agent: stream.view().agentConnected, ...(saver ? { persist: saver.status() } : {}) }));
+    return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, busy: auction.snapshot().lots.some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status)) || ['running', 'break'].includes(api.eventState()?.phase), errors: errorCount, agent: stream.view().agentConnected,
+      // 外からの見張り（死活監視）が、気づけるように: 保存が1分以上失敗している（本番運用の評価 A8）
+      alerts: saver && saver.status().failingSince && nowMs() - saver.status().failingSince > 60000 ? ['persist_failing'] : [], ...(saver ? { persist: saver.status() } : {}) }));
   }
   if (url.pathname === '/hooks/ivs' && req.method === 'POST') return handleEventBridge(req, res);
   if (url.pathname.startsWith('/api/')) return api.handle(req, res, url);
@@ -616,6 +618,19 @@ const sysTimer = setInterval(() => {
   lastAt = at;
 }, config.sysSampleMs);
 sysTimer.unref();
+
+// 保存先（R2）への保存が1分以上失敗し続けたら、主催者管理者へ知らせる（そのまま止まると、そのあいだの入札が失われるため。本番運用の評価 A7・A8）
+if (saver) setInterval(() => {
+  const st = saver.status();
+  if (st.failingSince && nowMs() - st.failingSince > 60000) {
+    api.alertAdmins('persist', '保存先にデータを保存できていません', [
+      `${new Date(st.failingSince + 9 * 3600000).toISOString().slice(11, 16)} から、保存先（Cloudflare R2）にデータを保存できていません。`,
+      'このあいだにサーバーが止まると、それまでの入札や操作が失われるおそれがあります。',
+      '競りの最中なら、新しい品を始めず、進行中の品を締めてから、開発の担当者に連絡してください。',
+      `理由: ${st.lastError ?? '不明'}`,
+    ]);
+  }
+}, 30000).unref();
 
 server.listen(config.port, config.host, () => {
   saver?.start();

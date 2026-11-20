@@ -15,6 +15,8 @@ const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
 // 立ち上がりを待っているあいだに出す案内（5秒ごとに、自動で開き直す）
 const STARTING_PAGE = '<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="5"><title>令和の競り</title><body style="font-family:sans-serif;text-align:center;padding:20vh 16px"><h1 style="font-size:20px">起動しています</h1><p>しばらくお待ちください。自動で開き直します。</p></body></html>';
 
+const MAINTENANCE_PAGE = '<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>令和の競り</title><body style="font-family:sans-serif;text-align:center;padding:20vh 16px"><h1 style="font-size:20px">ただいま保守の作業中です</h1><p>しばらくしてから、もう一度お試しください。</p></body></html>';
+
 // コンテナからの「保存先」あての通信を受けて、R2 に出し入れする
 export class DataStore extends WorkerEntrypoint {
   fetch(request) {
@@ -39,6 +41,17 @@ export class AuctionApp extends DurableObject {
   }
 
   async fetch(request) {
+    // 保守中（MAINTENANCE=1）: コンテナを止めて、だれもつなげないようにする。R2 の控えから手で戻すときに、
+    // 動いているコンテナに上書きされないようにするため（本番運用の評価 A9。手順は docs/05-運用手順.md の 7 章）
+    if (this.env.MAINTENANCE === '1') {
+      const container = this.ctx.container;
+      if (container?.running) {
+        container.signal(15); // 止める合図。アプリは、まだ送っていないデータを送ってから終わる
+        const exited = container.monitor().catch(() => {});
+        if ((await Promise.race([exited, scheduler.wait(60000).then(() => 'timeout')])) === 'timeout') await container.destroy('保守中');
+      }
+      return new Response(MAINTENANCE_PAGE, { status: 503, headers: { 'content-type': 'text/html; charset=utf-8', 'retry-after': '300', 'cache-control': 'no-store' } });
+    }
     // 同時に届いた通信は、1回の起動を待ち合わせる
     this.starting ??= this.startAndWait().finally(() => { this.starting = undefined; });
     try { await this.starting; } catch (err) {

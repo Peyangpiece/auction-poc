@@ -55,3 +55,20 @@ test('メールは、1通ずつ間隔をあけて送る（送信サービスの�
   assert.equal(at.length, 4);
   for (let i = 1; i < at.length; i++) assert.ok(at[i] - at[i - 1] >= 55, `間隔 ${at[i] - at[i - 1]}ms`);
 });
+
+test('保存の失敗などの緊急の知らせは、主催者管理者と主催者の連絡先へメールで送る。同じ種類は1時間に1回まで（本番運用の評価 A8）', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auction-alert-'));
+  const config = loadConfig({ POC_DATA_DIR: dir });
+  const store = openDb(config.dbPath);
+  const api = createApi({ store, config, nowMs: () => Date.now() });
+  try {
+    api.inviteStaff({ email: 'boss@example.com', name: '管理', role: 'admin' });
+    store.db.prepare("INSERT INTO settings (key, value) VALUES ('org_email', 'office@example.com') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
+    assert.equal(api.alertAdmins('persist', '保存先にデータを保存できていません', ['理由: 止まっている']), true);
+    assert.equal(api.alertAdmins('persist', '保存先にデータを保存できていません', ['理由: 止まっている']), false, '1時間に1回まで');
+    await new Promise((r) => setTimeout(r, 100));
+    const sent = fs.readFileSync(path.join(dir, 'outbox', 'outbox.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((m) => m.kind === 'alert');
+    assert.deepEqual(sent.map((m) => m.to).sort(), ['boss@example.com', 'office@example.com']);
+    assert.match(sent[0].subject, /【緊急】保存先/);
+  } finally { store.db.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});

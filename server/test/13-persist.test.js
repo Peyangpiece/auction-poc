@@ -165,3 +165,25 @@ test('送ったメールの控え・最初の管理者の控えは、保存先�
   store.db.close();
   server.close();
 });
+
+test('保存先のデータベースが壊れていたら、日ごとの控えから戻す（中身の確かめ。本番運用の評価 A9）', async () => {
+  const zlib = await import('node:zlib');
+  const bucket = fakeBucket();
+  const { server, url } = await storeServer(bucket);
+  // 正しい控え（きのう）を作る
+  const a = machine(url);
+  const storeA = openDb(a.dbPath);
+  storeA.db.exec('CREATE TABLE t_ok (v TEXT)'); storeA.db.prepare('INSERT INTO t_ok VALUES (?)').run('控え');
+  storeA.db.close();
+  await bucket.put('data/history/auction-20261201.db.gz', zlib.gzipSync(fs.readFileSync(a.dbPath)));
+  // 最新は、先頭だけデータベースの形で、中身が壊れている
+  await bucket.put('data/' + DB_KEY, zlib.gzipSync(Buffer.concat([Buffer.from('SQLite format 3\0'), Buffer.alloc(8192, 7)])));
+  const b = machine(url);
+  const logs = [];
+  await restore(b, { log: (m) => logs.push(m) });
+  const storeB = openDb(b.dbPath);
+  assert.equal(storeB.db.prepare('SELECT v FROM t_ok').get().v, '控え');
+  assert.ok(logs.some((m) => m.includes('壊れています')));
+  storeB.db.close();
+  server.close();
+});

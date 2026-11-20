@@ -898,6 +898,21 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   // 開催を、管理画面から終える（本番運用の評価 A5）。進行コンソールの「開催終了」を押し忘れた開催の、請求書を出すため。
   // いまの開催（今日・進行中）なら、進行コンソールと同じ条件（進行中の品がないこと）。過ぎた日の開催なら、残った品をすべて未実施にして終える
   const hooks = { closeOut: null, afterEnd: null };
+  /**
+   * 主催者管理者への緊急の知らせ（保存の失敗など。本番運用の評価 A8）。管理画面の「知らせ」に残し、主催者管理者と主催者の連絡先へメールで送る。
+   * 同じ種類は、1時間に1回まで
+   */
+  const alertedAt = new Map();
+  function alertAdmins(kind, subject, lines) {
+    if (nowMs() - (alertedAt.get(kind) ?? 0) < HOUR) return false;
+    alertedAt.set(kind, nowMs());
+    db.prepare('INSERT INTO notices (at, kind, body) VALUES (?, ?, ?)').run(nowMs(), 'alert', JSON.stringify({ kind, subject }));
+    const to = new Set(db.prepare("SELECT email FROM staff_accounts WHERE role = 'admin' AND active = 1 AND email IS NOT NULL").all().map((r) => r.email));
+    if (isEmail(setting('org_email'))) to.add(setting('org_email'));
+    for (const addr of to) notifier.email(addr, 'alert', subjectOf(`【緊急】${subject}`), compose(setting, { lines })).catch(() => {});
+    console.error(`[alert] ${subject}`);
+    return true;
+  }
   route('POST', '/api/events/:id/end', (ctx, body, id) => {
     const staff = needStaff(ctx, 'admin');
     const e = db.prepare('SELECT * FROM events WHERE id = ?').get(id);
@@ -1400,7 +1415,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return p;
   }
   return {
-    hooks, handle, createStaff, inviteStaff, audit, participantFromCookie, bidGate, sendEventMails, eventId: () => activeEvent()?.id ?? null,
+    hooks, alertAdmins, handle, createStaff, inviteStaff, audit, participantFromCookie, bidGate, sendEventMails, eventId: () => activeEvent()?.id ?? null,
     staffFromCookie, viewerFromCookie, signedIn, memberIdFromCookie, eventState, endedToday, setPhase, proxyTarget, billing,
   };
 }
