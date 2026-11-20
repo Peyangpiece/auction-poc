@@ -208,7 +208,7 @@ const server = http.createServer((req, res) => {
     let db = true;
     try { store.db.prepare('SELECT 1').get(); } catch { db = false; }
     res.statusCode = db ? 200 : 503;
-    return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, busy: auction.snapshot().lots.some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status)), errors: errorCount, agent: stream.view().agentConnected, ...(saver ? { persist: saver.status() } : {}) }));
+    return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, busy: auction.snapshot().lots.some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status)) || ['running', 'break'].includes(api.eventState()?.phase), errors: errorCount, agent: stream.view().agentConnected, ...(saver ? { persist: saver.status() } : {}) }));
   }
   if (url.pathname === '/hooks/ivs' && req.method === 'POST') return handleEventBridge(req, res);
   if (url.pathname.startsWith('/api/')) return api.handle(req, res, url);

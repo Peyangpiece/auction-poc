@@ -114,6 +114,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   const notifier = new Notifier(
     config.mailUrl ? httpMailSender(config.mailUrl, outboxSender(path.join(config.dataDir, 'outbox'))) : outboxSender(path.join(config.dataDir, 'outbox')),
     (failure) => db.prepare('INSERT INTO notices (at, kind, body) VALUES (?, ?, ?)').run(nowMs(), 'send_failed', JSON.stringify(failure)),
+    // 本物の送信サービスにつないでいるときは、メールを1通ずつ間隔をあけて送る（本番運用の評価 B11）
+    { intervalMs: config.mailUrl ? config.mailIntervalMs : 0 },
   );
   const setting = (key) => db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? '';
   // メールの宛名（法人は、会社名と担当者名）

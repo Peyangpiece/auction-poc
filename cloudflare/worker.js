@@ -93,6 +93,8 @@ export class AuctionApp extends DurableObject {
           ...(e.AGENT_TOKEN ? { POC_AGENT_TOKEN: e.AGENT_TOKEN } : {}),
         } : { POC_IVS_MODE: 'always-live' }),
         POC_PERSIST_URL: `http://${STORE_HOST}`,
+        // 測定の記録は、本番では要点だけにする（詳しい記録は、11分で約 330MB になる。本番運用の評価 C1）
+        POC_METRICS: 'basic',
         // お試し用: 認証番号を画面に出し、今日の開催を自動で作る（SMS がまだつながっていないため）
         ...(demo ? { POC_DEV_SHOW_CODES: '1', POC_SETUP_ARGS: '--with-event' } : {}),
         // メールの送信がつながっていれば、実際に送る。SMS は使わない（発注者の決定）ので、本番では、電話番号での認証を止める

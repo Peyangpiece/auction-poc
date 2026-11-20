@@ -42,11 +42,14 @@ export class Notifier {
    * @param {(message: object) => Promise<void>} send 1通を送る関数（失敗したら例外を投げる）
    * @param {(failure: object) => void} onGiveUp 再送しても失敗したときに呼ぶ（主催者管理者への知らせに使う）
    */
-  constructor(send, onGiveUp = () => {}, { retries = 3, waitMs = 500 } = {}) {
+  constructor(send, onGiveUp = () => {}, { retries = 3, waitMs = 500, intervalMs = 0 } = {}) {
     this.send = send;
     this.onGiveUp = onGiveUp;
     this.retries = retries;
     this.waitMs = waitMs;
+    // メールは、1通ずつ、決まった間隔をあけて送る（送信サービスの速さの上限に当たって、一斉に送ったお知らせが落ちないように。本番運用の評価 B11）
+    this.intervalMs = intervalMs;
+    this.queue = Promise.resolve();
   }
 
   async #deliver(message) {
@@ -78,6 +81,9 @@ export class Notifier {
   }
 
   email(to, kind, subject, body) {
-    return this.#deliver({ channel: 'email', to, kind, subject, body });
+    if (!this.intervalMs) return this.#deliver({ channel: 'email', to, kind, subject, body });
+    const run = this.queue.then(() => this.#deliver({ channel: 'email', to, kind, subject, body }));
+    this.queue = run.catch(() => {}).then(() => new Promise((r) => setTimeout(r, this.intervalMs)));
+    return run;
   }
 }

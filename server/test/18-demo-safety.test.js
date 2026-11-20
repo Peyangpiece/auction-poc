@@ -46,3 +46,12 @@ test('お試し用でも、ログインの認証番号は返事に入れない�
     assert.ok(!fs.existsSync(path.join(dir, 'outbox', 'outbox.ndjson')), '送ったメールの控えも消える');
   } finally { await prod.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('メールは、1通ずつ間隔をあけて送る（送信サービスの速さの上限に当たらないように。本番運用の評価 B11）', async () => {
+  const { Notifier } = await import('../src/mvp/notify.js');
+  const at = [];
+  const n = new Notifier(async () => { at.push(Date.now()); }, () => {}, { intervalMs: 60 });
+  await Promise.all([1, 2, 3, 4].map((i) => n.email(`m${i}@example.com`, 'event', '件名', '本文')));
+  assert.equal(at.length, 4);
+  for (let i = 1; i < at.length; i++) assert.ok(at[i] - at[i - 1] >= 55, `間隔 ${at[i] - at[i - 1]}ms`);
+});

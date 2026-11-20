@@ -454,6 +454,7 @@ test('休憩と開催終了（FR-CON-003、FR-EVT-003）', async () => {
     assert.equal(events.at(-1).event.resumeAt, '13:00', '次の開始予定時刻が、参加者に届く');
     await con.cmd('start', { lotId: a.id });
     await until(() => events.at(-1)?.event?.phase === 'running', 10000);
+    assert.equal((await (await fetch(t.srv.httpUrl + '/healthz')).json()).busy, true, '開催の進行中は、配る作業を止める印（busy）を出す（本番運用の評価 A2）');
     assert.match((await con.cmd('event_break', { resumeAt: '14:00' })).message, /進行中の品/);
     assert.match((await con.cmd('event_end')).message, /進行中の品/);
     await until(() => w1.lots.get(a.id)?.status === 'open');

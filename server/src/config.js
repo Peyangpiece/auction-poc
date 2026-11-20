@@ -67,7 +67,7 @@ export function loadConfig(env = process.env) {
     streamIdleWarnMs: num(env.POC_STREAM_IDLE_WARN_MS, 600000),
 
     // ---- 守り（不正な連打・大量の接続・よそのサイトからの接続への備え）。0 を指定すると、その制限を外す
-    maxConnections: num(env.POC_MAX_CONNECTIONS, 500),        // 同時接続の上限（想定の上限 100 人の5倍）
+    maxConnections: num(env.POC_MAX_CONNECTIONS, 1500),       // 同時接続の上限（300 人が2台ずつ開き、切れた接続が少し残っても足りるように。本番運用の評価 B12）
     maxConnectionsPerUser: num(env.POC_MAX_CONNECTIONS_PER_USER, 5), // 同じ会員・スタッフの同時接続（複数の端末やタブ）
     helloTimeoutMs: num(env.POC_HELLO_TIMEOUT_MS, 10000),     // つないでから、この時間内に名乗らない接続は切る
     messageRate: num(env.POC_MESSAGE_RATE, 100),              // 1接続あたりの受信の上限（1秒あたり。瞬間的にはこの2倍まで）
@@ -102,7 +102,9 @@ export function loadConfig(env = process.env) {
     // クッキーに Secure を付ける（HTTPS だけで送る）。本番は必ず 1。手前のプロキシが x-forwarded-proto: https を付ける場合は自動で付く
     cookieSecure: env.POC_COOKIE_SECURE === '1',
     // 認証の試行（認証番号の送信・照合、スタッフのログイン）の上限。同じ接続元から1分あたり。0 で外す
-    authRatePerMin: num(env.POC_AUTH_RATE, 20),
+    // 接続元ごとの、認証の試行の上限（1分あたり）。会場の Wi-Fi や携帯の回線では、多くの人が同じ接続元になるので、大きめにする
+    // （20 では、開場のとき21人目からログインできなかった。本番運用の評価 B10）。総当たりは、アカウントごとの締め出しと、認証番号の回数の上限で防ぐ
+    authRatePerMin: num(env.POC_AUTH_RATE, 150),
     // 最初の主催者管理者のメールアドレスの、SHA-256（16進）。メールアドレスそのものは、ソースに書かない。
     // このメールアドレスで「はじめての方」から進むと、主催者管理者として登録される（まだ登録が無いときの、1回だけ）
     adminEmailHash: (env.POC_ADMIN_EMAIL_SHA256 || '').trim().toLowerCase(),
