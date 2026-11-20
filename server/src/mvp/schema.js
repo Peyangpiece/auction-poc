@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS member_accounts (
   id INTEGER PRIMARY KEY,                 -- 会員番号（登録の順。画面には出さない。FR-NUM-001）
   kind TEXT NOT NULL CHECK (kind IN ('b2b','b2c')),
   name TEXT NOT NULL,
-  phone TEXT NOT NULL UNIQUE,             -- 1つの電話番号で登録できる会員は1人（FR-AUTH-001）
+  phone TEXT NOT NULL,                    -- 1つの電話番号で登録できる会員は1人（FR-AUTH-001）。重なりを禁じるのは、本人のものと確かめた番号だけ（索引 member_accounts_phone_verified）
   email TEXT NOT NULL,
   email_verified INTEGER NOT NULL DEFAULT 0,
   address TEXT NOT NULL,

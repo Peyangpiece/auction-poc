@@ -82,6 +82,22 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   }
   // 電話番号が本人のものと確かめてあるか（メールで登録した人は、まだ確かめていない）。前からの会員は、SMS で確かめてある
   if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = 'phone_verified'").get()) db.exec('ALTER TABLE member_accounts ADD COLUMN phone_verified INTEGER NOT NULL DEFAULT 1');
+  // 電話番号の重なりを禁じるのは、本人のものと確かめた番号（phone_verified = 1）だけにする。メールで登録した人の番号は、まだ確かめていないので、
+  // 他人の番号を先に入れて、本人が登録できなくなる（先取り）のを防ぐ（本番運用の評価 C）。前の版の表（phone に UNIQUE）は、作り直す
+  const memberSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'member_accounts'").get().sql;
+  if (/phone TEXT NOT NULL UNIQUE/.test(memberSql)) {
+    const fk = db.pragma('foreign_keys', { simple: true });
+    db.pragma('foreign_keys = OFF');
+    db.transaction(() => {
+      db.exec('DROP TABLE IF EXISTS member_accounts_new');
+      db.exec(memberSql.replace(/CREATE TABLE ("?)member_accounts\1/, 'CREATE TABLE member_accounts_new').replace('phone TEXT NOT NULL UNIQUE', 'phone TEXT NOT NULL'));
+      const cols = db.prepare("SELECT name FROM pragma_table_info('member_accounts')").all().map((c) => c.name).join(', ');
+      db.exec(`INSERT INTO member_accounts_new (${cols}) SELECT ${cols} FROM member_accounts; DROP TABLE member_accounts; ALTER TABLE member_accounts_new RENAME TO member_accounts;`);
+    })();
+    db.pragma(`foreign_keys = ${fk ? 'ON' : 'OFF'}`);
+  }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS member_accounts_phone_verified ON member_accounts (phone) WHERE phone_verified = 1');
+  db.exec('CREATE INDEX IF NOT EXISTS member_accounts_phone ON member_accounts (phone)');
   for (const [col, type] of [['login_id', 'TEXT'], ['password_hash', 'TEXT'], ['login_failed', 'INTEGER NOT NULL DEFAULT 0'], ['login_locked_until', 'REAL NOT NULL DEFAULT 0'], ['withdrawn_at', 'REAL'], ['withdrawn_phone', 'TEXT'], ['agreed_at', 'REAL'], ['name_kana', 'TEXT'], ['postal_code', 'TEXT'], ['prefecture', 'TEXT'], ['address1', 'TEXT'], ['address2', 'TEXT']]) {
     if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = ?").get(col)) db.exec(`ALTER TABLE member_accounts ADD COLUMN ${col} ${type}`);
   }
@@ -172,6 +188,27 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   function setCookie(ctx, token, maxAgeMs) {
     const secure = config.cookieSecure || ctx.req.headers['x-forwarded-proto'] === 'https';
     ctx.res.setHeader('set-cookie', `sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(maxAgeMs / 1000)}${secure ? '; Secure' : ''}`);
+  }
+
+  // ------------------------------------------------------------ いつもの端末（ロックの締め出しを防ぐ。本番運用の評価 C）
+  // ログイン ID（rw＋会員番号）は推測できるので、他人がわざと誤りを続けると、本人がロックで入れなくなる（締め出し）。
+  // 一度ログインに成功した端末には、署名した印（クッキー）を渡し、その端末からは、ロックを掛けず・誤りも数えない。
+  // ロックは、印のない端末（初めての端末・他人）にだけ掛かる。パスワードの総当たりは、接続元ごとの回数の制限（throttle）でも止まる
+  db.exec('CREATE TABLE IF NOT EXISTS app_secrets (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  db.prepare('INSERT OR IGNORE INTO app_secrets (key, value) VALUES (?, ?)').run('device', crypto.randomBytes(32).toString('hex'));
+  const deviceKey = db.prepare("SELECT value FROM app_secrets WHERE key = 'device'").get().value;
+  const deviceSig = (kind, id) => crypto.createHmac('sha256', deviceKey).update(`${kind}:${id}`).digest('base64url');
+  function trustDevice(ctx, kind, id) {
+    const secure = config.cookieSecure || ctx.req.headers['x-forwarded-proto'] === 'https';
+    const prev = ctx.res.getHeader('set-cookie');
+    const add = `dv_${kind}=${id}.${deviceSig(kind, id)}; Path=/api/; HttpOnly; SameSite=Strict; Max-Age=${400 * 24 * 3600}${secure ? '; Secure' : ''}`;
+    ctx.res.setHeader('set-cookie', [...(prev ? [prev].flat() : []), add]);
+  }
+  function trustedDevice(ctx, kind, id) {
+    const m = new RegExp(`(?:^|;\\s*)dv_${kind}=(\\d+)\\.([A-Za-z0-9_-]+)`).exec(ctx.req.headers.cookie ?? '');
+    if (!m || Number(m[1]) !== id) return false;
+    const want = Buffer.from(deviceSig(kind, id)), got = Buffer.from(m[2]);
+    return want.length === got.length && crypto.timingSafeEqual(want, got);
   }
   function startSession(ctx, kind, subjectId, lifetime, phone = null) {
     const token = randomToken();
@@ -396,7 +433,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     } else {
       // スタッフとして登録された番号では、会員登録できない（FR-AUTH-013）
       if (db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号では登録できません');
-      if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号は登録済みです。ログインしてください', { login: true });
+      // 確かめ済みの番号の会員がいれば、ログインへ。メールで登録した人の（確かめていない）番号とは、重なってもよい
+      if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ? AND phone_verified = 1').get(phone)) throw new HttpError(409, 'この電話番号は登録済みです。ログインしてください', { login: true });
     }
     const code = await sendOtp(phone);
     // お試し用の設定のときだけ、認証番号を画面に出せるように返す（本番では返さない）
@@ -424,7 +462,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (!isEmail(email)) errors.email = 'メールアドレスを正しく入力してください';
     // メールで登録する人は、電話番号をここで入れる（本人のものかは、まだ確かめない）
     if (byEmail && !phone) errors.phone = '電話番号を、国内の番号（例: 090-1234-5678）で入力してください';
-    else if (byEmail && (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone) || db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone))) errors.phone = 'この電話番号では登録できません。会場の受付にお申し出ください';
+    else if (byEmail && (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ? AND phone_verified = 1').get(phone) || db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone))) errors.phone = 'この電話番号では登録できません。会場の受付にお申し出ください';
     const company = text(body.company), contactName = text(body.contactName), billing = text(body.billing, 300);
     if (kind === 'b2b') {
       if (!company) errors.company = '会社名を入力してください';
@@ -437,7 +475,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     // 規約への同意は、いつも必須（発注者の決定。報告書 80 章）
     if (body.agreed !== true) errors.agreed = '利用規約とプライバシーポリシーをお読みのうえ、同意してください';
     if (Object.keys(errors).length) throw bad('入力を確かめてください', { errors });
-    if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(phone) || db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) {
+    if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ? AND phone_verified = 1').get(phone) || db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) {
       throw new HttpError(409, 'この電話番号では登録できません');
     }
     const now = nowMs();
@@ -536,7 +574,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (!m) throw new HttpError(404, '会員が見つかりません');
     const phone = phoneOf(body), reason = String(body.reason ?? '').trim().slice(0, 500);
     if (!reason) throw bad('本人を確かめた方法を、入力してください');
-    if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ? AND id <> ?').get(phone, id) || db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号は、すでに使われています');
+    if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ? AND phone_verified = 1 AND id <> ?').get(phone, id) || db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号は、すでに（本人のものと確かめた番号として）使われています');
     db.prepare('UPDATE member_accounts SET phone = ?, phone_verified = 1, updated_at = ? WHERE id = ?').run(phone, nowMs(), id); // 受付で本人を確かめた番号
     db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ?").run(id); // 古い番号でのログインを切る
     audit(ctx, 'member.phone_change', { target: `member:${id}`, reason });
@@ -560,14 +598,17 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const m = db.prepare('SELECT * FROM member_accounts WHERE login_id = ? AND withdrawn_at IS NULL AND approved_at IS NOT NULL').get(normLoginId(body.loginId));
     if (!m || !m.password_hash) throw fail;
     const now = nowMs();
-    if (m.login_locked_until > now) throw new HttpError(423, `誤りが続いたため、しばらくログインできません。${Math.ceil((m.login_locked_until - now) / MIN)} 分後にやり直すか、「パスワードを忘れた方」からお入りください`);
+    const trusted = trustedDevice(ctx, 'm', m.id); // いつもの端末には、ロックを掛けない
+    if (m.login_locked_until > now && !trusted) throw new HttpError(423, `誤りが続いたため、しばらくログインできません。${Math.ceil((m.login_locked_until - now) / MIN)} 分後にやり直すか、「パスワードを忘れた方」からお入りください`);
     if (!passwordMatches(body.password, m.password_hash)) {
+      if (trusted) throw fail;
       const failed = m.login_failed + 1;
       db.prepare('UPDATE member_accounts SET login_failed = ?, login_locked_until = ? WHERE id = ?').run(failed >= LOGIN_FAIL_MAX ? 0 : failed, failed >= LOGIN_FAIL_MAX ? now + LOGIN_LOCK : 0, m.id);
       throw fail;
     }
     db.prepare('UPDATE member_accounts SET login_failed = 0, login_locked_until = 0 WHERE id = ?').run(m.id);
     startSession(ctx, 'member', m.id, MEMBER_IDLE);
+    trustDevice(ctx, 'm', m.id);
     audit({ ...ctx, member: m }, 'member.login', { target: `member:${m.id}`, after: { via: 'password' } });
     return { ok: true, member: memberView(m) };
   });
@@ -592,6 +633,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const member = target.member;
     if (!member) throw new HttpError(400, '認証番号が正しくないか、期限が切れています。番号を送り直してください', { resend: true });
     startSession(ctx, 'member', member.id, MEMBER_IDLE, 'otp');
+    trustDevice(ctx, 'm', member.id);
     audit({ ...ctx, member }, 'member.login', { target: `member:${member.id}`, after: { via: 'code' } });
     return { ok: true, member: memberView(member) };
   });
@@ -643,13 +685,15 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const fail = new HttpError(401, 'メールアドレスかパスワードが違います。はじめてログインする方は、下の「はじめての方」からお進みください');
     if (!staff || !staff.active) throw fail;
     const now = nowMs();
-    if (staff.locked_until > now) throw new HttpError(423, `誤りが続いたため、ロックしています。${Math.ceil((staff.locked_until - now) / MIN)} 分後にやり直してください`);
+    const trusted = trustedDevice(ctx, 's', staff.id); // いつもの端末には、ロックを掛けない（締め出しを防ぐ）
+    if (staff.locked_until > now && !trusted) throw new HttpError(423, `誤りが続いたため、ロックしています。${Math.ceil((staff.locked_until - now) / MIN)} 分後にやり直してください`);
     if (!staff.password_hash || !verifyPassword(body.password ?? '', staff.password_hash)) {
-      if (staff.password_hash) staffFailed(ctx, staff, now);
+      if (staff.password_hash && !trusted) staffFailed(ctx, staff, now);
       throw fail;
     }
     db.prepare('UPDATE staff_accounts SET failed_count = 0, locked_until = 0 WHERE id = ?').run(staff.id);
     startSession(ctx, 'staff', staff.id, STAFF_LIFETIME);
+    trustDevice(ctx, 's', staff.id);
     audit({ ...ctx, staff }, 'staff.login', { target: `staff:${staff.id}` });
     return { ok: true, staff: staffOut(staff) };
   });
@@ -765,7 +809,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (!fullName) throw bad('名前を入力してください');
     const tel = phone ? normalizePhone(phone) : null;
     if (phone && !tel) throw bad('電話番号を、国内の番号で入力してください');
-    if (tel && db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(tel)) throw new HttpError(409, 'この電話番号は、会員として登録されています');
+    if (tel && db.prepare('SELECT 1 FROM member_accounts WHERE phone = ? AND phone_verified = 1').get(tel)) throw new HttpError(409, 'この電話番号は、会員として登録されています');
     if (db.prepare('SELECT 1 FROM staff_accounts WHERE lower(email) = ? OR login_id = ?').get(mail, mail)) throw new HttpError(409, 'このメールアドレスは、スタッフとして登録済みです');
     const info = db.prepare("INSERT INTO staff_accounts (login_id, email, name, role, phone, password_hash, totp_secret, created_at) VALUES (?,?,?,?,?,'',?,?)")
       .run(mail, mail, fullName, role, tel, newTotpSecret(), nowMs());
@@ -794,7 +838,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (!fullName) throw bad('名前を入力してください');
     const tel = phone ? normalizePhone(phone) : null;
     if (phone && !tel) throw bad('電話番号を、国内の番号で入力してください');
-    if (tel && db.prepare('SELECT 1 FROM member_accounts WHERE phone = ?').get(tel)) throw new HttpError(409, 'この電話番号は、会員として登録されています');
+    if (tel && db.prepare('SELECT 1 FROM member_accounts WHERE phone = ? AND phone_verified = 1').get(tel)) throw new HttpError(409, 'この電話番号は、会員として登録されています');
     if (db.prepare('SELECT 1 FROM staff_accounts WHERE login_id = ?').get(id)) throw new HttpError(409, 'このログイン ID は使われています');
     const password = given || randomToken(12);
     const secret = newTotpSecret();
@@ -1229,7 +1273,10 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     needStaff(ctx, 'admin', 'auctioneer', 'reception');
     const event = activeEvent();
     if (!event) throw new HttpError(409, '本日の開催はありません');
-    const m = db.prepare('SELECT * FROM member_accounts WHERE phone = ?').get(phoneOf(body));
+    // 同じ番号の会員（確かめていない番号）が複数いるときは、どの人か決められないので、止める
+    const found = db.prepare('SELECT * FROM member_accounts WHERE phone = ? AND withdrawn_at IS NULL ORDER BY phone_verified DESC, id').all(phoneOf(body));
+    if (found.length > 1 && !found[0].phone_verified) throw new HttpError(409, 'この電話番号で登録した会員が複数います。主催者管理者が、会員の一覧で本人を確かめて、電話番号を確定してください');
+    const m = found[0];
     if (!m) throw new HttpError(404, 'この電話番号の会員が見つかりません。先に、会員登録をしてもらってください');
     // 承認済みで、退会・却下・停止になっていない会員だけ（本番運用の評価 B6）
     if (!m.approved_at || m.rejected_at || m.withdrawn_at) throw new HttpError(409, 'この会員は、まだ承認されていないか、退会・却下されています。主催者管理者に確かめてください');

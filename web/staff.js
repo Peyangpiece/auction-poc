@@ -214,7 +214,8 @@ async function membersPanel() {
     // 区分の列はなくし、法人のときだけ名前の横に印を付ける（ほとんどが個人のため。報告書 83 章）
     el('td', { class: 'dyn' }, m.kind === 'b2b' ? [`${m.company}　${m.contactName}`, ' ', el('span', { class: 'tag', text: '法人' })] : m.name),
     el('td', { text: m.loginId ?? '' }),
-    el('td', { class: 'n', text: telFmt(m.phone) }),
+    // 本人のものと確かめていない番号（メールで登録した人）には、印を付ける。同じ番号の申し込みがほかにもありうるため
+    el('td', { class: 'n', text: telFmt(m.phone) + (m.phoneVerified || m.withdrawn ? '' : '（未確認）') }),
     el('td', { class: 'dyn', text: m.email + (m.emailVerified ? '' : '（未確認）') }),
     el('td', { class: 'dyn' }, m.rejected ? '承認しなかった' : m.withdrawn ? '退会' : !m.approved ? el('span', { class: 'warn', text: '承認待ち' }) : m.suspendedBy === 'manual' ? el('span', { class: 'warn', text: `停止中: ${m.suspendReason}` })
       : m.suspendedBy === 'unpaid' ? el('span', { class: 'warn', text: '未払いによる停止（消し込むと、自動で解ける）' }) : '利用中'),

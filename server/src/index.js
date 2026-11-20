@@ -644,8 +644,19 @@ server.listen(config.port, config.host, () => {
 });
 
 // 思いがけないエラーで、サーバーごと止まらないようにする（競りの最中に、全員の接続が切れるのを防ぐ）。記録して、続ける
-process.on('uncaughtException', (err) => { if (err?.syscall === 'listen') { console.error(err); process.exit(1); } errorCount++; console.error('[uncaught]', err); });
-process.on('unhandledRejection', (err) => { errorCount++; console.error('[unhandled]', err); });
+// 思いがけないエラーは、主催者管理者へも知らせる（1時間に1回まで。中身は、エラーの種類と1行目だけ。本番運用の評価 C3）
+function alertUnexpected(label, err) {
+  try {
+    const first = String(err?.message ?? err).split('\n')[0].slice(0, 200);
+    api.alertAdmins('unexpected', 'サーバーで思いがけないエラーが起きました', [
+      'サーバーで、思いがけないエラーが起きました。サーバーは止めずに、動かし続けています。',
+      '競りの画面と、管理画面の「記録」で、おかしな動きがないかを確かめてください。続くときは、開発の担当者に知らせてください。',
+      '', `種類: ${label}（${err?.name ?? 'Error'}）`, `内容: ${first}`, `これまでの件数: ${errorCount}`,
+    ]);
+  } catch { /* 知らせられなくても、続ける */ }
+}
+process.on('uncaughtException', (err) => { if (err?.syscall === 'listen') { console.error(err); process.exit(1); } errorCount++; console.error('[uncaught]', err); alertUnexpected('uncaughtException', err); });
+process.on('unhandledRejection', (err) => { errorCount++; console.error('[unhandled]', err); alertUnexpected('unhandledRejection', err); });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, async () => {

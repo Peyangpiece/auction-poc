@@ -584,3 +584,34 @@ test('個人情報の保存期間: 退会でログインの情報をすぐ消し
     assert.throws(() => db.prepare('DELETE FROM audit_log WHERE id = 1').run(), /追記だけ/);
   } finally { await t.close(); }
 });
+
+test('締め出しを防ぐ: 他人が誤りを続けてロックしても、一度ログインに成功した端末からは入れる（本番運用の評価 C。報告書 111 章）', async () => {
+  const t = await setup();
+  try {
+    const s = t.api.createStaff({ loginId: 'uketsuke9', name: '受付の人', role: 'reception' });
+    const login = (password, cookie = '') => fetch(`${t.base}/api/staff/login`, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify({ loginId: 'uketsuke9', password }) });
+    const ok = await login(s.initialPassword);
+    assert.equal(ok.status, 200);
+    const dv = ok.headers.getSetCookie().find((c) => c.startsWith('dv_s='));
+    assert.ok(dv, 'いつもの端末の印を渡す');
+    assert.match(dv, /HttpOnly; SameSite=Strict/);
+    const device = dv.split(';')[0];
+    for (let i = 0; i < 5; i++) await login('wrong-password-x');
+    assert.equal((await login(s.initialPassword)).status, 423, '印のない端末は、ロックされる');
+    assert.equal((await login(s.initialPassword, device.replace(/.$/, (c) => (c === 'A' ? 'B' : 'A')))).status, 423, '印を書き換えると、効かない');
+    assert.equal((await login('wrong-password-x', device)).status, 401, 'いつもの端末の誤りは、数えない');
+    assert.equal((await login(s.initialPassword, device)).status, 200, 'いつもの端末からは、ロック中でも入れる');
+  } finally { await t.close(); }
+});
+
+test('電話番号の先取りを防ぐ: メールで登録した人の（確かめていない）番号は、ほかの人の登録を止めない（本番運用の評価 C。報告書 111 章）', async () => {
+  const t = await setup();
+  try {
+    const db = t.store.db;
+    db.prepare("INSERT INTO member_accounts (kind, name, phone, email, address, phone_verified, created_at, updated_at) VALUES ('b2c', '先取り', '09011110301', 'x@example.com', '東京都', 0, 1, 1)").run();
+    const b = t.browser();
+    assert.equal((await register(t, b, '090-1111-0301')).status, 200, '本人は、SMS で確かめて登録できる');
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM member_accounts WHERE phone = '09011110301'").get().n, 2);
+    assert.throws(() => db.prepare("INSERT INTO member_accounts (kind, name, phone, email, address, phone_verified, created_at, updated_at) VALUES ('b2c', '二人目', '09011110301', 'y@example.com', '東京都', 1, 1, 1)").run(), /UNIQUE/, '確かめた番号は、重ならない');
+  } finally { await t.close(); }
+});

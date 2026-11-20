@@ -167,8 +167,11 @@ class Link {
     // 応答を待っている操作（入札など）を、時間切れまで待たせない。届いたかどうかは、再接続後の表示で分かる
     for (const [key, w] of this.waiters) { this.waiters.delete(key); w(null); }
     this.onStatus(false, cause === 'busy' ? '混み合っています。自動でつなぎ直します' : undefined);
-    // 切れてから1秒後に1回目を試し、その後は2秒ごとに試す（FR-UI-001）。混み合っているときは、2〜6秒の間でばらして試す（一斉につなぎ直さない）
-    const wait = cause === 'busy' ? 2000 + Math.random() * 4000 : this.attempt === 0 ? 1000 : 2000;
+    // 切れてから約1秒後に1回目を試し、その後は約2秒ごとに試す（FR-UI-001）。サーバーの入れ替えで全員が同時に切れても、
+    // 同じ瞬間につなぎ直さないように、±0.5秒の幅でばらす（平均は 1秒・2秒のまま。本番運用の評価 C7）。
+    // 混み合っているときは、2〜6秒の間でばらして試す
+    const jitter = (Math.random() - 0.5) * 1000;
+    const wait = cause === 'busy' ? 2000 + Math.random() * 4000 : (this.attempt === 0 ? 1000 : 2000) + jitter;
     this.attempt++;
     setTimeout(() => this.connect(), wait);
   }
