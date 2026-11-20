@@ -1,11 +1,11 @@
 // スタッフ（登録・ログイン・二段階認証・パスワード）（報告書 119 章で、api.js から分けた。中身は、分ける前と同じ）
 import QRCode from 'qrcode';
-import { DAY, HOUR, HttpError, LOCK_AFTER, LOCK_FOR, MIN, ROLE_LABEL, STAFF_LIFETIME, bad } from './shared.js';
-import { hashPassword, isEmail, newTotpSecret, normalizePhone, otpauthUrl, randomToken, safeEqual, sha256, verifyPassword } from './security.js';
+import { DAY, HOUR, HttpError, LOCK_AFTER, STAFF_FAIL_GLOBAL, LOCK_FOR, MIN, ROLE_LABEL, STAFF_LIFETIME, bad, siteOrigin, requestOrigin } from './shared.js';
+import { hashPassword, isEmail, newTotpSecret, normalizePhone, otpauthUrl, randomToken, safeEqual, sha256, verifyPassword, verifyPasswordAsync } from './security.js';
 import { compose, jpDay, subjectOf } from './mails.js';
 
 export function createStaffApi(deps) {
-  const { audit, config, db, dropLogin, healthDetail, memberView, nameOf, needStaff, newPassword, notifier, nowMs, route, setting, startSession, throttle, trustDevice, trustedDevice } = deps;
+  const { audit, config, db, loginGuard, dropLogin, healthDetail, memberView, nameOf, needStaff, newPassword, notifier, nowMs, route, setting, startSession, throttle, trustDevice, trustedDevice } = deps;
   // ------------------------------------------------------------ スタッフ
   // スタッフのログイン: メールアドレスとパスワード（発注者の指示。認証アプリのコードは、使わなくなった）。
   // メールアドレスを登録していない、前からのアカウントは、ログイン ID でも入れる
@@ -13,14 +13,16 @@ export function createStaffApi(deps) {
     const id = String(raw ?? '').trim().toLowerCase();
     return (id.includes('@') ? db.prepare('SELECT * FROM staff_accounts WHERE lower(email) = ?').get(id) : db.prepare('SELECT * FROM staff_accounts WHERE login_id = ?').get(id)) ?? null;
   };
-  const staffFailed = (ctx, staff, now) => {
-    const failed = staff.failed_count + 1;
-    const lock = failed >= LOCK_AFTER;
-    db.prepare('UPDATE staff_accounts SET failed_count = ?, locked_until = ? WHERE id = ?').run(lock ? 0 : failed, lock ? now + LOCK_FOR : 0, staff.id);
-    if (lock) audit({ ...ctx, system: true }, 'staff.locked', { target: `staff:${staff.id}` });
+  // 止めは2つ（会員と同じ。報告書 121 章）: この接続元からの誤り5回（この接続元だけを止める）と、接続元をまたいだ誤り25回（全体を止める）
+  const staffFailed = (ctx, staff, now, guard) => {
+    const pair = guard.failed(now);
+    const failed = db.prepare('UPDATE staff_accounts SET failed_count = failed_count + 1 WHERE id = ? RETURNING failed_count').get(staff.id)?.failed_count ?? 0;
+    const lock = failed >= STAFF_FAIL_GLOBAL;
+    if (lock) db.prepare('UPDATE staff_accounts SET failed_count = 0, locked_until = ? WHERE id = ?').run(now + LOCK_FOR, staff.id);
+    if (lock || pair) audit({ ...ctx, system: true }, 'staff.locked', { target: `staff:${staff.id}`, after: { scope: lock ? 'all' : 'ip' } });
   };
   const staffOut = (staff) => ({ loginId: staff.login_id, email: staff.email ?? null, name: staff.name, role: staff.role, roleLabel: ROLE_LABEL[staff.role] });
-  route('POST', '/api/staff/login', (ctx, body) => {
+  route('POST', '/api/staff/login', async (ctx, body) => {
     throttle(ctx);
     const staff = staffByLogin(body.email ?? body.loginId);
     // どれが違ったか（登録の有無・パスワードが未登録か）は、伝えない
@@ -28,11 +30,19 @@ export function createStaffApi(deps) {
     if (!staff || !staff.active) throw fail;
     const now = nowMs();
     const trusted = trustedDevice(ctx, 's', staff.id); // いつもの端末には、ロックを掛けない（締め出しを防ぐ）
-    if (staff.locked_until > now && !trusted) throw new HttpError(423, `誤りが続いたため、ロックしています。${Math.ceil((staff.locked_until - now) / MIN)} 分後にやり直してください`);
-    if (!staff.password_hash || !verifyPassword(body.password ?? '', staff.password_hash)) {
-      if (staff.password_hash && !trusted) staffFailed(ctx, staff, now);
+    const locked = (until) => new HttpError(423, `誤りが続いたため、ロックしています。${Math.ceil((until - now) / MIN)} 分後にやり直してください`);
+    const guard = loginGuard('s', staff, ctx, { max: LOCK_AFTER, lockMs: LOCK_FOR });
+    const until = Math.max(staff.locked_until > now ? staff.locked_until : 0, guard.lockedUntil(now));
+    if (until && !trusted) throw locked(until);
+    if (!staff.password_hash || !(await verifyPasswordAsync(body.password ?? '', staff.password_hash))) {
+      if (staff.password_hash && !trusted) staffFailed(ctx, staff, now, guard);
       throw fail;
     }
+    // 照合のあいだに、止められた・パスワードが変わったかもしれないので、読み直す
+    const fresh = db.prepare('SELECT active, password_hash, locked_until FROM staff_accounts WHERE id = ?').get(staff.id);
+    if (!fresh?.active || fresh.password_hash !== staff.password_hash) throw fail;
+    if (!trusted && (fresh.locked_until > now || guard.lockedUntil(now))) throw locked(Math.max(fresh.locked_until, guard.lockedUntil(now)));
+    guard.passed();
     db.prepare('UPDATE staff_accounts SET failed_count = 0, locked_until = 0 WHERE id = ?').run(staff.id);
     startSession(ctx, 'staff', staff.id, STAFF_LIFETIME);
     trustDevice(ctx, 's', staff.id);
@@ -203,7 +213,7 @@ export function createStaffApi(deps) {
     // 入口（プロキシ）が付けた値だけを信用する。どれも無ければ、送らない（偽のサイトへのリンクを、本人あてに送らせないため）
     const trusted = config.siteUrl || setting('site_url') || (config.trustProxy && ctx.req.headers['x-forwarded-host'] ? `https://${ctx.req.headers['x-forwarded-host']}` : '');
     if (!ctx.staff && !trusted && !config.devShowCodes) { console.error('[staff] サイトの URL が決まっていないので、設定用のメールを送りません（POC_SITE_URL を入れてください）'); return {}; }
-    const origin = trusted || `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${ctx.req.headers.host}`;
+    const origin = trusted || requestOrigin(config, ctx.req);
     // 1回だけ使える合言葉を作り直す（前のリンクは、使えなくなる）。期限は7日
     const token = randomToken(32);
     db.prepare('UPDATE staff_accounts SET setup_hash = ?, setup_expires = ? WHERE id = ?').run(sha256('setup:' + token), nowMs() + SETUP_LIFETIME, s.id);
@@ -255,7 +265,7 @@ export function createStaffApi(deps) {
     const password = newPassword();
     db.prepare('UPDATE member_accounts SET login_id = ?, password_hash = ?, login_failed = 0, login_locked_until = 0, updated_at = ? WHERE id = ?').run(loginId, hashPassword(password), nowMs(), m.id);
     db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ?").run(m.id); // 前のパスワードでのログインは切る
-    const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
+    const origin = siteOrigin(config, ctx.req);
     const sent = await notifier.email(m.email, 'credentials', subject, compose(setting, { name: nameOf(m), lines: [
       ...lead,
       '',

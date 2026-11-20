@@ -172,3 +172,12 @@ test('送れなかったお知らせは、次の見回りで送り直す。同�
     assert.equal(hits, 4);
   } finally { await t.close(); await new Promise((r) => mailer.close(r)); }
 });
+
+test('返品特約の「仮の文言」の印は、利用者には見せない。主催者管理者の設定には、残る（報告書 120 章）', async () => {
+  const t = await setup();
+  try {
+    const pub = (await (await fetch(t.base + '/api/terms')).json()).returnPolicy;
+    assert.ok(pub.length > 10 && !/【仮/.test(pub), pub);
+    assert.match((await t.admin.get('/api/settings')).json.returnPolicy, /^【仮/);
+  } finally { await t.close(); }
+});

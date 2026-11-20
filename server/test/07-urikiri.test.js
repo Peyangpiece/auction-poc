@@ -88,7 +88,7 @@ test('最低落札額の入力がないロットは、オークショニアが�
   assert.equal(closed.status, 'unsold', '押さずに締めると、流札');
 });
 
-test('最低落札額が開始値と同じなら、最初の入札でランプが点く。設定の誤りは拒否する', async () => {
+test('最低落札額が開始価格と同じなら、最初の入札でランプが点く。設定の誤りは拒否する', async () => {
   const same = await createLot(A, 9500, null, 'テスト品', 9500);
   assert.deepEqual([same.reservePrice, same.urikiri], [9500, false], '最低落札額は、そのまま持つ（入札の前は、まだ点かない）');
   await A.cmd('start', { lotId: same.id });

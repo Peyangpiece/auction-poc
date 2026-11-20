@@ -47,8 +47,7 @@ function onMessage(msg) {
   switch (msg.type) {
     case 'welcome': case 'snapshot':
       // 開催が切り替わっていたら（前の開催の画面を開いたままだった）、読み込み直して、最初からにする
-      if (S.eventKey !== undefined && S.eventKey !== (msg.event?.id ?? null)) return location.reload();
-      S.eventKey = msg.event?.id ?? null;
+      if (reloadOnNewEvent(S, msg)) return;
       S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history; showEvent(msg.event ?? null, !msg.event && !!msg.ended); render(); break;
     case 'lot': {
       const prev = S.lots.get(msg.lot.id);

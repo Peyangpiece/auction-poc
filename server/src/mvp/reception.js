@@ -1,12 +1,12 @@
 // 受付（来場確認・入札できるかどうかの判定）（報告書 119 章で、api.js から分けた。中身は、分ける前と同じ）
 import QRCode from 'qrcode';
-import { HttpError, bad } from './shared.js';
+import { HttpError, bad, siteOrigin } from './shared.js';
 import { randomToken, sha256 } from './security.js';
 
 export function createReception(deps) {
   const { PAYMENT, RECEIVE, activeEvent, audit, billing, config, db, loadSession, needMember, needStaff, nowMs, participant, phoneOf, route } = deps;
   // ------------------------------------------------------------ 受付（来場確認。FR-MODE-002・004。主催者管理者・進行役・受付係）
-  const venueUrl = (ctx, event) => `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}/bidder.html?venue=${event.venue_code}`;
+  const venueUrl = (ctx, event) => `${siteOrigin(config, ctx.req)}/bidder.html?venue=${event.venue_code}`;
   const ensureVenueCode = (event) => {
     if (!event.venue_code) { event.venue_code = randomToken(9); db.prepare('UPDATE events SET venue_code = ? WHERE id = ?').run(event.venue_code, event.id); }
     return event;

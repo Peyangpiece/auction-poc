@@ -3,7 +3,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 
 // 画面のスクリプトが、common.js・site.js・外の再生ライブラリから受け取る名前
-const SHARED = 'params yen STATE_LABEL jstShort IVSPlayer setKeepCaret localNow jst takeToken Link showOverlay $ el setupNav api onSubmit telFmt jpDay field personFields markTab tabKeys dateFmt'.split(' ');
+const SHARED = 'params yen STATE_LABEL jstShort IVSPlayer setKeepCaret localNow jst takeToken Link showOverlay $ el setupNav api onSubmit telFmt jpDay field personFields markTab tabKeys dateFmt reloadOnNewEvent'.split(' ');
 
 export default [
   { ignores: ['node_modules/**', 'agent/node_modules/**', 'data/**', 'web/vendor/**', '**/*.min.js', '.wrangler/**'] },

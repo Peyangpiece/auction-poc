@@ -7,7 +7,7 @@
 import { nowMs } from './clock.js';
 import { minimumBid, minimumAllowed, validateTable } from './ladder.js';
 
-const MAX_AMOUNT = 1e10; // 金額の上限（開始値の上限と同じ）
+const MAX_AMOUNT = 1e10; // 金額の上限（開始価格の上限と同じ）
 /** 1回の入札で入れられる、いちばん高い額（min = 入札できる最も低い額） */
 export const maxAllowed = (min) => Math.min(MAX_AMOUNT, Math.max(min * 2, min + 100000));
 
@@ -154,7 +154,7 @@ export class Auction {
     const min = minimumAllowed(lot.start_price, lot.current_price);
     if (item.amount < min) return 'BELOW_MINIMUM';
     // 上限: 1人の入札で、競りを止められないようにする（けた外れの額を入れると、ほかの人が入札できなくなる）。
-    // 絶対の上限は、開始値と同じ 100億円。1回の入札で上げられるのは、「入札できる最も低い額の2倍」か「＋10万円」の、大きいほうまで
+    // 絶対の上限は、開始価格と同じ 100億円。1回の入札で上げられるのは、「入札できる最も低い額の2倍」か「＋10万円」の、大きいほうまで
     // （10倍だと、組んだ2人が交互に入れて、1秒たらずで上限まで上げられた。2倍でも、組めば上げられるが、進行役が気づいて「中断」できる速さになる）
     if (item.amount > MAX_AMOUNT || item.amount > maxAllowed(min)) return 'TOO_HIGH';
     return 'ACCEPTED';
@@ -207,7 +207,7 @@ export class Auction {
   // ---------------------------------------------------------------- 進行役の操作（8.6 の状態遷移表）
   #processCommand(item) {
     const { q } = this.store;
-    let lot = q.lot.get(item.lotId); // 開始値をいっしょに決めて始めるときは、読み直す
+    let lot = q.lot.get(item.lotId); // 開始価格をいっしょに決めて始めるときは、読み直す
     const fail = (message) => {
       item.reply({ type: 'cmd_result', reqId: item.reqId, ok: false, action: item.action, lotId: item.lotId, message });
       this.metrics.write('cmd', { seq: item.seq, lotId: item.lotId, action: item.action, ok: false, message, receivedAt: item.receivedAt });
@@ -224,17 +224,17 @@ export class Auction {
         { const why = this.lotGate(); if (why) return fail(why); }
         if (this.eventId() !== null && lot.event_id !== this.eventId()) return fail('この品は、いまの開催の品ではありません');
         if (q.busyLot.get(lot.id, lot.event_id)) return fail('進行中の品がほかにあります（同時に1つまで）');
-        // 開始値をいっしょに送ってきたら、先に開始値を決めてから始める（1つの操作で。オークショニアの「開始値を入力 → 競りを開始」）
+        // 開始価格をいっしょに送ってきたら、先に開始価格を決めてから始める（1つの操作で。オークショニアの「開始価格を入力 → 競りを開始」）
         if (item.amount !== undefined && item.amount !== null && item.amount !== '') {
           const amount = Number(item.amount);
-          if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1e10) return fail('開始値を、1円以上の整数で入れてください');
-          const reserve = lot.reserve_price // 最低落札額は、開始値を変えても、そのまま（なくすと、ランプが点かなくなる。報告書 89 章）;
+          if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1e10) return fail('開始価格を、1円以上の整数で入れてください');
+          const reserve = lot.reserve_price // 最低落札額は、開始価格を変えても、そのまま（なくすと、ランプが点かなくなる。報告書 89 章）;
           this.store.tx(() => {
             q.setStartPrice.run(amount, reserve, item.receivedAt, lot.id);
             q.insertEvent.run(this.nextSeq(), lot.id, 'set_start', item.receivedAt, item.actor.name, JSON.stringify({ from: lot.start_pending ? null : lot.start_price, to: amount, withStart: true }));
           });
           lot = q.lot.get(lot.id);
-        } else if (lot.start_pending) return fail('開始値が決まっていません。開始値を入れてから始めてください');
+        } else if (lot.start_pending) return fail('開始価格が決まっていません。開始価格を入れてから始めてください');
         this.#beginOrPrepare(lot, 'waiting', item.actor.name);
         break;
       }
@@ -250,14 +250,14 @@ export class Auction {
       }
       // ---- オークショニアの操作（発注者の指示。報告書 73 章）
       case 'set_start': {
-        // 開始値の設定: まだ入札のない品だけ（入札があると、価格の基準が変わってしまう）
-        if (!['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(s)) return fail(`「${stateName}」の品は、開始値を変えられません`);
-        if (lot.current_bid_seq) return fail('入札があるので、開始値は変えられません');
+        // 開始価格の設定: まだ入札のない品だけ（入札があると、価格の基準が変わってしまう）
+        if (!['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(s)) return fail(`「${stateName}」の品は、開始価格を変えられません`);
+        if (lot.current_bid_seq) return fail('入札があるので、開始価格は変えられません');
         const amount = Number(item.amount);
-        if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1e10) return fail('開始値を、1円以上の整数で入れてください');
-        if (amount === lot.start_price && !lot.start_pending) return fail('いまの開始値と同じです');
-        // 最低落札額が新しい開始値以下になるなら、最低落札額はなくなる（最初の入札で必ず届くため）
-        const reserve = lot.reserve_price // 最低落札額は、開始値を変えても、そのまま（なくすと、ランプが点かなくなる。報告書 89 章）;
+        if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1e10) return fail('開始価格を、1円以上の整数で入れてください');
+        if (amount === lot.start_price && !lot.start_pending) return fail('いまの開始価格と同じです');
+        // 最低落札額が新しい開始価格以下になるなら、最低落札額はなくなる（最初の入札で必ず届くため）
+        const reserve = lot.reserve_price // 最低落札額は、開始価格を変えても、そのまま（なくすと、ランプが点かなくなる。報告書 89 章）;
         this.store.tx(() => {
           q.setStartPrice.run(amount, reserve, item.receivedAt, lot.id);
           q.insertEvent.run(item.seq, lot.id, 'set_start', item.receivedAt, item.actor.name, JSON.stringify({ from: lot.start_pending ? null : lot.start_price, to: amount, reserveCleared: lot.reserve_price !== null && reserve === null }));
@@ -503,11 +503,11 @@ export class Auction {
     // 開始価格は、空でもよい（品名だけ登録し、オークショニアが開始のときに決める。発注者の指示。報告書 76 章）。そのあいだは仮に 1 を入れておく
     const pending = startPrice === null || startPrice === undefined || startPrice === '' || startPrice === 0;
     const start = pending ? 1 : Number(startPrice);
-    if (!Number.isSafeInteger(start) || start <= 0) throw new Error('開始値は1円以上の整数にしてください');
+    if (!Number.isSafeInteger(start) || start <= 0) throw new Error('開始価格は1円以上の整数にしてください');
     const reserve = reservePrice === null || reservePrice === undefined || reservePrice === '' ? null : Number(reservePrice);
     if (reserve !== null) {
-      if (!Number.isSafeInteger(reserve) || reserve < start) throw new Error('最低落札額は、開始値以上の整数にしてください');
-      // 開始値と同じ最低落札額は、そのまま持つ（最初の入札で届き、ランプが点く。報告書 89 章）
+      if (!Number.isSafeInteger(reserve) || reserve < start) throw new Error('最低落札額は、開始価格以上の整数にしてください');
+      // 開始価格と同じ最低落札額は、そのまま持つ（最初の入札で届き、ランプが点く。報告書 89 章）
     }
     if (!String(title ?? '').trim()) throw new Error('品名を入力してください');
     if (String(title).trim().length > 100) throw new Error('品名は、100文字以内にしてください');

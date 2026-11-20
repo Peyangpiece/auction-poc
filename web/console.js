@@ -35,7 +35,7 @@ function render() {
   $('status').dataset.st = st ?? 'idle';
   $('lotNo').textContent = lot ? `No.${lot.lotNo}` : '';
   $('title').textContent = lot ? lot.title : '進行中の品はありません';
-  $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札額' : lot.currentPrice === null ? '開始値' : '現在価格';
+  $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札額' : lot.currentPrice === null ? '開始価格' : '現在価格';
   $('price').textContent = lot ? yen(lot.currentPrice ?? lot.startPrice) : '';
   // 落札の条件は、うりきり（最低落札額に届いている）と、最高入札者がいることの両方
   setLamp('urikiri', !!lot?.urikiri, !lot || lot.reservePrice === null ? '' : `最低落札額 ${yen(lot.reservePrice)}`);
@@ -56,8 +56,8 @@ function render() {
   const show = (id, on) => { $(id).hidden = !on; };
   // 締めた後・最初は、次にやることが1つだけ（次の品を開始）。板から目を離さずに進められる
   show('b_next', (!lot || ended) && !!next);
-  // 開始値が未定の品（品名だけで登録した品）は、オークショニアの画面で開始値を入れて始める
-  if (next) { $('b_next').textContent = next.startPending ? `No.${next.lotNo} は、オークショニアの開始値の入力待ち` : `No.${next.lotNo} を開始`; $('b_next').disabled = !!next.startPending; $('b_next').onclick = () => lotCmd('start', next.id); }
+  // 開始価格が未定の品（品名だけで登録した品）は、オークショニアの画面で開始価格を入れて始める
+  if (next) { $('b_next').textContent = next.startPending ? `No.${next.lotNo} は、オークショニアの開始価格の入力待ち` : `No.${next.lotNo} を開始`; $('b_next').disabled = !!next.startPending; $('b_next').onclick = () => lotCmd('start', next.id); }
   show('b_close', st === 'open');
   // うりきり: ランプが消えている品だけ（最低落札額の入力がない品は、押すまで点かない。報告書 89 章）
   show('b_urikiri', !!lot && ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(st) && !lot.urikiri);
@@ -101,11 +101,11 @@ function render() {
     const name = document.createElement('b'); name.className = 'dyn'; name.textContent = l.title;
     const sub = document.createElement('span'); sub.className = 'lotlist__sub num';
     const result = l.status === 'sold' ? `${l.highestPaddle}番 ${yen(l.currentPrice)} で落札` : l.status === 'unsold' && l.currentPrice !== null ? '最低落札額に届かず流札' : '';
-    sub.textContent = [l.startPending ? '開始値 未定（オークショニアが決める）' : `開始 ${yen(l.startPrice)}`, l.reservePrice === null ? '' : `最低落札額 ${yen(l.reservePrice)}`, result].filter(Boolean).join('・');
+    sub.textContent = [l.startPending ? '開始価格 未定（オークショニアが決める）' : `開始 ${yen(l.startPrice)}`, l.reservePrice === null ? '' : `最低落札額 ${yen(l.reservePrice)}`, result].filter(Boolean).join('・');
     main.append(name, sub);
     const tag = document.createElement('span'); tag.className = 'pill'; tag.dataset.st = l.status; tag.textContent = STATE_LABEL[l.status];
     li.append(no, main, tag);
-    if (l.status === 'waiting' && !busy && !l.startPending) { // 開始値が未定の品は、オークショニアの画面から始める
+    if (l.status === 'waiting' && !busy && !l.startPending) { // 開始価格が未定の品は、オークショニアの画面から始める
       const b1 = document.createElement('button'); b1.type = 'button'; b1.textContent = '開始'; b1.className = 'btn';
       b1.setAttribute('aria-label', `No.${l.lotNo} の競りを開始`);
       b1.onclick = () => lotCmd('start', l.id);
@@ -310,8 +310,7 @@ function onMessage(msg, at) {
       S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history; S.stream = msg.stream;
       S.comments = msg.comments ?? S.comments; renderComments();
       // 開催が切り替わっていたら（前の開催の画面を開いたままだった）、読み込み直して、最初からにする
-      if (S.eventKey !== undefined && S.eventKey !== (msg.event?.id ?? null)) return location.reload();
-      S.eventKey = msg.event?.id ?? null;
+      if (reloadOnNewEvent(S, msg)) return;
       S.connected = true; S.ended = !msg.event && !!msg.ended;
       S.event = msg.event ?? null; if (msg.sold) S.sold = msg.sold; renderEvent(); renderSold();
       if (msg.type === 'welcome') {

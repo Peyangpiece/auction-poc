@@ -15,7 +15,7 @@
 <link rel="stylesheet" href="caller.css">
 </head>
 <body>
-<!-- オークショニアの画面（発注者の指示。報告書 73・74 章）: 次の品の開始と、競りの最中の開始値・うりきり・締め・流札・中断・再開を操作する。
+<!-- オークショニアの画面（発注者の指示。報告書 73・74 章）: 次の品の開始と、競りの最中の開始価格・うりきり・締め・流札・中断・再開を操作する。
      すべてのボタンを、スクロールなしで1画面に収める（タブレットの縦・横、スマホ、パソコン） -->
 <div class="overlay" id="overlay" role="alert"><div><span id="overlayText">接続しています…</span></div></div>
 <div class="app">
@@ -52,12 +52,12 @@
     </section>
 
     <div class="controls">
-    <!-- 開始値 -->
+    <!-- 開始価格 -->
     <section class="start" id="startBox" aria-labelledby="startTitle">
-      <h2 class="sr-only" id="startTitle">開始値</h2>
+      <h2 class="sr-only" id="startTitle">開始価格</h2>
       <form class="start__row" id="startForm" novalidate>
         <button class="btn step" type="button" id="stepDown" aria-label="1段下げる">−</button>
-        <label class="amount"><span class="yen" aria-hidden="true">¥</span><input id="startInput" inputmode="numeric" autocomplete="off" aria-label="新しい開始値（円）"></label>
+        <label class="amount"><span class="yen" aria-hidden="true">¥</span><input id="startInput" inputmode="numeric" autocomplete="off" aria-label="新しい開始価格（円）"></label>
         <button class="btn step" type="button" id="stepUp" aria-label="1段上げる">＋</button>
         <button class="btn btn-primary" type="submit" id="setStart">変更</button>
       </form>
@@ -75,12 +75,12 @@
   </main>
 </div>
 
-<!-- 開始値の入力（進行役がパソコンで品名だけを登録すると、自動で開く。発注者の指示。報告書 76 章） -->
+<!-- 開始価格の入力（進行役がパソコンで品名だけを登録すると、自動で開く。発注者の指示。報告書 76 章） -->
 <dialog id="startSheet" class="sheet" aria-labelledby="sheetTitle">
   <form id="sheetForm" novalidate>
     <p class="sheet__lot" id="sheetLot"></p>
-    <h2 id="sheetTitle">開始値を入力</h2>
-    <label class="amount amount--lg"><span class="yen" aria-hidden="true">¥</span><input id="sheetInput" inputmode="numeric" autocomplete="off" aria-label="開始値（円）" placeholder="0"></label>
+    <h2 id="sheetTitle">開始価格を入力</h2>
+    <label class="amount amount--lg"><span class="yen" aria-hidden="true">¥</span><input id="sheetInput" inputmode="numeric" autocomplete="off" aria-label="開始価格（円）" placeholder="0"></label>
     <p class="sheet__err" id="sheetMsg" role="alert"></p>
     <button class="act act--close sheet__go" type="submit" id="sheetGo"><b>競りを開始</b><span id="sheetSub"></span></button>
     <button class="textbtn" type="button" id="sheetLater">あとで</button>

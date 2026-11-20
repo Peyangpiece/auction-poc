@@ -524,7 +524,7 @@ function onAuctioneer(conn, msg, send) {
   const sendSold = () => send({ type: 'sold', sold: auction.soldList() });
   const ok = (extra = {}) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: true, action: msg.action, ...extra });
   const ng = (message) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: false, action: msg.action, message });
-  // オークショニアは、次の品の開始・中断・再開と、競りの最中の4つの操作（開始値・うりきり・締め・流札）だけができる（発注者の指示）
+  // オークショニアは、次の品の開始・中断・再開と、競りの最中の4つの操作（開始価格・うりきり・締め・流札）だけができる（発注者の指示）
   if (conn.staff?.role === 'caller' && !CALLER_ACTIONS.has(msg.action)) return ng('この操作は、オークショニアにはできません');
   try {
     switch (msg.action) {

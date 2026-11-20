@@ -1,4 +1,4 @@
-// オークショニアの操作（発注者の指示。報告書 73 章）: 開始値の設定・うりきり・締め・流札
+// オークショニアの操作（発注者の指示。報告書 73 章）: 開始価格の設定・うりきり・締め・流札
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, startServer, connectAll, createLot, cleanup, sleep } from './helpers.js';
@@ -11,18 +11,18 @@ before(async () => {
 });
 after(async () => { await srv.stop(); cleanup(ctx); });
 
-test('開始値は、入札の前だけ変えられる。最低落札額は、開始値を変えてもそのまま', async () => {
+test('開始価格は、入札の前だけ変えられる。最低落札額は、開始価格を変えてもそのまま', async () => {
   const lot = await createLot(A, 10000, null, '柱時計', 15000);
   let r = await A.cmd('set_start', { lotId: lot.id, amount: 8000 });
   assert.deepEqual([r.ok, r.startPrice], [true, 8000], '待機中でも変えられる（始まる前に決められる）');
   assert.equal((await A.cmd('start', { lotId: lot.id })).ok, true);
-  assert.equal((await A.cmd('set_start', { lotId: lot.id, amount: 8000 })).message, 'いまの開始値と同じです');
+  assert.equal((await A.cmd('set_start', { lotId: lot.id, amount: 8000 })).message, 'いまの開始価格と同じです');
   assert.match((await A.cmd('set_start', { lotId: lot.id, amount: 0 })).message, /1円以上/);
   assert.equal((await A.cmd('set_start', { lotId: lot.id, amount: 6000 })).ok, true, '受付中でも、入札がなければ変えられる');
   await sleep(50);
-  assert.equal(m[0].lots.get(lot.id).startPrice, 6000, '会員の画面にも、新しい開始値が届く');
+  assert.equal(m[0].lots.get(lot.id).startPrice, 6000, '会員の画面にも、新しい開始価格が届く');
   r = await m[0].bid(lot.id, 5999);
-  assert.equal(r.code, 'BELOW_MINIMUM', '入札は、新しい開始値から');
+  assert.equal(r.code, 'BELOW_MINIMUM', '入札は、新しい開始価格から');
   assert.equal((await m[0].bid(lot.id, 6000)).accepted, true);
   assert.match((await A.cmd('set_start', { lotId: lot.id, amount: 5000 })).message, /入札があるので/);
   await A.cmd('close', { lotId: lot.id });
@@ -30,7 +30,7 @@ test('開始値は、入札の前だけ変えられる。最低落札額は、�
   const lot2 = await createLot(A, 10000, null, '花瓶', 15000);
   await A.cmd('set_start', { lotId: lot2.id, amount: 16000 });
   await sleep(50);
-  assert.deepEqual([A.lots.get(lot2.id).reservePrice, A.lots.get(lot2.id).urikiri], [15000, false], '最低落札額以上の開始値にしても、最低落札額は残る（最初の入札で届き、ランプが点く。報告書 89 章）');
+  assert.deepEqual([A.lots.get(lot2.id).reservePrice, A.lots.get(lot2.id).urikiri], [15000, false], '最低落札額以上の開始価格にしても、最低落札額は残る（最初の入札で届き、ランプが点く。報告書 89 章）');
 });
 
 test('うりきり: 最低落札額をなくす。締めると、最低落札額に届かない額でも落札になる', async () => {
@@ -68,15 +68,15 @@ test('流札: 最低落札額に届かない品を、売らずに終える。う
   assert.deepEqual([r.ok, r.status], [true, 'unsold'], '最低落札額に届いていない入札があっても、流札にできる');
 });
 
-test('品名だけで登録した品は、開始値が決まるまで始められない。開始値をいっしょに送ると、決めてから始まる', async () => {
+test('品名だけで登録した品は、開始価格が決まるまで始められない。開始価格をいっしょに送ると、決めてから始まる', async () => {
   const r0 = await A.cmd('create_lot', { title: '名前だけの品', startPrice: null });
   assert.equal(r0.ok, true);
   const lot = r0.lot;
-  assert.deepEqual([lot.startPrice, lot.startPending, lot.minBid], [null, true, null], '開始値は未定');
-  assert.match((await A.cmd('start', { lotId: lot.id })).message, /開始値が決まっていません/);
+  assert.deepEqual([lot.startPrice, lot.startPending, lot.minBid], [null, true, null], '開始価格は未定');
+  assert.match((await A.cmd('start', { lotId: lot.id })).message, /開始価格が決まっていません/);
   assert.match((await A.cmd('start', { lotId: lot.id, amount: 0 })).message, /1円以上/);
   const r = await A.cmd('start', { lotId: lot.id, amount: 7000 });
-  assert.equal(r.ok, true, '開始値を決めて、そのまま始まる');
+  assert.equal(r.ok, true, '開始価格を決めて、そのまま始まる');
   await sleep(100);
   const seen = m[0].lots.get(lot.id);
   assert.deepEqual([seen.startPrice, seen.startPending, seen.status === 'open' || seen.status === 'preparing'], [7000, false, true]);
@@ -89,7 +89,7 @@ test('品名だけで登録した品は、開始値が決まるまで始めら�
   assert.match((await A.cmd('create_lot', { title: ' ', startPrice: 100 })).message, /品名/);
 });
 
-test('品名だけの品も、開始値の設定（set_start）で決められる', async () => {
+test('品名だけの品も、開始価格の設定（set_start）で決められる', async () => {
   const lot = (await A.cmd('create_lot', { title: '名前だけの品2' })).lot;
   const r = await A.cmd('set_start', { lotId: lot.id, amount: 1 });
   assert.equal(r.ok, true, '仮の値と同じ 1円でも、未定のときは決められる');

@@ -164,6 +164,8 @@ $('#editBtn').addEventListener('click', () => {
     corp && field('担当者名', 'contactName', { value: m.contactName, required: true, autocomplete: 'name' }),
     corp && field('請求先', 'billing', { value: m.billing, rows: 2, required: true, autocomplete: 'billing street-address' }),
     field('メールアドレス', 'email', { value: m.email, type: 'email', inputMode: 'email', spellcheck: false, required: true, autocomplete: 'email' }, '変えると、新しいアドレスに確認のメールを送ります'),
+    // メールアドレスを変えるときは、いまのパスワードで確かめ直す（パスワードのある人だけ。報告書 121 章）
+    m.hasPassword && field('いまのパスワード（メールアドレスを変えるときだけ）', 'currentPassword', { type: 'password', autocomplete: 'current-password' }),
     ...personFields(m),
     field('配送先', 'shipTo', { value: m.shipTo ?? '', rows: 2, autocomplete: 'shipping street-address' }, '住所と違う場合だけ'),
     el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),

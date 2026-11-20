@@ -1,10 +1,10 @@
 // オークショニアの画面の動き（発注者の指示。報告書 73 章）。接続と時刻合わせは common.js
-// できること: 次の品の開始・開始値の設定（入札の前だけ）・うりきり・締め・流札・中断・再開。どのボタンも、押せないときは理由を、押したらどうなるかを、ボタンの中に書く
+// できること: 次の品の開始・開始価格の設定（入札の前だけ）・うりきり・締め・流札・中断・再開。どのボタンも、押せないときは理由を、押したらどうなるかを、ボタンの中に書く
 'use strict';
 const $ = (id) => document.getElementById(id);
 const S = { lots: new Map(), focus: null, history: [], ladder: null, busy: false, editing: false };
 
-/** いま扱う品: 進行中の品。なければ、出品順でいちばん先の待機中の品（始まる前に、開始値を決められるように） */
+/** いま扱う品: 進行中の品。なければ、出品順でいちばん先の待機中の品（始まる前に、開始価格を決められるように） */
 function current() {
   // 締めた・流札にした直後は、しばらくその品の結果を出し続ける（すぐ次の品に替わると、続けて押したときに次の品が始まってしまう。本番運用の評価 B14）
   if (S.holdLot && Date.now() < S.holdUntil && S.lots.get(S.holdLot)) return S.lots.get(S.holdLot);
@@ -54,7 +54,7 @@ function render() {
   $('title').textContent = lot ? lot.title : '品を待っています';
   $('status').textContent = !lot ? '待機中' : st === 'waiting' ? '次の品' : STATE_LABEL[st];
   $('status').dataset.st = st;
-  $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札額' : hasBid ? '現在価格' : '開始値';
+  $('priceLabel').textContent = !lot ? '現在価格' : st === 'sold' ? '落札額' : hasBid ? '現在価格' : '開始価格';
   $('price').textContent = !lot ? '—' : lot.startPending ? '未定' : yen(lot.currentPrice ?? lot.startPrice);
   $('leader').textContent = lot?.highestPaddle ? `${lot.highestPaddle}番` : 'なし';
   // うりきりのランプは、サーバーが決める（うりきりを押した・最低落札額に届いた。最低落札額の入力がない品は、押すまで点かない。報告書 89 章）
@@ -66,7 +66,7 @@ function render() {
   const said = !lot ? '' : [`No.${lot.lotNo}`, $('status').textContent, $('price').textContent, lot.highestPaddle ? `${lot.highestPaddle}番` : ''].filter(Boolean).join('　');
   if (said !== S.lotSaid) { S.lotSaid = said; $('lotSay').textContent = said; }
 
-  // 開始値: 入札の前だけ変えられる
+  // 開始価格: 入札の前だけ変えられる
   const canStart = !!lot && ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(st) && !hasBid && !S.busy;
   for (const id of ['stepDown', 'stepUp', 'setStart', 'startInput']) $(id).disabled = !canStart;
   $('startBox').classList.toggle('locked', !canStart && !S.busy);
@@ -99,8 +99,8 @@ function render() {
     $('closeSub').textContent = '';
     $('close').disabled = S.busy;
   } else if (S.mode === 'start' && lot.startPending && !typed) {
-    // 品名だけの品: 押すと、開始値の入力のシートを開く
-    $('closeLabel').textContent = '開始値を入れて始める';
+    // 品名だけの品: 押すと、開始価格の入力のシートを開く
+    $('closeLabel').textContent = '開始価格を入れて始める';
     $('closeSub').textContent = '';
     $('close').disabled = S.busy;
   } else if (S.mode === 'start') {
@@ -160,7 +160,7 @@ function ask({ title, body, okLabel, danger = false }) {
   });
 }
 
-// ---- 開始値
+// ---- 開始価格
 const step = (dir) => {
   const lot = current();
   const now = parseAmount($('startInput').value) ?? lot?.startPrice ?? 0;
@@ -174,7 +174,7 @@ $('startInput').addEventListener('focus', () => { S.editing = true; $('startInpu
 $('startForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const amount = parseAmount($('startInput').value);
-  if (!amount) return say('開始値を入れてください');
+  if (!amount) return say('開始価格を入れてください');
   const res = await cmd('set_start', { amount });
   if (res?.ok) { S.editing = false; say(''); render(); }
 });
@@ -197,7 +197,7 @@ $('close').addEventListener('click', async () => {
     return;
   }
   if (S.mode === 'start') {
-    // 欄の金額で始める（ボタンの小さな字と同じ金額）。品名だけの品で、欄が空なら、開始値の入力のシートを開く
+    // 欄の金額で始める（ボタンの小さな字と同じ金額）。品名だけの品で、欄が空なら、開始価格の入力のシートを開く
     const amount = parseAmount($('startInput').value);
     if (lot.startPending && !amount) { openSheet(lot, true); return; }
     const res = await cmd('start', amount && amount !== lot.startPrice ? { amount } : {});
@@ -226,7 +226,7 @@ $('suspend').addEventListener('click', async () => {
   if (res?.ok) say('');
 });
 
-// ---- 開始値の入力のシート: 品名だけの品が次の品になったら、自動で開く（1つの品につき1回。「あとで」で閉じたら、下のボタンから開き直す）
+// ---- 開始価格の入力のシート: 品名だけの品が次の品になったら、自動で開く（1つの品につき1回。「あとで」で閉じたら、下のボタンから開き直す）
 S.sheetShownFor = new Set();
 function openSheet(lot, byUser = false) {
   const dlg = $('startSheet');
@@ -252,7 +252,7 @@ $('sheetForm').addEventListener('submit', async (ev) => {
   const lot = current();
   const amount = parseAmount($('sheetInput').value);
   if (!lot) return $('startSheet').close();
-  if (!amount) { $('sheetMsg').textContent = '開始値を入れてください'; $('sheetInput').focus(); return; }
+  if (!amount) { $('sheetMsg').textContent = '開始価格を入れてください'; $('sheetInput').focus(); return; }
   $('sheetGo').disabled = true;
   const res = await cmd('start', { amount });
   $('sheetGo').disabled = false;
@@ -265,8 +265,7 @@ function onMessage(msg) {
   switch (msg.type) {
     case 'welcome': case 'snapshot':
       // 開催が切り替わっていたら（前の開催の画面を開いたままだった）、読み込み直して、最初からにする
-      if (S.eventKey !== undefined && S.eventKey !== (msg.event?.id ?? null)) return location.reload();
-      S.eventKey = msg.event?.id ?? null;
+      if (reloadOnNewEvent(S, msg)) return;
       S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history ?? [];
       S.connected = true; S.event = msg.event ?? null; S.ended = !msg.event && !!msg.ended;
       if (msg.ladder) S.ladder = msg.ladder;
@@ -276,7 +275,7 @@ function onMessage(msg) {
       S.lots.set(msg.lot.id, msg.lot);
       if (msg.lot.status !== 'waiting' && msg.lot.status !== 'not_held' && S.focus !== msg.lot.id) { S.focus = msg.lot.id; S.history = []; }
       if (prev && prev.status === 'suspended' && msg.lot.status === 'waiting') S.history.forEach((h) => { h.valid = 0; });
-      // 別の品に移ったら、開始値の書きかけは捨てる
+      // 別の品に移ったら、開始価格の書きかけは捨てる
       if (!prev || prev.id !== current()?.id || prev.startPrice !== msg.lot.startPrice) S.editing = false;
       render(); break;
     }

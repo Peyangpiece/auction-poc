@@ -213,3 +213,12 @@ class Link {
 // 競りの画面を開いているあいだ、10分ごとに、サーバーへ短い問い合わせを送る。
 // 入札の通信（WebSocket）だけが続いていると、置き場所によっては「だれも使っていない」と見なされて、サーバーが休んでしまうため
 setInterval(() => { fetch('/healthz', { cache: 'no-store' }).catch(() => {}); }, 10 * 60 * 1000);
+
+// 開催が切り替わったら（別の開催が始まった・終わった）、画面を読み込み直して、最初からにする（報告書 112 章）。
+// 4つの画面（入札・進行コンソール・オークショニア・会場モニター）で同じなので、ここに1つだけ置く（報告書 120 章）
+function reloadOnNewEvent(S, msg) {
+  const id = msg.event?.id ?? null;
+  if (S.eventKey !== undefined && S.eventKey !== id) { location.reload(); return true; }
+  S.eventKey = id;
+  return false;
+}

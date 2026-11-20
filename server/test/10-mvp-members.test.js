@@ -398,8 +398,15 @@ test('メールアドレスでも会員登録を始められる（電話番号�
     const code2 = /認証番号は (\d{6})/.exec(mails('hana@example.com').at(-1).body)[1];
     assert.equal((await c.post('/api/login/verify', { id: 'hana@example.com', code: code2 })).status, 200);
     // 登録済み（確認済み）のアドレスでは、登録を始められない
+    // 画面の返事は、登録のないアドレスと同じ（どのアドレスが会員かを、外から調べられない）。本人には、「登録済みです」の案内が、メールで届く（報告書 121 章）
+    const before = mails('hana@example.com').length;
     const again = await t.browser().post('/api/register/start', { id: 'hana@example.com' });
-    assert.deepEqual([again.status, again.json.login], [409, true]);
+    const fresh = await t.browser().post('/api/register/start', { id: 'mada@example.com' });
+    assert.deepEqual([again.status, again.json], [fresh.status, fresh.json], '返事は同じ');
+    const notice = mails('hana@example.com').at(-1);
+    assert.equal(mails('hana@example.com').length, before + 1);
+    assert.match(notice.body, /すでに会員として登録されています/);
+    assert.doesNotMatch(notice.body, /認証番号は \d{6}/, '認証番号は、送らない');
   } finally { await t.close(); }
 });
 
@@ -649,5 +656,50 @@ test('電話番号の先取りを防ぐ: メールで登録した人の（確か
     assert.equal((await register(t, b, '090-1111-0301')).status, 200, '本人は、SMS で確かめて登録できる');
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM member_accounts WHERE phone = '09011110301'").get().n, 2);
     assert.throws(() => db.prepare("INSERT INTO member_accounts (kind, name, phone, email, address, phone_verified, created_at, updated_at) VALUES ('b2c', '二人目', '09011110301', 'y@example.com', '東京都', 1, 1, 1)").run(), /UNIQUE/, '確かめた番号は、重ならない');
+  } finally { await t.close(); }
+});
+
+test('ログインの誤り（報告書 121 章）: 止まるのは、誤りを続けた接続元だけ。ほかの接続元の本人は、入れる。接続元をまたいで 50 回で、全体が止まる', async () => {
+  const { hashPassword } = await import('../src/mvp/security.js');
+  const t = await setup({ POC_TRUST_PROXY: '1' });
+  try {
+    const b = t.browser();
+    assert.equal((await register(t, b, '09011110021')).status, 200);
+    t.store.db.prepare("UPDATE member_accounts SET login_id = 'rw00021', password_hash = ?, approved_at = 1 WHERE id = (SELECT MAX(id) FROM member_accounts)").run(hashPassword('tadashii-pass-1'));
+    const login = (ip, password) => t.browser().post('/api/login/password', { loginId: 'rw00021', password }, { 'x-real-ip': ip });
+    for (let i = 0; i < 10; i++) assert.equal((await login('203.0.113.7', 'ng')).status, 401);
+    assert.equal((await login('203.0.113.7', 'tadashii-pass-1')).status, 423, '誤りを続けた接続元は、正しくても入れない');
+    assert.equal((await login('198.51.100.20', 'tadashii-pass-1')).status, 200, 'ほかの接続元の本人は、入れる（締め出されない）');
+    // 接続元を変えながらの総当たり: 合わせて 50 回で、全体を止める（ログインに成功すると、数え直す）
+    for (let i = 0; i < 50; i++) assert.equal((await login(`192.0.2.${i + 1}`, 'ng')).status, 401);
+    assert.equal((await login('198.51.100.20', 'tadashii-pass-1')).status, 423, '全体が止まる');
+    t.advance(16 * MIN);
+    assert.equal((await login('198.51.100.20', 'tadashii-pass-1')).status, 200, '15分たつと、また入れる');
+  } finally { await t.close(); }
+});
+
+test('メールアドレスの変更（報告書 121 章）: パスワードのある会員は、いまのパスワードが要る。前のアドレスにも、変えたことを知らせる', async () => {
+  const { hashPassword } = await import('../src/mvp/security.js');
+  const t = await setup();
+  try {
+    const b = t.browser();
+    assert.equal((await register(t, b, '09011110022')).status, 200);
+    const profile = { name: person.name, address: person.address, email: 'atarashii@example.com' };
+    // パスワードの無い会員（認証番号だけで入る人）は、確かめる手段が無いので、そのまま変えられる。前のアドレスへの知らせは、届く
+    assert.equal((await b.post('/api/my/profile', profile)).status, 200);
+    const mailsTo = (to) => t.outbox().filter((m) => m.channel === 'email' && m.to === to);
+    assert.match(mailsTo('taro@example.com').at(-1).subject, /メールアドレスが変更されました/);
+    assert.doesNotMatch(mailsTo('taro@example.com').at(-1).body, /atarashii@example\.com/, '新しいアドレスは、書かない');
+    // パスワードのある会員: いまのパスワードが無い・違うと、変えられない
+    t.store.db.prepare('UPDATE member_accounts SET login_id = ?, password_hash = ? WHERE id = (SELECT MAX(id) FROM member_accounts)').run('rw00022', hashPassword('tadashii-pass-1'));
+    t.advance(31 * MIN); // 認証番号でログインした直後（30分）は、確かめない。それを過ぎてから
+    const next = { ...profile, email: 'motto@example.com' };
+    const r0 = await b.post('/api/my/profile', next); assert.ok(r0.json.errors?.currentPassword, JSON.stringify(r0.json));
+    assert.ok((await b.post('/api/my/profile', { ...next, currentPassword: 'chigau' })).json.errors.currentPassword);
+    assert.equal((await b.get('/api/me')).json.member.email, 'atarashii@example.com', '変わっていない');
+    // メールアドレスを変えないなら、パスワードは要らない
+    assert.equal((await b.post('/api/my/profile', { ...profile, address: '東京都千代田区2-2' })).status, 200);
+    assert.equal((await b.post('/api/my/profile', { ...next, currentPassword: 'tadashii-pass-1' })).status, 200);
+    assert.equal((await b.get('/api/me')).json.member.email, 'motto@example.com');
   } finally { await t.close(); }
 });

@@ -56,7 +56,14 @@ const TOP_ADJUST = 0.2;
 function writePdf(file, c) {
   return new Promise((resolve, reject) => {
     // 2ページ以上になったら、あとから各ページに請求番号とページ数を書き足すので、ページを貯めておく
-    const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true, info: { Title: `${c.title} ${c.number}` } });
+    // 読み上げソフト用の構造（タグ）を付ける。言語は日本語。題名を、窓の題に出す（報告書 120 章）。見た目は、変えない
+    const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true, tagged: true, lang: 'ja-JP', displayTitle: true, pdfVersion: '1.7', info: { Title: `${c.title} ${c.number}` } });
+    const root = doc.struct('Document');
+    doc.addStructure(root);
+    /** 構造の1つの要素として描く（読み上げの順番は、描いた順） */
+    const S = (type, fn, /** @type {{ parent?: any, alt?: string }} */ { parent = root, ...opts } = {}) => parent.add(doc.struct(type, opts, fn));
+    /** 飾り（罫線・枠・ページ数）は、読み上げない */
+    const deco = (fn) => { doc.markContent('Artifact', { type: 'Layout' }); fn(); doc.endMarkedContent(); };
     const out = fs.createWriteStream(file);
     out.on('finish', () => resolve());
     out.on('error', reject);
@@ -66,11 +73,12 @@ function writePdf(file, c) {
     const L = 35, R = 560, PAD = 7, NUM_R = 6.7;
     const LT = L + 0.2; // 左の文字の始まり（線は 35 ちょうど。文字は、原本と画像で比べて 0.2 だけ右）
     /** 文字を置く。top は、文字の上端の位置（原本から読み取った値） */
-    const T = (str, x, top, size, { font = 'M', align = 'left', width = null, underline = false } = {}) => {
+    const T = (str, x, top, size, { font = 'M', align = 'left', width = null, underline = false, tag = 'P', parent = root } = {}) => {
       doc.font(font).fontSize(size);
       const w = width ?? doc.widthOfString(str);
       // 太字は、書体の上の余白が少し大きいので、その分も引く
-      doc.text(str, x, top - size * (font === 'B' ? TOP_ADJUST + 0.045 : TOP_ADJUST), { width: width ?? w + 2, align, lineBreak: width !== null, underline });
+      const draw = () => doc.text(str, x, top - size * (font === 'B' ? TOP_ADJUST + 0.045 : TOP_ADJUST), { width: width ?? w + 2, align, lineBreak: width !== null, underline });
+      if (tag === null) draw(); else S(tag, draw, { parent });
       return w;
     };
     const right = (str, edge, top, size, opt = {}) => { doc.font(opt.font ?? 'M').fontSize(size); return T(str, edge - doc.widthOfString(str), top, size, opt); };
@@ -78,7 +86,7 @@ function writePdf(file, c) {
     right(c.date, R + 0.2, 28.7, 10);
     right(`請求番号: ${c.number}`, R + 0.2, 50.9, 10);
     doc.font('M').fontSize(24);
-    T(c.title, (595.28 - doc.widthOfString(c.title)) / 2, 81.4, 24);
+    T(c.title, (595.28 - doc.widthOfString(c.title)) / 2, 81.4, 24, { tag: 'H1' });
 
     // 左: 宛先（下線つき）・件名・ご請求金額（下線つき）・期限
     // 宛名は、右の発行者（エンブレム）に重ならない幅（275）に収める。長い名前は、文字を小さくして1行に収める（原本の 14 から、10 まで）
@@ -92,37 +100,40 @@ function writePdf(file, c) {
       nameW = T(nameText, L, 125.7 + (14 - nameSize) * 0.8, nameSize);
     } else {
       // それでも収まらない名前は、10 の大きさで、2行に折り返す（下線は、2行目の下）
-      doc.font('M').fontSize(10).text(nameText, L, 113 - 10 * TOP_ADJUST, { width: NAME_MAX, lineGap: 1 });
+      S('P', () => doc.font('M').fontSize(10).text(nameText, L, 113 - 10 * TOP_ADJUST, { width: NAME_MAX, lineGap: 1 }));
       nameW = NAME_MAX;
     }
     // 宛名の下線: 原本と同じ高さ（139.29）で、宛名の文字の幅ちょうど
-    doc.moveTo(L, 139.29).lineTo(L + nameW, 139.29).stroke();
+    deco(() => doc.moveTo(L, 139.29).lineTo(L + nameW, 139.29).stroke());
     T(`件名 : ${c.subject}`, LT, 158, 9.5, { width: 270 });
     T('下記のとおりご請求申し上げます。', LT, 180, 9.5);
     T('ご請求金額', LT, 205.1, 12);
     right(`¥ ${num(c.total)} -`, 264, 205.1, 12);
-    doc.moveTo(L, 220.31).lineTo(265.1, 220.31).stroke();
+    deco(() => doc.moveTo(L, 220.31).lineTo(265.1, 220.31).stroke());
     T(c.due, LT, 233.3, 9.5, { width: 270 });
 
     // 右: 発行者（会社のシンボル、名称、住所、電話・メール・登録番号、印鑑）
     const rx = 320;
-    doc.image(LOGO, 320.5, 125.8, { width: 60 });
+    S('Figure', () => doc.image(LOGO, 320.5, 125.8, { width: 60 }), { alt: '発行者のシンボル' });
     T(c.issuer.name, rx, 192.9, 10.5);
     let ry = 218.4;
     for (const line of c.issuer.address) { T(line, rx, ry, 9); ry += 11.5; }
     ry += 10.8; // 住所と連絡先のあいだを、1行あける
     for (const line of c.issuer.contact) { T(line, rx, ry, 9); ry += 11.4; }
     // 印鑑: 原本と同じ枠（左上 500.2・193.0、幅 58.25・高さ 60pt）に、縦横の比を保って収める（原本の PDF を 600dpi で測った値）
-    if (c.seal) doc.image(c.seal, 500.2, 193.0, { fit: [58.25, 60] });
+    if (c.seal) S('Figure', () => doc.image(c.seal, 500.2, 193.0, { fit: [58.25, 60] }), { alt: '発行者の印' });
 
     // 表: 品番・品名｜数量｜単価｜金額
     const col = [L, 350, 417, 482, R], H = 25;
     // 2ページ目からは、上に請求番号を書いて、どの請求書の続きか分かるようにする
-    const nextPage = () => { doc.addPage(); right(`${c.title}　請求番号: ${c.number}（続き）`, R + 0.2, 24, 9); return 46; };
+    const nextPage = () => { doc.addPage(); deco(() => right(`${c.title}　請求番号: ${c.number}（続き）`, R + 0.2, 24, 9, { tag: null })); return 46; };
+    // 表の構造（見出しの行・品の行・合計の行）
+    const table = doc.struct('Table'); root.add(table);
+    const row = () => { const tr = doc.struct('TR'); table.add(tr); return tr; };
     const head = (top) => {
-      doc.rect(L, top, R - L, H).fillAndStroke('#d9d8d8', '#000').fillColor('#000');
-      for (const x of col.slice(1, 4)) doc.moveTo(x, top).lineTo(x, top + H).stroke();
-      ['品番・品名', '数量', '単価', '金額'].forEach((t, i) => { doc.font('B').fontSize(9.5); T(t, (col[i] + col[i + 1]) / 2 - doc.widthOfString(t) / 2, top + 7.6, 9.5, { font: 'B' }); });
+      deco(() => { doc.rect(L, top, R - L, H).fillAndStroke('#d9d8d8', '#000').fillColor('#000'); for (const x of col.slice(1, 4)) doc.moveTo(x, top).lineTo(x, top + H).stroke(); });
+      const tr = row();
+      ['品番・品名', '数量', '単価', '金額'].forEach((t, i) => { doc.font('B').fontSize(9.5); T(t, (col[i] + col[i + 1]) / 2 - doc.widthOfString(t) / 2, top + 7.6, 9.5, { font: 'B', tag: 'TH', parent: tr }); });
     };
     let y = Math.max(318.44, ry + 20);
     head(y); y += H;
@@ -133,22 +144,24 @@ function writePdf(file, c) {
       const lines = Math.max(1, Math.round(doc.heightOfString(label, { width: NAME_W, lineGap: 2.5 }) / (doc.currentLineHeight() + 2.5)));
       const rh = H + (lines - 1) * 12.5;
       if (y + rh > 800) { y = nextPage(); head(y); y += H; }
-      doc.rect(L, y, R - L, rh).stroke();
-      for (const x of col.slice(1, 4)) doc.moveTo(x, y).lineTo(x, y + rh).stroke();
-      if (lines === 1) T(label, L + PAD, y + 7.9, 9.5);
-      else doc.font('M').fontSize(9.5).text(label, L + PAD, y + 7.9 - 9.5 * TOP_ADJUST, { width: NAME_W, lineGap: 2.5 });
-      right(String(qty), col[2] - PAD, y + 7.9, 9.5);
-      right(num(unit), col[3] - NUM_R, y + 7.9, 9.5);
-      right(num(amount), col[4] - NUM_R, y + 7.9, 9.5);
+      const top = y;
+      deco(() => { doc.rect(L, top, R - L, rh).stroke(); for (const x of col.slice(1, 4)) doc.moveTo(x, top).lineTo(x, top + rh).stroke(); });
+      const tr = row(), cell = { tag: 'TD', parent: tr };
+      if (lines === 1) T(label, L + PAD, y + 7.9, 9.5, cell);
+      else S('TD', () => doc.font('M').fontSize(9.5).text(label, L + PAD, top + 7.9 - 9.5 * TOP_ADJUST, { width: NAME_W, lineGap: 2.5 }), { parent: tr });
+      right(String(qty), col[2] - PAD, y + 7.9, 9.5, cell);
+      right(num(unit), col[3] - NUM_R, y + 7.9, 9.5, cell);
+      right(num(amount), col[4] - NUM_R, y + 7.9, 9.5, cell);
       y += rh;
     }
     // 小計・消費税・合計（表の右下）
     if (y + H * 3 > 800) y = nextPage();
     for (const [label, value] of [['小計', num(c.total)], [c.taxLabel, c.taxValue], ['合計', num(c.total)]]) {
-      doc.rect(col[1], y, R - col[1], H).stroke();
-      doc.moveTo(col[3], y).lineTo(col[3], y + H).stroke();
-      T(label, col[1] + 7.1, y + 7.75, 9.5);
-      right(value, col[4] - NUM_R, y + 7.9, 9.5);
+      const top = y;
+      deco(() => { doc.rect(col[1], top, R - col[1], H).stroke(); doc.moveTo(col[3], top).lineTo(col[3], top + H).stroke(); });
+      const tr = row();
+      T(label, col[1] + 7.1, y + 7.75, 9.5, { tag: 'TH', parent: tr });
+      right(value, col[4] - NUM_R, y + 7.9, 9.5, { tag: 'TD', parent: tr });
       y += H;
     }
     y += 14.3;
@@ -166,9 +179,10 @@ function writePdf(file, c) {
         doc.switchToPage(i);
         const label = `${i + 1} / ${count}`;
         doc.font('M').fontSize(9);
-        T(label, (595.28 - doc.widthOfString(label)) / 2, 815, 9);
+        deco(() => T(label, (595.28 - doc.widthOfString(label)) / 2, 815, 9, { tag: null }));
       }
     }
+    table.end(); root.end();
     doc.end();
   });
 }

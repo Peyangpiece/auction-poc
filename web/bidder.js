@@ -37,7 +37,11 @@ function sayPrice(msg) {
     if (S.priceSayNext) { $('priceSay').textContent = S.priceSayNext; S.priceSayNext = null; S.priceSayTimer = setTimeout(flush, 3000); }
   }, 3000);
 }
-function say(text, kind = '') { $('msg').textContent = text; $('msg').dataset.kind = kind; }
+// quiet: 画面には出すが、読み上げない（同じことを #alert が読み上げるとき。2回読み上げない。報告書 120 章）
+function say(text, kind = '', quiet = false) {
+  if (quiet) $('msg').setAttribute('aria-hidden', 'true'); else $('msg').removeAttribute('aria-hidden');
+  $('msg').textContent = text; $('msg').dataset.kind = kind;
+}
 // 入札ボタンの「押せない」は、aria-disabled で表す（disabled にすると、キーボードのフォーカスが外れて、続けて入札できない。報告書 80 章）
 const bidOff = (off) => $('bid').setAttribute('aria-disabled', String(!!off));
 const bidIsOff = () => $('bid').getAttribute('aria-disabled') === 'true';
@@ -338,8 +342,7 @@ function onMessage(msg, at) {
         setMode(S.mode);
       }
       // 開催が切り替わっていたら（前の開催の画面を開いたままだった）、読み込み直して、最初からにする
-      if (S.eventKey !== undefined && S.eventKey !== (msg.event?.id ?? null)) return location.reload();
-      S.eventKey = msg.event?.id ?? null;
+      if (reloadOnNewEvent(S, msg)) return;
       S.comments = msg.comments ?? S.comments;
       S.lots = new Map(msg.lots.map((l) => [l.id, l]));
       S.focus = msg.focusLotId; S.history = msg.history; S.stream = msg.stream; S.rendered = msg.history.length;
@@ -418,7 +421,7 @@ function notifyOutbid(msg) {
   const audio = beep();
   const vibrated = 'vibrate' in navigator ? navigator.vibrate([200, 100, 200]) : null;
   $('audio').textContent = audio; $('vib').textContent = vibrated === null ? '非対応' : String(vibrated);
-  say(`上回られました：${msg.paddle}番 ${yen(msg.amount)}`, 'ng');
+  say(`上回られました：${msg.paddle}番 ${yen(msg.amount)}`, 'ng', true);
   $('alert').textContent = `上回られました。${msg.paddle}番が ${yen(msg.amount)}。次の入札額は ${yen(msg.minBid)}`;
   document.title = `上回られました｜${yen(msg.amount)}`;
   link.event('outbid_notify', { seq: msg.seq, audio, vibrated, hidden: document.hidden, wake: $('wake').textContent });

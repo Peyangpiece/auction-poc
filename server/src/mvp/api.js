@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { MVP_SCHEMA, DEFAULT_SETTINGS } from './schema.js';
 import {
-  randomToken, sha256, safeEqual, verifyPassword,
+  randomToken, sha256, safeEqual, verifyPasswordAsync,
   newOtpCode, normalizePhone, isEmail,
 } from './security.js';
 import { clientIp } from './security.js';
@@ -32,7 +32,7 @@ import { createReception } from './reception.js';
 import { createEvents } from './events.js';
 import { createStaffApi } from './staff.js';
 
-import { MIN, HOUR, DAY, OTP_TTL, OTP_MAX_ATTEMPTS, OTP_MAX_FAILS_PER_HOUR, OTP_SENDS_PER_HOUR, MEMBER_IDLE, STAFF_LIFETIME, REGISTER_LIFETIME, ROLE_LABEL, HttpError, bad } from './shared.js';
+import { MIN, HOUR, DAY, OTP_TTL, OTP_MAX_ATTEMPTS, OTP_MAX_FAILS_PER_HOUR, OTP_SENDS_PER_HOUR, MEMBER_IDLE, STAFF_LIFETIME, REGISTER_LIFETIME, ROLE_LABEL, HttpError, bad, siteOrigin } from './shared.js';
 
 export function createApi({ store, config, nowMs, persistStatus = () => null, durable = () => null, healthDetail = () => ({}) }) {
   const db = store.db;
@@ -312,11 +312,31 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   const PASSWORD_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
   const newPassword = () => Array.from({ length: 12 }, () => PASSWORD_CHARS[crypto.randomInt(PASSWORD_CHARS.length)]).join('');
   // 写し取るときに前後に入った空白（改行・全角の空白を含む）は、無いものとして確かめ直す
-  const passwordMatches = (input, hash) => {
+  const passwordMatches = async (input, hash) => {
     const raw = String(input ?? '');
-    if (verifyPassword(raw, hash)) return true;
+    if (await verifyPasswordAsync(raw, hash)) return true;
     const trimmed = raw.trim();
-    return trimmed !== raw && verifyPassword(trimmed, hash);
+    return trimmed !== raw && await verifyPasswordAsync(trimmed, hash);
+  };
+  // ログインの誤りの数え方（報告書 121 章）: 「この ID × この接続元」で数えて、その接続元だけを止める。
+  // これまでは、ID ごとに数えていたので、連番のログイン ID に、わざと誤ったパスワードを入れるだけで、ほかの会員を締め出せた。
+  // パスワードを変えると（再発行を含む）、鍵が変わるので、止めは消える。覚えるのは、動いているあいだだけ
+  const pairFails = new Map();
+  const loginGuard = (kind, row, ctx, { max, lockMs }) => {
+    const key = `${kind}|${row.id}|${ctx.ip}|${String(row.password_hash ?? '').slice(-12)}`;
+    return {
+      lockedUntil: (now) => { const e = pairFails.get(key); return e && e.until > now ? e.until : 0; },
+      failed: (now) => {
+        const e = pairFails.get(key) ?? { n: 0, until: 0, at: now };
+        e.n++; e.at = now;
+        if (e.n >= max) { e.n = 0; e.until = now + lockMs; }
+        pairFails.set(key, e);
+        // 増えすぎたら、古いものから捨てる（止めの最中のものは、残す）
+        if (pairFails.size > 20000) for (const [k, v] of pairFails) { if (v.until <= now && now - v.at > lockMs) pairFails.delete(k); }
+        return e.until > now;
+      },
+      passed: () => pairFails.delete(key),
+    };
   };
   function credentialErrors(body, errors, { memberId = null, need = false } = {}) {
     const loginId = normLoginId(body.loginId), password = String(body.password ?? '');
@@ -396,7 +416,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
     // 確認のリンクは、送った先のアドレスにだけ効く（あとでアドレスを変えた人が、古いリンクで、別のアドレスを確認済みにできないように）
     db.prepare('DELETE FROM email_tokens WHERE member_id = ?').run(member.id);
     db.prepare('INSERT INTO email_tokens (token_hash, member_id, expires_at, email) VALUES (?,?,?,?)').run(sha256(token), member.id, nowMs() + DAY, String(member.email).toLowerCase());
-    const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
+    const origin = siteOrigin(config, ctx.req);
     await notifier.email(member.email, 'verify_email', subjectOf('メールアドレスの確認'), compose(setting, { name: nameOf(member), lines: [
       'このメールアドレスを、令和の競りの会員のアドレスとして登録しました。',
       '次のリンクを開くと、確認が終わります（このメールから24時間、有効です）。',
@@ -415,10 +435,10 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   const billing = createBilling({ db, config, nowMs, audit, notifier, setting, route, needStaff, needMember, HttpError, bad });
 
   // ------------------------------------------------------------ 会員の受け口（members.js）
-  createMembers({ audit, checkOtp, config, credentialErrors, db, dropLogin, endSession, loginTarget, lookupPostal, memberView, needMember, needStaff, normLoginId, nowMs, passwordMatches, persistStatus, personFrom, phoneOf, registerKey, route, sendEmailVerification, sendOtp, startSession, throttle, toHalfDigits, trustDevice, trustedDevice });
+  createMembers({ audit, checkOtp, loginGuard, nameOf, notifier, setting, config, credentialErrors, db, dropLogin, endSession, loginTarget, lookupPostal, memberView, needMember, needStaff, normLoginId, nowMs, passwordMatches, persistStatus, personFrom, phoneOf, registerKey, route, sendEmailVerification, sendOtp, startSession, throttle, toHalfDigits, trustDevice, trustedDevice });
 
   // ------------------------------------------------------------ スタッフ（staff.js）
-  const { createStaff, inviteStaff } = createStaffApi({ audit, config, db, dropLogin, healthDetail, memberView, nameOf, needStaff, newPassword, notifier, nowMs, route, setting, startSession, throttle, trustDevice, trustedDevice });
+  const { createStaff, inviteStaff } = createStaffApi({ audit, config, db, loginGuard, dropLogin, healthDetail, memberView, nameOf, needStaff, newPassword, notifier, nowMs, route, setting, startSession, throttle, trustDevice, trustedDevice });
 
   // ------------------------------------------------------------ 開催（events.js）
   const { PAYMENT, RECEIVE, activeEvent, alertAdmins, endedToday, hooks, participant, sendEventMails } = createEvents({ audit, billing, config, db, nameOf, needMember, needStaff, notifier, nowMs, route, setting });
@@ -429,7 +449,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   // ------------------------------------------------------------ 表示する文言
   // 商品は、競りの最中に進行コンソールからその場で登録する（発注者の決定）。事前の登録・審査・カタログは持たない。
   // 送料が含まれないことの表示（FR-SHIP-003）と、返品特約の表示（FR-LEG-002）。だれでも見られる
-  route('GET', '/api/terms', () => ({ devShowCodes: config.devShowCodes, sms: config.sms, orgName: setting('org_name'), shippingNotice: setting('shipping_notice'), returnPolicy: setting('return_policy'), premiumRate: billing.premiumRate() }));
+  // 返品特約の「【仮の文言。…】」の印は、利用者には見せない（主催者管理者の設定の画面と、公開の前の確かめには、残る。報告書 120 章）
+  route('GET', '/api/terms', () => ({ devShowCodes: config.devShowCodes, sms: config.sms, orgName: setting('org_name'), shippingNotice: setting('shipping_notice'), returnPolicy: setting('return_policy').replace(/^【仮[^】]*】\s*/, ''), premiumRate: billing.premiumRate() }));
 
   // ------------------------------------------------------------ 主催者設定（FR-ORG-001 の一部）・監査ログ・知らせ
   // 請求書・手数料に使う設定（FR-ORG-001 の一部）。未入力でも動くが、請求書には「（未設定）」と出る

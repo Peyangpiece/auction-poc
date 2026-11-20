@@ -1,9 +1,10 @@
 // 会員（登録・ログイン・登録内容の変更・退会・主催者管理者による管理）（報告書 119 章で、api.js から分けた。中身は、分ける前と同じ）
-import { HttpError, LOGIN_FAIL_MAX, LOGIN_LOCK, MEMBER_IDLE, MIN, REGISTER_LIFETIME, ROLE_LABEL, bad } from './shared.js';
+import { HttpError, LOGIN_FAIL_MAX, LOGIN_FAIL_GLOBAL, LOGIN_LOCK, MEMBER_IDLE, MIN, REGISTER_LIFETIME, ROLE_LABEL, bad } from './shared.js';
 import { hashPassword, isEmail, normalizePhone, sha256, verifyPassword } from './security.js';
+import { compose, subjectOf } from './mails.js';
 
 export function createMembers(deps) {
-  const { audit, checkOtp, config, credentialErrors, db, dropLogin, endSession, loginTarget, lookupPostal, memberView, needMember, needStaff, normLoginId, nowMs, passwordMatches, persistStatus, personFrom, phoneOf, registerKey, route, sendEmailVerification, sendOtp, startSession, throttle, toHalfDigits, trustDevice, trustedDevice } = deps;
+  const { audit, checkOtp, loginGuard, nameOf, notifier, setting, config, credentialErrors, db, dropLogin, endSession, loginTarget, lookupPostal, memberView, needMember, needStaff, normLoginId, nowMs, passwordMatches, persistStatus, personFrom, phoneOf, registerKey, route, sendEmailVerification, sendOtp, startSession, throttle, toHalfDigits, trustDevice, trustedDevice } = deps;
   // ------------------------------------------------------------ 会員の受け口
   route('GET', '/api/me', (ctx) => ({
     member: ctx.member ? memberView(ctx.member) : null,
@@ -33,8 +34,20 @@ export function createMembers(deps) {
     throttle(ctx);
     const phone = registerKey(body);
     if (phone.startsWith('email:')) {
-      // メールアドレスで登録を始める（発注者の指示）。確認済みの会員がいるアドレスは、ログインへ案内する
-      if (db.prepare('SELECT 1 FROM member_accounts WHERE lower(email) = ? AND email_verified = 1 AND withdrawn_at IS NULL').get(phone.slice(6))) throw new HttpError(409, 'このメールアドレスは登録済みです。ログインしてください', { login: true });
+      // メールアドレスで登録を始める（発注者の指示）。確認済みの会員がいるアドレスには、認証番号の代わりに、「登録済みです」という案内を、そのアドレスへ送る。
+      // 画面の返事は、登録のないアドレスと同じにする（どのアドレスが会員かを、外から調べられないように。報告書 121 章）
+      const exists = db.prepare('SELECT * FROM member_accounts WHERE lower(email) = ? AND email_verified = 1 AND withdrawn_at IS NULL').get(phone.slice(6));
+      if (exists) {
+        limitRegister(ctx);
+        await notifier.email(exists.email, 'already_registered', subjectOf('会員登録のお申し込みについて'), compose(setting, { name: nameOf(exists), lines: [
+          'このメールアドレスで、会員登録のお申し込みがありました。',
+          'このメールアドレスは、すでに会員として登録されています。新しく登録する必要はありません。ログインの画面からお入りください。',
+          'パスワードをお忘れの場合は、ログインの画面の「パスワードを忘れた方」からお進みください。',
+          '',
+          'お心当たりがない場合は、このメールを破棄してください（ほかの方が、アドレスをまちがえて入力した可能性があります）。',
+        ] }));
+        return { ok: true, via: 'email' };
+      }
     } else {
       // スタッフとして登録された番号では、会員登録できない（FR-AUTH-013）
       if (db.prepare('SELECT 1 FROM staff_accounts WHERE phone = ?').get(phone)) throw new HttpError(409, 'この電話番号では登録できません');
@@ -121,8 +134,12 @@ export function createMembers(deps) {
       company: m.kind === 'b2b' ? text(body.company) : null, contact_name: m.kind === 'b2b' ? text(body.contactName) : null, billing: m.kind === 'b2b' ? text(body.billing, 300) : null };
     if (!isEmail(next.email)) errors.email = 'メールアドレスを正しく入力してください';
     if (m.kind === 'b2b') { if (!next.company) errors.company = '会社名を入力してください'; if (!next.contact_name) errors.contactName = '担当者名を入力してください'; if (!next.billing) errors.billing = '請求先を入力してください'; }
-    if (Object.keys(errors).length) throw bad('入力を確かめてください', { errors });
     const emailChanged = next.email !== m.email;
+    // メールアドレスを変えるときは、いまのパスワードで、本人を確かめ直す（報告書 121 章）。
+    // ログインは 400 日続くので、開いたままの端末から、アドレスを変えられると、「パスワードを忘れた方」（メールの認証番号）で、乗っ取れてしまう。
+    // パスワードの無い人と、メールの認証番号でログインした直後の人は、確かめない（確かめる手段が、そのメールだけなので）
+    if (emailChanged && m.password_hash && !ctx.viaOtp && !verifyPassword(String(body.currentPassword ?? ''), m.password_hash)) errors.currentPassword = 'メールアドレスを変えるには、いまのパスワードを入力してください';
+    if (Object.keys(errors).length) throw bad('入力を確かめてください', { errors });
     db.prepare('UPDATE member_accounts SET name=?, email=?, email_verified=?, address=?, ship_to=?, company=?, contact_name=?, billing=?, updated_at=? WHERE id=?')
       .run(next.name, next.email, emailChanged ? 0 : m.email_verified, next.address, next.ship_to, next.company, next.contact_name, next.billing, nowMs(), m.id);
     // 分けて入れた場合だけ、フリガナと住所の内訳を書き換える（まとめた形で届いたときは、前の内訳を消す）
@@ -131,6 +148,12 @@ export function createMembers(deps) {
     audit(ctx, 'member.update', { target: `member:${m.id}`, after: { fields: Object.keys(next).filter((k) => next[k] !== m[k]) } });
     const fresh = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(m.id);
     if (emailChanged) await sendEmailVerification(ctx, fresh); // 新しいアドレスを、確認メールで確かめ直す
+    // 前のアドレスにも、変えたことを知らせる（本人でなければ、気づけるように）。新しいアドレスは、書かない
+    if (emailChanged && isEmail(m.email)) await notifier.email(m.email, 'email_changed', subjectOf('メールアドレスが変更されました'), compose(setting, { name: nameOf(m), lines: [
+      '令和の競りの会員のメールアドレスが、変更されました。これからのお知らせは、新しいメールアドレスへお送りします。',
+      '',
+      'お心当たりがない場合は、すぐに、主催者までご連絡ください。',
+    ] }));
     return { ok: true, member: memberView(fresh) };
   });
   // 開催のお知らせメールを受け取るか（本人が切り替える）
@@ -198,20 +221,30 @@ export function createMembers(deps) {
     return { ok: true, via: target.key.startsWith('email:') ? 'email' : 'sms' };
   });
   // ログイン ID とパスワードでのログイン（発注者の指示）。どちらが違ったかは、伝えない
-  route('POST', '/api/login/password', (ctx, body) => {
+  route('POST', '/api/login/password', async (ctx, body) => {
     throttle(ctx);
     const fail = new HttpError(401, 'ログイン ID かパスワードが違います');
     const m = db.prepare('SELECT * FROM member_accounts WHERE login_id = ? AND withdrawn_at IS NULL AND approved_at IS NOT NULL').get(normLoginId(body.loginId));
     if (!m || !m.password_hash) throw fail;
     const now = nowMs();
     const trusted = trustedDevice(ctx, 'm', m.id); // いつもの端末には、ロックを掛けない
-    if (m.login_locked_until > now && !trusted) throw new HttpError(423, `誤りが続いたため、しばらくログインできません。${Math.ceil((m.login_locked_until - now) / MIN)} 分後にやり直すか、「パスワードを忘れた方」からお入りください`);
-    if (!passwordMatches(body.password, m.password_hash)) {
+    const locked = (until) => new HttpError(423, `誤りが続いたため、しばらくログインできません。${Math.ceil((until - now) / MIN)} 分後にやり直すか、「パスワードを忘れた方」からお入りください`);
+    // 止めは2つ: この接続元からの誤り10回（この接続元だけを止める）と、接続元をまたいだ誤り50回（全体を止める。大勢での総当たりへの備え）
+    const guard = loginGuard('m', m, ctx, { max: LOGIN_FAIL_MAX, lockMs: LOGIN_LOCK });
+    const until = Math.max(m.login_locked_until > now ? m.login_locked_until : 0, guard.lockedUntil(now));
+    if (until && !trusted) throw locked(until);
+    if (!(await passwordMatches(body.password, m.password_hash))) {
       if (trusted) throw fail;
-      const failed = m.login_failed + 1;
-      db.prepare('UPDATE member_accounts SET login_failed = ?, login_locked_until = ? WHERE id = ?').run(failed >= LOGIN_FAIL_MAX ? 0 : failed, failed >= LOGIN_FAIL_MAX ? now + LOGIN_LOCK : 0, m.id);
+      guard.failed(now);
+      const failed = db.prepare('UPDATE member_accounts SET login_failed = login_failed + 1 WHERE id = ? RETURNING login_failed').get(m.id)?.login_failed ?? 0;
+      if (failed >= LOGIN_FAIL_GLOBAL) db.prepare('UPDATE member_accounts SET login_failed = 0, login_locked_until = ? WHERE id = ?').run(now + LOGIN_LOCK, m.id);
       throw fail;
     }
+    // 照合は、別のスレッドで行う（そのあいだに、ほかの処理が進む）。終わったら、会員の状態を読み直す（退会・パスワードの変更・止めが、あいだに入ったかもしれない）
+    const fresh = db.prepare('SELECT password_hash, login_locked_until FROM member_accounts WHERE id = ? AND withdrawn_at IS NULL AND approved_at IS NOT NULL').get(m.id);
+    if (!fresh || fresh.password_hash !== m.password_hash) throw fail;
+    if (!trusted && (fresh.login_locked_until > now || guard.lockedUntil(now))) throw locked(Math.max(fresh.login_locked_until, guard.lockedUntil(now)));
+    guard.passed();
     db.prepare('UPDATE member_accounts SET login_failed = 0, login_locked_until = 0 WHERE id = ?').run(m.id);
     startSession(ctx, 'member', m.id, MEMBER_IDLE);
     trustDevice(ctx, 'm', m.id);

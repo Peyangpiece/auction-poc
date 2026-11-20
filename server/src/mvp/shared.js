@@ -12,6 +12,9 @@ export const OTP_SENDS_PER_HOUR = 5;       // 同じ番号へ1時間に5回ま�
 export const MEMBER_IDLE = 400 * DAY;
 export const LOGIN_FAIL_MAX = 10;          // ログイン ID とパスワードの誤りが続いたら、しばらく止める
 export const LOGIN_LOCK = 15 * MIN;
+// 接続元をまたいだ誤りの上限（会員・スタッフ）。同じ接続元からの誤りは、その接続元だけを止める（ほかの人を、締め出させない。報告書 121 章）
+export const LOGIN_FAIL_GLOBAL = 50;
+export const STAFF_FAIL_GLOBAL = 25;
 export const STAFF_LIFETIME = 12 * HOUR;   // スタッフ: 12時間（FR-AUTH-012）
 export const REGISTER_LIFETIME = 15 * MIN; // SMS 認証から登録の完了まで
 export const LOCK_AFTER = 5;               // パスワードの誤り5回で
@@ -36,3 +39,9 @@ export const csvCell = (v) => {
   const t = String(v ?? '');
   return `"${(typeof v === 'string' && /^[=+\-@\t\r]/.test(t) ? "'" + t : t).replaceAll('"', '""')}"`;
 };
+
+// ---- サイトの URL（メールや QR コードに載せるリンクの頭）。組み立ては、ここだけで行う（報告書 120 章。これまでは、5か所に同じ式があった）
+/** この通信が届いたアドレス。手前のプロキシを信用する設定のときだけ、プロキシが付けた名前を使う */
+export const requestOrigin = (config, req) => `${req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && req.headers['x-forwarded-host']) || req.headers.host}`;
+/** 公開しているサイトの URL。設定（POC_SITE_URL）があれば、それ（通信の見出しより、確かなため） */
+export const siteOrigin = (config, req) => config.siteUrl || requestOrigin(config, req);

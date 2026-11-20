@@ -558,7 +558,7 @@ function staffDialog() {
   const form = el('form', { class: 'form', novalidate: true },
     field('メールアドレス', 'email', { type: 'email', inputMode: 'email', required: true, autocapitalize: 'none', spellcheck: false }, 'このメールアドレスで、ログインします。パスワードは、本人が最初のログインで決めます'),
     field('名前', 'name', { required: true }),
-    field('役割', 'role', { options: [['auctioneer', '進行役'], ['caller', 'オークショニア（競りの最中の開始値・うりきり・締め・流札だけ）'], ['reception', '受付係'], ['admin', '主催者管理者'], ['operator', '開発・運営者（手数料と記録を見るだけ）']] }),
+    field('役割', 'role', { options: [['auctioneer', '進行役'], ['caller', 'オークショニア（競りの最中の開始価格・うりきり・締め・流札だけ）'], ['reception', '受付係'], ['admin', '主催者管理者'], ['operator', '開発・運営者（手数料と記録を見るだけ）']] }),
     field('電話番号', 'phone', { type: 'tel', inputMode: 'tel' }, '任意。この番号では会員登録できなくなります'),
     msgLine(),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '作る' }), closeBtn()));

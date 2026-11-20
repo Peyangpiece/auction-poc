@@ -23,6 +23,23 @@ export function verifyPassword(password, stored) {
   const actual = crypto.scryptSync(String(password), Buffer.from(salt, 'base64url'), 32, SCRYPT);
   return crypto.timingSafeEqual(actual, Buffer.from(hash, 'base64url'));
 }
+/**
+ * ログインのときの照合: 別のスレッドで計算する（報告書 121 章）。
+ * verifyPassword は、計算のあいだ（約30〜40ミリ秒）、入札の受け付けを含む、ほかの処理を止める。ログインが重なると、入札の返事が遅れていた。
+ * 同時に計算するのは2つまで（ファイルの読み書きに使うスレッドを、使い切らないように）。それより多いログインは、順番を待つ
+ */
+let verifying = 0;
+const verifyQueue = [];
+export async function verifyPasswordAsync(password, stored) {
+  const [scheme, salt, hash] = String(stored).split('$');
+  if (scheme !== 'scrypt' || !salt || !hash) return false;
+  if (verifying >= 2) await new Promise((resolve) => verifyQueue.push(resolve));
+  verifying++;
+  try {
+    const actual = await new Promise((resolve, reject) => crypto.scrypt(String(password), Buffer.from(salt, 'base64url'), 32, SCRYPT, (err, key) => (err ? reject(err) : resolve(key))));
+    return crypto.timingSafeEqual(actual, Buffer.from(hash, 'base64url'));
+  } finally { verifying--; verifyQueue.shift()?.(); }
+}
 
 // ---- 二段階認証（TOTP、RFC 6238。認証アプリと同じ: SHA-1・6桁・30秒）
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
