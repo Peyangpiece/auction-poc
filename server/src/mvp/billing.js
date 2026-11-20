@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { makeInvoiceFiles } from './invoice-files.js';
 import { Worker } from 'node:worker_threads';
+import { migrate } from '../migrate.js';
 import { jpDay, compose, subjectOf, kv, signature } from './mails.js';
 import { createPickup } from './pickup.js';
 import { createInvoiceRoutes } from './invoice-routes.js';
@@ -79,6 +80,10 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     })();
   }
   db.exec(BILLING_SCHEMA);
+  // 形の変更は、番号を付けて1回ずつ（migrate.js）
+  migrate(db, 'billing', [
+    { v: 1, name: '無効にした領収書（取り消した日と、取り消す前の明細）', up: (d) => { d.exec('ALTER TABLE invoices ADD COLUMN voided_at REAL'); d.exec('ALTER TABLE invoices ADD COLUMN void_lines TEXT'); } },
+  ], { nowMs });
   if (!db.prepare("SELECT 1 FROM pragma_table_info('bill_lines') WHERE name = 'premium'").get()) db.exec('ALTER TABLE bill_lines ADD COLUMN premium INTEGER NOT NULL DEFAULT 0');
   // 繰り上げの打診のときの買歩銭（打診のあとに割合を変えても、案内した金額のまま請求する。本番運用の評価 C）
   if (!db.prepare("SELECT 1 FROM pragma_table_info('offers') WHERE name = 'premium'").get()) db.exec('ALTER TABLE offers ADD COLUMN premium INTEGER');
@@ -308,7 +313,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     return worker;
   }
   function makeFiles(args) {
-    const pdf = path.join(args.dir, `${args.invoice.number}.pdf`), xlsx = path.join(args.dir, `${args.invoice.number}.xlsx`);
+    const pdf = path.join(args.dir, `${args.invoice.number}${args.receipt ? '-receipt' : ''}.pdf`), xlsx = path.join(args.dir, `${args.invoice.number}.xlsx`);
     const w = filesWorker();
     if (!w) return makeInvoiceFiles(args);
     const done = new Promise((resolve, reject) => {
@@ -331,20 +336,45 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
     return { ...inv, done };
   }
-  function renderInvoiceNow(invoiceId, { draft = false } = {}) {
-    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
-    const all = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ? ORDER BY id').all(invoiceId);
+  /** 請求書・領収書のファイルに書く中身（発行者・宛先・件名・印鑑） */
+  const fileArgs = (inv, lines, shipping, a, org) => ({
+    dir: invoiceDir, invoice: inv, lines, shipping, org, to: { name: displayName(a), address: a.kind === 'b2b' && a.billing ? a.billing : a.address },
+    seal: sealFile(),
+    premium: { total: lines.reduce((s, l) => s + (l.premium ?? 0), 0), rate: premiumRate() },
+    issuedOn: jst(inv.issued_at), paidOn: inv.kind === 'cash' ? jst(inv.issued_at) : null,
+    // 件名: 開催日と「令和の競り」だけ（発注者の指示。例: 12.7 令和の競り）
+    subject: (() => { const e = db.prepare('SELECT starts_at FROM events WHERE id = ?').get(inv.event_id); return e ? `${Number(e.starts_at.slice(5, 7))}.${Number(e.starts_at.slice(8, 10))} 令和の競り` : '令和の競り'; })(),
+  });
+  /**
+   * 領収書（振込などで払った人。発注者の決定。報告書 123 章）。請求書の明細（解除したものを除く）が、すべて消し込み済みのときだけ作れる。
+   * 当日現金の精算は、請求書が領収書を兼ねるので、作らない。開くたびに、いまの消し込みの内容で作り直す
+   */
+  const receiptJobs = new Map(); // 同じ領収書を、同時に2つ書かない
+  function renderReceipt(inv) {
+    const running = receiptJobs.get(inv.id);
+    if (running) return running;
+    if (inv.kind === 'cash') throw new HttpError(409, '当日現金の精算は、請求書が領収書を兼ねています');
+    const all = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ? AND cancelled_at IS NULL ORDER BY id').all(inv.id);
+    if (!all.length || all.some((l) => !l.cleared_at)) throw new HttpError(409, 'お支払いの確認が済んでいないので、領収書は、まだ発行できません');
     const lines = all.filter((l) => l.kind !== 'shipping'), shipping = all.filter((l) => l.kind === 'shipping');
     const a = account(inv.account_id);
     const org = Object.fromEntries(['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'].map((k) => [k, setting(k)]));
-    const files = makeFiles({
-      dir: invoiceDir, invoice: inv, lines, shipping, org, to: { name: displayName(a), address: a.kind === 'b2b' && a.billing ? a.billing : a.address },
-      seal: sealFile(),
-      premium: { total: lines.reduce((s, l) => s + (l.premium ?? 0), 0), rate: premiumRate() },
-      issuedOn: jst(inv.issued_at), paidOn: inv.kind === 'cash' ? jst(inv.issued_at) : null,
-      // 件名: 開催日と「令和の競り」だけ（発注者の指示。例: 12.7 令和の競り）
-      subject: (() => { const e = db.prepare('SELECT starts_at FROM events WHERE id = ?').get(inv.event_id); return e ? `${Number(e.starts_at.slice(5, 7))}.${Number(e.starts_at.slice(8, 10))} 令和の競り` : '令和の競り'; })(),
-    });
+    const last = all.reduce((x, l) => (l.cleared_at > x.cleared_at ? l : x));
+    // 領収の日は、入金の日（消し込みに記録した日）のうち、いちばん新しい日
+    const files = makeFiles({ ...fileArgs(inv, lines, shipping, a, org), receipt: { paidOn: jst(last.cleared_at), method: all.every((l) => l.cleared_method === 'cash') ? 'cash' : 'transfer', total: all.reduce((s, l) => s + payable(l), 0) } });
+    track(files.done);
+    receiptJobs.set(inv.id, files);
+    files.done.catch(() => {}).finally(() => receiptJobs.delete(inv.id));
+    return files;
+  }
+  function renderInvoiceNow(invoiceId, { draft = false } = {}) {
+    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
+    // 無効にした領収書（精算をすべて取り消したもの）は、取り消す前の明細で作り、「無効」の印を入れる（発注者の決定。報告書 123 章）
+    const all = inv.voided_at ? JSON.parse(inv.void_lines || '[]') : db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ? ORDER BY id').all(invoiceId);
+    const lines = all.filter((l) => l.kind !== 'shipping'), shipping = all.filter((l) => l.kind === 'shipping');
+    const a = account(inv.account_id);
+    const org = Object.fromEntries(['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'].map((k) => [k, setting(k)]));
+    const files = makeFiles({ ...fileArgs(inv, lines, shipping, a, org), voidedOn: inv.voided_at ? jst(inv.voided_at) : null });
     db.prepare('UPDATE invoices SET pdf_file = ?, xlsx_file = ? WHERE id = ?').run(files.pdf, files.xlsx, inv.id);
     // 送付用のメールの下書き（FR-INV-007）。送信は、利用会社の担当者が自分で行う。当日現金の精算では作らない
     if (draft) {
@@ -439,10 +469,10 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   });
 
   // ------------------------------------------------------------ 当日現金の精算（clearing.js）
-  createClearing({ HttpError, audit, bad, db, getLine, issueInvoice, needStaff, nowMs, payable, route, syncLines, text, today, yen });
+  createClearing({ HttpError, audit, bad, db, getLine, issueInvoice, renderInvoice, needStaff, nowMs, payable, route, syncLines, text, today, yen });
 
   // ------------------------------------------------------------ 請求書の一覧・送付済み（invoice-routes.js）
-  createInvoiceRoutes({ HttpError, account, audit, db, displayName, invoiceAmounts, invoiceMail, jst, listLimit, needStaff, nowMs, renderInvoice, route, setting, today });
+  createInvoiceRoutes({ HttpError, account, audit, db, renderReceipt, displayName, invoiceAmounts, invoiceMail, jst, listLimit, needStaff, nowMs, renderInvoice, route, setting, today });
 
   // ------------------------------------------------------------ 未払い: 督促・解除・違約金・繰り上げ・返金（unpaid.js）
   createUnpaid({ HttpError, account, audit, bad, db, displayName, getLine, issueInvoice, jst, lineView, needStaff, notifier, nowMs, payable, premiumOf, premiumRate, route, setting, suspension, text, today, yen });

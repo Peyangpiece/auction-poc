@@ -17,7 +17,7 @@ let link, audioCtx = null, wakeLock = null, player = null, playerLoading = false
 const REJECT = {
   LOT_NOT_OPEN: () => 'この品は入札を受け付けていません',
   AFTER_CLOSE: () => '締めに間に合いませんでした',
-  TOO_HIGH: (r) => `一度に入れられるのは、${yen(maxBid(r.minAllowed ?? r.minBid ?? 0))} までです`,
+  TOO_HIGH: (r) => { const lot = S.lots.get(S.focus); const base = r.currentPrice ?? lot?.currentPrice ?? lot?.startPrice; return base ? `一度に入れられるのは、現在の価格の10倍（${yen(maxBid(base))}）までです` : '一度に入れられる金額を超えています'; },
   BELOW_MINIMUM: (r) => `価格が更新されました：${yen(r.minAllowed ?? r.minBid)} 以上で入札できます`,
   OFF_LADDER: () => '入札できる金額ではありません',
   ALREADY_HIGHEST: () => 'あなたが最高入札者です',
@@ -506,12 +506,13 @@ function checkAmount(amount, lot) {
   const min = lot.minAllowed ?? (lot.currentPrice === null ? lot.startPrice : lot.currentPrice + 1);
   if (amount < min) return { error: lot.currentPrice === null ? `開始価格 ${yen(min)} 以上で入力してください` : `現在価格より高い ${yen(min)} 以上で入力してください` };
   // 上限は、送る前に確かめる（「入札しますか？」と確かめてから断る、という順にならないように）
-  if (amount > maxBid(min)) return { error: `一度に入れられるのは、${yen(maxBid(min))} までです` };
+  const base = lot.currentPrice ?? lot.startPrice;
+  if (base && amount > maxBid(base)) return { error: `一度に入れられるのは、現在の価格の10倍（${yen(maxBid(base))}）までです` };
   return { ok: true };
 }
 // 現在の価格から大きく離れた金額は、押す前に確かめる（桁の打ちまちがいを防ぐ）
-// 1回の入札で入れられる、いちばん高い額（サーバーと同じ決まり: 入札できる最も低い額の2倍か、＋10万円の、大きいほう。上限は100億円）
-const maxBid = (min) => Math.min(1e10, Math.max(min * 2, min + 100000));
+// 1回の入札で入れられる、いちばん高い額（サーバーと同じ決まり: 現在の価格の10倍まで。入札が無ければ、開始価格の10倍まで。上限は100億円。発注者の決定）
+const maxBid = (price) => Math.min(1e10, price * 10);
 const confirmBid = (amount, lot) => new Promise((resolve) => {
   const price = lot.currentPrice ?? lot.startPrice;
   $('bidDlgTitle').textContent = `${yen(amount)} で入札しますか？`;

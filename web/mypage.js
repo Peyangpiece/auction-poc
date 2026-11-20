@@ -102,7 +102,9 @@ function showInvoices(list, lines = [], bank = null) {
     i.state !== 'cancelled' && i.issuedTotal != null && i.issuedTotal !== i.total && el('span', { class: 'note', text: `請求書の金額 ${yen(i.issuedTotal)} から、解除した品を除いた金額です` }),
     el('span', { class: i.state === 'overdue' ? 'warn' : 'invlist__state', text: INVOICE_STATE[i.state] }),
     invoiceItems(lines.filter((l) => l.invoice?.id === i.id)),
-    el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: '請求書を開く（PDF）' })))));
+    el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: i.kind === 'cash' ? (i.state === 'void' ? '無効の領収書を開く（PDF）' : '請求書 兼 領収書を開く（PDF）') : '請求書を開く（PDF）' }),
+    // 振込などで払った人の領収書（お支払いの確認が済んだあと。当日現金の人は、上の請求書が領収書を兼ねる）
+    i.state === 'paid' && i.kind !== 'cash' && el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/receipt`, text: '領収書を開く（PDF）' })))));
 }
 // 繰り上げ落札の回答: どちらも取り消せないので、金額と結果を書いて確かめる。最初のフォーカスは「やめる」（報告書 80 章）
 function answerOffer(o, answer) {

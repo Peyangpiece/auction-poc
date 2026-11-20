@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { DAY, addDays } from './shared.js';
 
 export function createInvoiceRoutes(deps) {
-  const { HttpError, account, audit, db, displayName, invoiceAmounts, invoiceMail, jst, listLimit, needStaff, nowMs, renderInvoice, route, setting, today } = deps;
+  const { HttpError, account, audit, db, renderReceipt, displayName, invoiceAmounts, invoiceMail, jst, listLimit, needStaff, nowMs, renderInvoice, route, setting, today } = deps;
   // ------------------------------------------------------------ 請求書の一覧・送付済み（FR-INV-008）・ファイル
   const invoiceView = (i) => {
     const a = account(i.account_id);
@@ -70,6 +70,15 @@ export function createInvoiceRoutes(deps) {
     // スタッフが、会員の請求書（氏名・住所が載る）を開いた記録（本番運用の評価 C）
     if (ctx.staff) audit(ctx, 'view.invoice', { target: `invoice:${i.number}`, after: { file: 'pdf' } });
     return sendFile(i, 'pdf');
+  });
+  // 領収書（振込などで払った人。発注者の決定。報告書 123 章）。本人と、主催者管理者・受付係が開ける。お支払いの確認（消し込み）が済んでから
+  route('GET', '/api/billing/invoices/:id/receipt', async (ctx, body, id) => {
+    const i = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
+    if (!i || !(ctx.staff && ['admin', 'reception'].includes(ctx.staff.role)) && ctx.member?.id !== i.account_id) throw new HttpError(404, '請求書が見つかりません');
+    const files = renderReceipt(i);
+    await files.done;
+    audit(ctx, ctx.staff ? 'view.invoice' : 'receipt.issue', { target: `invoice:${i.number}`, after: { file: 'receipt' } });
+    return { file: { body: fs.readFileSync(files.pdf), type: 'application/pdf', name: `${i.number}-receipt.pdf` } };
   });
   // 送付用のメールの文面（宛先・件名・本文）。下書きは、利用会社のメールソフトには届かないので、管理画面から写して送れるようにする（報告書 118 章）
   route('GET', '/api/billing/invoices/:id/mail', (ctx, body, id) => {

@@ -11,6 +11,9 @@ import { loadConfig } from '../src/config.js';
 import { createApi } from '../src/mvp/api.js';
 import { totp } from '../src/mvp/security.js';
 import { addDays } from '../src/mvp/billing.js';
+import { execFileSync } from 'node:child_process';
+// PDF の中の文字（道具が入っていない環境では、確かめを飛ばす）
+const pdfText = (file) => { try { return execFileSync('pdftotext', [file, '-'], { encoding: 'utf8' }); } catch { return null; } };
 
 const DAY = 86400000;
 async function setup() {
@@ -85,7 +88,7 @@ async function setup() {
     return made;
   };
   return {
-    api, store, admin, browser, staffLogin, member, sold, lines, line, endEvent, outbox, today, eventId,
+    api, store, dataDir, admin, browser, staffLogin, member, sold, lines, line, endEvent, outbox, today, eventId,
     // 日を進める。スタッフのログインは12時間で切れるので、進めたらログインし直す
     advance: async (days) => { now += days * DAY; for (const b of staff) await b.login(); },
     close: async () => { await new Promise((r) => server.close(r)); await api.billing.filesIdle(); store.db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); },
@@ -740,6 +743,7 @@ test('精算の取り消し（報告書 118 章）: 開催が終わったあと�
   const t = await setup();
   try {
     const b = await t.member(2, { venue: true });
+    const other = await t.member(3);
     t.sold('水筒', [[b, 500]]);
     const water = await t.line('水筒');
     const cash = (await t.admin.post('/api/billing/settle', { lineIds: [water.id] })).json.invoice;
@@ -763,6 +767,23 @@ test('精算の取り消し（報告書 118 章）: 開催が終わったあと�
     assert.match(mail.json.body, /水筒/);
     assert.equal((await t.admin.get(`/api/billing/invoices/${list.find((i) => i.number === cash.number).id}/mail`)).status, 404, '現金の領収書には、送付の文面は無い');
     assert.equal((await b.get(`/api/billing/invoices/${inv.id}/mail`)).status, 401);
+    // 無効の領収書の PDF は、取り消す前の明細で、「無効」の印を入れて作り直す（発注者の決定。報告書 123 章）
+    const voided = t.store.db.prepare('SELECT voided_at, void_lines, pdf_file FROM invoices WHERE number = ?').get(cash.number);
+    assert.ok(voided.voided_at);
+    assert.equal(JSON.parse(voided.void_lines)[0].label, after.label);
+    const txt = pdfText(voided.pdf_file);
+    if (txt !== null) { assert.match(txt, /無効/); assert.match(txt, /精算を取り消したため、無効です/); assert.match(txt, /水筒/, '取り消す前の明細が載る'); }
+    // 領収書（振込で払った人。発注者の決定）: お支払いの確認が済むまでは、出せない。済んだら、本人と主催者管理者が開ける
+    assert.equal((await b.get(`/api/billing/invoices/${inv.id}/receipt`)).status, 409);
+    await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);
+    assert.equal((await t.admin.post(`/api/billing/lines/${after.id}/clear`, { amount: inv.total })).status, 200);
+    const rc = await b.get(`/api/billing/invoices/${inv.id}/receipt`);
+    assert.deepEqual([rc.status, rc.type], [200, 'application/pdf']);
+    assert.equal((await t.admin.get(`/api/billing/invoices/${inv.id}/receipt`)).status, 200);
+    const rtxt = pdfText(path.join(t.dataDir, 'invoices', `${inv.number}-receipt.pdf`));
+    if (rtxt !== null) { assert.match(rtxt, /領収書/); assert.match(rtxt, /銀行振込にて領収しました/); assert.match(rtxt, /領収金額/); assert.doesNotMatch(rtxt, /お振込先/); }
+    assert.equal((await other.get(`/api/billing/invoices/${inv.id}/receipt`)).status, 404, 'ほかの会員は、開けない');
+    assert.equal((await t.admin.get(`/api/billing/invoices/${list.find((i) => i.number === cash.number).id}/receipt`)).status, 409, '当日現金の精算は、請求書が領収書を兼ねる');
     await new Promise((r) => setTimeout(r, 500));
   } finally { await t.close(); }
 });

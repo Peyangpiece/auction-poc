@@ -9,7 +9,9 @@ import { minimumBid, minimumAllowed, validateTable } from './ladder.js';
 
 const MAX_AMOUNT = 1e10; // 金額の上限（開始価格の上限と同じ）
 /** 1回の入札で入れられる、いちばん高い額（min = 入札できる最も低い額） */
-export const maxAllowed = (min) => Math.min(MAX_AMOUNT, Math.max(min * 2, min + 100000));
+// 1回の入札で入れられる、いちばん高い額: 現在の価格の10倍まで（発注者の決定。報告書 123 章）。入札がまだ無いときは、開始価格の10倍まで
+export const MAX_STEP = 10;
+export const maxAllowed = (price) => Math.min(MAX_AMOUNT, price * MAX_STEP);
 
 export const TERMINAL = new Set(['sold', 'unsold', 'not_held']);
 
@@ -154,9 +156,9 @@ export class Auction {
     const min = minimumAllowed(lot.start_price, lot.current_price);
     if (item.amount < min) return 'BELOW_MINIMUM';
     // 上限: 1人の入札で、競りを止められないようにする（けた外れの額を入れると、ほかの人が入札できなくなる）。
-    // 絶対の上限は、開始価格と同じ 100億円。1回の入札で上げられるのは、「入札できる最も低い額の2倍」か「＋10万円」の、大きいほうまで
-    // （10倍だと、組んだ2人が交互に入れて、1秒たらずで上限まで上げられた。2倍でも、組めば上げられるが、進行役が気づいて「中断」できる速さになる）
-    if (item.amount > MAX_AMOUNT || item.amount > maxAllowed(min)) return 'TOO_HIGH';
+    // 絶対の上限は、開始価格と同じ 100億円。1回の入札で上げられるのは、現在の価格（入札が無ければ、開始価格）の10倍まで（発注者の決定。報告書 123 章）。
+    // 【分かっている弱さ】組んだ2人が交互に入れると、短い時間で上限まで上げられる（報告書 116 章で確かめた）。気づいたら、進行役が「中断」する
+    if (item.amount > MAX_AMOUNT || item.amount > maxAllowed(lot.current_price ?? lot.start_price)) return 'TOO_HIGH';
     return 'ACCEPTED';
   }
 

@@ -2,7 +2,7 @@
 import { RECV } from './shared.js';
 
 export function createClearing(deps) {
-  const { HttpError, audit, bad, db, getLine, issueInvoice, needStaff, nowMs, payable, route, syncLines, text, today, yen } = deps;
+  const { HttpError, audit, bad, db, getLine, issueInvoice, renderInvoice, needStaff, nowMs, payable, route, syncLines, text, today, yen } = deps;
   // ------------------------------------------------------------ 当日現金の精算（FR-PAY-010。受付係・主催者管理者）
   route('POST', '/api/billing/settle', async (ctx, body) => {
     const me = needStaff(ctx, 'admin', 'reception');
@@ -64,11 +64,18 @@ export function createClearing(deps) {
     // 本番運用の評価 B4）。開催終了の前なら、もう一度精算でき、開催終了のときは振込の請求書に入る。精算の請求書（領収書）は、記録として残す
     const cashInv = l.invoice_id ? db.prepare("SELECT id FROM invoices WHERE id = ? AND kind = 'cash'").get(l.invoice_id) : null;
     db.transaction(() => {
-      if (cashInv) db.prepare('UPDATE bill_lines SET invoice_id = NULL WHERE id = ?').run(id);
+      if (cashInv) {
+        // 外す前の明細を、領収書に控える。全部を外したら、その領収書は「無効」（PDF にも、印を入れる。発注者の決定。報告書 123 章）
+        const kept = JSON.parse(db.prepare('SELECT void_lines FROM invoices WHERE id = ?').get(cashInv.id).void_lines || '[]');
+        db.prepare('UPDATE invoices SET void_lines = ? WHERE id = ?').run(JSON.stringify([...kept, l]), cashInv.id);
+        db.prepare('UPDATE bill_lines SET invoice_id = NULL WHERE id = ?').run(id);
+        if (!db.prepare('SELECT 1 FROM bill_lines WHERE invoice_id = ?').get(cashInv.id)) db.prepare('UPDATE invoices SET voided_at = ? WHERE id = ?').run(nowMs(), cashInv.id);
+      }
       db.prepare('UPDATE bill_lines SET cleared_at = NULL, cleared_method = NULL, cleared_by = NULL WHERE id = ?').run(id);
       db.prepare('UPDATE clearings SET reversed_at = ?, reverse_reason = ? WHERE line_id = ? AND reversed_at IS NULL').run(nowMs(), reason, id);
     })();
     audit(ctx, 'billing.unclear', { target: `line:${id}`, before: { cleared: true }, after: { cleared: false }, reason });
+    if (cashInv && db.prepare('SELECT voided_at FROM invoices WHERE id = ?').get(cashInv.id).voided_at) await renderInvoice(cashInv.id).done; // 「無効」の印を入れて、作り直す
     // 開催が終わったあとに、当日現金の精算を取り消した: その明細を、振込の請求書にする（そのままだと、請求する手段が無く、期限も停止も付かなかった）
     let reissued = null;
     if (cashInv && db.prepare("SELECT 1 FROM events WHERE id = ? AND phase = 'ended'").get(l.event_id)) {

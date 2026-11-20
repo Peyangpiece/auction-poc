@@ -438,7 +438,7 @@ try {
   check(mine.includes('防水シート') && mine.includes('お渡し済み'), '落札者のマイページに、品・状態が出る（請求書の中に）');
   check(await guest.isHidden('#billing'), '請求書になった品は、「落札した品」に二度出さない');
   const invs = await guest.textContent('#invoices');
-  check(/\d{8}-0001/.test(invs) && invs.includes('¥11,000') && invs.includes('お支払い済み') && invs.includes('請求書を開く'), 'マイページの「請求書」に、請求番号・金額・状態と、PDF を開くボタンが出る');
+  check(/\d{8}-0001/.test(invs) && invs.includes('¥11,000') && invs.includes('お支払い済み') && invs.includes('請求書 兼 領収書を開く'), 'マイページの「請求書」に、請求番号・金額・状態と、PDF を開くボタンが出る');
   await guest.evaluate(() => { location.hash = '#profile'; });
   check(await guest.isVisible('#facts') && await guest.isHidden('#invoices'), '「個人情報の設定」のタブに切り替えられる');
   await guest.evaluate(() => { location.hash = '#bills'; });
