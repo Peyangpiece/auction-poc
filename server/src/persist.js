@@ -12,6 +12,7 @@ import { JOURNAL_PREFIX, parseJournalKey, replayJournal } from './journal.js';
 const gzip = promisify(zlib.gzip); // 圧縮は、別の糸で行う（競りの最中に、入札の処理を止めない）
 
 export const DB_KEY = 'db/auction.db.gz';
+export const RESTORE_NOTE = '.persist-restore-note.json';
 const HISTORY_PREFIX = 'history/';
 const HISTORY_DAYS = 35;
 // 保存しないもの: データベースの本体（写しを別に送る）、計測の記録、作業用のファイル
@@ -25,8 +26,8 @@ async function call(base, method, pathname, body) {
   if (!res.ok) throw new Error(`保存先が ${res.status} を返しました（${method} ${pathname}）`);
   return res;
 }
-/** 保存先に、1つのファイルを置く・消す（書き込みの控えが使う。置くのは、5秒で見切って、やり直す） */
-export const storePut = async (config, rel, body) => { const res = await fetch(config.persistUrl + filePath(rel), { method: 'PUT', body, signal: AbortSignal.timeout(5000) }); if (!res.ok) throw new Error(`保存先が ${res.status} を返しました`); await res.body?.cancel(); };
+/** 保存先に、1つのファイルを置く・消す（書き込みの控えが使う。置くのは、2秒で見切って、やり直す） */
+export const storePut = async (config, rel, body) => { const res = await fetch(config.persistUrl + filePath(rel), { method: 'PUT', body, signal: AbortSignal.timeout(2000) }); if (!res.ok) throw new Error(`保存先が ${res.status} を返しました`); await res.body?.cancel(); };
 export const storeDel = (config, rel) => call(config.persistUrl, 'DELETE', filePath(rel));
 const filePath = (rel) => '/file/' + rel.split('/').map(encodeURIComponent).join('/');
 
@@ -50,6 +51,7 @@ export async function restore(config, { retries = 20, waitMs = 1500, log = conso
   if (!manifest) throw new Error(`保存先に届きません: ${lastError?.message}`);
   fs.mkdirSync(config.dataDir, { recursive: true });
   let count = 0;
+  const notes = []; // 運用者に知らせること（古い控えから戻した・控えのやり直しが途中で止まった）。起動のあと、主催者管理者へ知らせる
   // 取りに行くのに失敗したら、間をあけて、やり直す。それでもだめなら、例外を投げて、起動を止める
   // （届かないことと、中身が壊れていることを、分ける。届かないだけで古い控えに戻すと、そのあとの保存が、新しいデータを上書きしてしまう）
   const get = async (rel) => {
@@ -79,7 +81,7 @@ export async function restore(config, { retries = 20, waitMs = 1500, log = conso
     let healthy = false;
     try { const d = new Database(config.dbPath, { readonly: true }); healthy = d.pragma('quick_check', { simple: true }) === 'ok'; d.close(); } catch { healthy = false; }
     if (!healthy) { log(`【注意】保存先のデータベース（${rel}）が壊れています。次の控えを試します`); continue; }
-    if (rel !== DB_KEY) log(`【注意】日ごとの控え（${rel}）から戻しました。それより後の書き込みは、入っていません`);
+    if (rel !== DB_KEY) { log(`【注意】日ごとの控え（${rel}）から戻しました。それより後の書き込みは、入っていません`); notes.push(`保存先の最新のデータベースが壊れていたため、日ごとの控え（${rel}）から戻しました。それより後の入札・落札・操作は、入っていません。`); }
     count++;
     break;
   }
@@ -91,6 +93,7 @@ export async function restore(config, { retries = 20, waitMs = 1500, log = conso
     try {
       const r = await replayJournal(d, journalFiles, get, { log });
       if (r.applied) log(`書き込みの控えから、${r.applied} 件の書き込みを戻しました（通し番号 ${r.seq} まで）`);
+      if (r.stoppedAt !== null) notes.push(`書き込みの控えのやり直しが、通し番号 ${r.stoppedAt} で止まりました。それより後の入札・落札・操作は、戻っていません。`);
       d.pragma('wal_checkpoint(TRUNCATE)');
     } finally { d.close(); }
   }
@@ -113,6 +116,8 @@ export async function restore(config, { retries = 20, waitMs = 1500, log = conso
     }
   }));
   log(`保存先から ${count} 個のファイルを戻しました`);
+  // 知らせることがあれば、置き場に書いておく（起動したサーバーが読んで、知らせる。保存先には送らない）
+  if (notes.length) fs.writeFileSync(path.join(config.dataDir, RESTORE_NOTE), JSON.stringify({ at: Date.now(), notes }));
   return count;
 }
 
@@ -135,7 +140,8 @@ export function createSaver({ db, config, nowMs = () => Date.now(), log = consol
       if (sizes.get(rel) === st.size) sent.set(rel, `${st.size}:${st.mtimeMs}`);
     }
     // 前の起動のときの、書き込みの控えのうち、いまの写しに入っているものを消す
-    if (journal) for (const f of manifest.files) { const k = parseJournalKey(f.path); if (k && k.last <= snapshotSeq) await call(base, 'DELETE', filePath(f.path)).catch(() => {}); }
+    // （別の世代の控え、または、いまの写しに入っている控え）
+    if (journal) for (const f of manifest.files) { const k = parseJournalKey(f.path); if (k && (k.epoch !== journal.epoch || k.last <= snapshotSeq)) await call(base, 'DELETE', filePath(f.path)).catch(() => {}); }
     seeded = true;
   }
 

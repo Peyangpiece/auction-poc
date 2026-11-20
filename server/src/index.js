@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { loadConfig } from './config.js';
 import { openDb, hashToken } from './db.js';
-import { createSaver, storePut, storeDel } from './persist.js';
+import { createSaver, storePut, storeDel, RESTORE_NOTE } from './persist.js';
 import { createJournal } from './journal.js';
 import { Metrics } from './metrics.js';
 import { StreamControl } from './stream.js';
@@ -143,7 +143,7 @@ function onComment(conn, msg, send) {
 
 const stream = new StreamControl({ config, metrics, broadcast });
 // 会員登録・ログイン・スタッフ・開催・参加手続き。商品は、進行コンソールからその場で登録する
-const api = createApi({ store, config, nowMs, persistStatus: () => saver?.status() ?? null, durable: () => journal?.durable() });
+const api = createApi({ store, config, nowMs, persistStatus: () => saver?.status() ?? null, durable: () => journal?.durable(), healthDetail: () => ({ persist: saver?.status() ?? null, journal: journal?.status() ?? null, journalStarted: journal?.started ?? null }) });
 // 本日の開催を終えたあとは、品の登録・開始を断る（開催に属さない品が残り、次の開催を止めないように。本番運用の評価 A6）
 const lotGate = () => (api.endedToday() ? '本日の開催は終了しています。品の登録・開始はできません' : null);
 const auction = new Auction({ store, config, metrics, broadcast, stream, crashPoint, eventId: api.eventId, bidGate: api.bidGate, lotGate });
@@ -202,6 +202,8 @@ const SECURITY_HEADERS = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer', // 参加用の URL が、よそのサイトに伝わらないようにする
   'x-frame-options': 'DENY',
+  // HTTPS で配っているときは、次からも HTTPS だけで開かせる（HSTS）
+  ...(config.cookieSecure ? { 'strict-transport-security': 'max-age=31536000; includeSubDomains' } : {}),
   'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
   ...(config.csp === 'off' ? {} : { 'content-security-policy': CSP }),
 };
@@ -222,9 +224,13 @@ const server = http.createServer((req, res) => {
     let db = true;
     try { store.db.prepare('SELECT 1').get(); } catch { db = false; }
     res.statusCode = db ? 200 : 503;
+    // だれでも見られるので、出すのは、死活と、配ってよいか（busy）と、警告の名前だけ。
+    // 保存や控えの細かい状態（通し番号・最後に保存した時刻）は、出さない（書き込みがあったかどうかから、登録の有無が分かってしまうため）。
+    // 細かい状態は、主催者管理者だけが /api/staff/health で見られる
     return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, busy: auction.snapshot().lots.some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status)) || ['running', 'break'].includes(api.eventState()?.phase), errors: errorCount, agent: stream.view().agentConnected,
-      // 外からの見張り（死活監視）が、気づけるように: 保存が1分以上失敗している（本番運用の評価 A8）
-      alerts: [...(saver && saver.status().failingSince && nowMs() - saver.status().failingSince > 60000 ? ['persist_failing'] : []), ...(journal?.status().degraded ? ['journal_degraded'] : [])], ...(saver ? { persist: saver.status() } : {}), ...(journal ? { journal: journal.status() } : {}) }));
+      errors: errorCount, agent: stream.view().agentConnected,
+      alerts: [...(saver && saver.status().failingSince && nowMs() - saver.status().failingSince > 60000 ? ['persist_failing'] : []), ...(journal?.status().degraded ? ['journal_degraded'] : []), ...(journal && !journal.started ? ['journal_not_started'] : []), ...(restoreNotes.length ? ['restore_incomplete'] : [])],
+      ...(journal ? { journal: { degraded: journal.status().degraded, putMs: journal.status().putMs } } : {}) }));
   }
   if (url.pathname === '/hooks/ivs' && req.method === 'POST') return handleEventBridge(req, res);
   if (url.pathname.startsWith('/api/')) return api.handle(req, res, url);
@@ -480,7 +486,7 @@ function onClient(ws, req) {
       case 'video_latency':
         return metrics.write('video_latency', { conn: conn.id, paddle: conn.member?.paddle_no ?? null, latencyMs: msg.latencyMs, clientAt: msg.at, net: msg.net ?? null });
       case 'client_event':
-        return metrics.write('client_event', { conn: conn.id, paddle: conn.member?.paddle_no ?? null, name: String(msg.name).slice(0, 64), data: msg.data ?? null, clientAt: msg.at ?? null });
+        return metrics.write('client_event', { conn: conn.id, paddle: conn.member?.paddle_no ?? null, name: String(msg.name).slice(0, 64), data: msg.data !== undefined && JSON.stringify(msg.data).length <= 2000 ? msg.data : null, clientAt: msg.at ?? null });
       case 'comment':
         if (!stillSignedIn()) return;
         return onComment(conn, msg, send);
@@ -659,14 +665,45 @@ if (journal) {
       `理由: ${why ?? '不明'}`,
     ]);
   };
-  await saver.flush();
-  journal.start();
+  // 新しい世代の印をデータベースに書き、その写しが保存先に届いてから、控えを始める（写しと控えが、必ず組になるように）。
+  // 写しを送れないあいだは、控えを始めずに、送れるまでやり直す（そのあいだの守りは、前と同じ、約2秒ごとの写しだけ）
+  journal.begin();
+  const startJournal = async () => {
+    await saver.flush();
+    if (saver.status().lastError) { setTimeout(startJournal, 2000).unref(); return; }
+    journal.start();
+  };
+  await startJournal();
 }
+// 復元のときに、知らせることがあった（古い控えから戻した・控えのやり直しが途中で止まった）: 主催者管理者へ知らせ、/healthz にも出す
+let restoreNotes = [];
+try {
+  const file = path.join(config.dataDir, RESTORE_NOTE);
+  if (fs.existsSync(file)) {
+    restoreNotes = JSON.parse(fs.readFileSync(file, 'utf8')).notes ?? [];
+    fs.rmSync(file, { force: true });
+    if (restoreNotes.length) {
+      console.error('[restore] ' + restoreNotes.join(' / '));
+      api.alertAdmins('restore', 'データを戻したときに、一部が戻りませんでした', [...restoreNotes, '競りの前に、直前の入札・落札・精算が正しく残っているかを、確かめてください。']);
+    }
+  }
+} catch (err) { console.error('[restore]', err); }
 server.listen(config.port, config.host, () => {
   saver?.start();
   console.log(`[server] listening on ${config.host}:${server.address().port} ivsMode=${config.ivsMode} db=${config.dbPath}`);
   console.log(`[server] metrics -> ${metrics.file ?? '（記録しない）'}`);
 });
+
+// ログインが切れた人（ログアウト・停止・パスワードの変更・期限切れ）の、開いたままの画面を、10秒ごとに見つけて切る。
+// 操作のたびにも確かめているが、何もしない画面にも、価格や（スタッフには）最低落札額が届き続けるのを止める
+setInterval(() => {
+  for (const c of clients) {
+    if (!c.recheck || c.ws.readyState !== 1) continue;
+    let ok = false;
+    try { ok = c.recheck(); } catch { ok = false; }
+    if (!ok) { try { c.ws.send(JSON.stringify({ type: 'error', code: 'SIGNED_OUT', message: 'ログインが切れました。ログインし直してください' })); } catch { /* 切れている */ } c.ws.close(4403, 'signed out'); }
+  }
+}, config.sessionRecheckMs).unref();
 
 // 思いがけないエラーで、サーバーごと止まらないようにする（競りの最中に、全員の接続が切れるのを防ぐ）。記録して、続ける
 // 思いがけないエラーは、主催者管理者へも知らせる（1時間に1回まで。中身は、エラーの種類と1行目だけ。本番運用の評価 C3）

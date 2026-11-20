@@ -31,6 +31,9 @@ test('画面を配るときに、ブラウザに守らせる制限を付ける�
   assert.equal((await fetch(`${srv.httpUrl}/%2e%2e%2fserver%2fsrc%2findex.js`)).status, 404);
   const health = await (await fetch(`${srv.httpUrl}/healthz`)).json();
   assert.deepEqual([health.ok, health.db], [true, true]);
+  // だれでも見られるので、保存や控えの細かい状態（通し番号・最後に保存した時刻）は、出さない
+  assert.equal(health.persist, undefined);
+  assert.ok(!JSON.stringify(health).includes('"seq"') && !JSON.stringify(health).includes('lastSavedAt'));
   await srv.stop(); cleanup(ctx);
 });
 

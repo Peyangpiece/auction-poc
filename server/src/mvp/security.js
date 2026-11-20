@@ -91,7 +91,8 @@ export function normalizePhone(input) {
   if (!/^0\d{9,10}$/.test(digits)) return null;
   return digits;
 }
-export const isEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(text ?? '')) && String(text).length <= 254;
+// メールアドレスの形。送信の入口（cloudflare/mail.js）が断る字（, ; < >）は、ここでも断る（入口で必ず失敗する宛先を、送り直し続けないように）
+export const isEmail = (text) => /^[^\s@,;<>"()\[\]\\]+@[^\s@,;<>"()\[\]\\]+\.[^\s@,;<>"()\[\]\\.]{2,}$/.test(String(text ?? '')) && String(text).length <= 254;
 
 /**
  * 利用者の接続元。手前にプロキシがあるとき（POC_TRUST_PROXY=1）は、プロキシが付けた x-real-ip を使う
@@ -100,5 +101,13 @@ export const isEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(tex
  */
 export function clientIp(req, config) {
   const real = config.trustProxy ? String(req.headers['x-real-ip'] ?? '').trim() : '';
-  return real && real.length <= 64 ? real : req.socket.remoteAddress;
+  const ip = real && real.length <= 64 ? real : String(req.socket.remoteAddress ?? '');
+  // IPv6 は、先頭の 64 ビット（1つの回線に配られるまとまり）で数える。1人が、アドレスを変えながら制限をすり抜けるのを防ぐ
+  if (ip.includes(':') && !ip.startsWith('::ffff:')) {
+    const [head, tail = ''] = ip.split('::');
+    const h = head ? head.split(':') : [], t = tail ? tail.split(':') : [];
+    const full = [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t];
+    return full.slice(0, 4).map((x) => x.replace(/^0+(?=.)/, '').toLowerCase()).join(':') + '::/64';
+  }
+  return ip;
 }

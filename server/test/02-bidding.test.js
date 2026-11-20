@@ -59,15 +59,15 @@ test('開始価格以上なら、1円単位で入札できる（価格の段に�
 test('けた外れの入札は断る（1人の入札で、ほかの人が入札できなくなるのを防ぐ）', async () => {
   const lot = await createLot(A, 1000);
   assert.equal((await A.cmd('start', { lotId: lot.id })).ok, true);
-  // 入札できる最も低い額（1,000円）の10倍か、＋10万円の、大きいほうまで
+  // 入札できる最も低い額（1,000円）の2倍か、＋10万円の、大きいほうまで
   assert.equal((await m[0].bid(lot.id, Number.MAX_SAFE_INTEGER)).code, 'TOO_HIGH');
   assert.equal((await m[0].bid(lot.id, 1e10 + 1)).code, 'TOO_HIGH');
   assert.equal((await m[0].bid(lot.id, 101001)).code, 'TOO_HIGH');
   assert.equal((await m[0].bid(lot.id, 101000)).accepted, true);
-  // 次は、101,001円の10倍まで
-  assert.equal((await m[1].bid(lot.id, 1010011)).code, 'TOO_HIGH');
-  const r = await m[1].bid(lot.id, 1010010);
-  assert.deepEqual([r.accepted, r.currentPrice], [true, 1010010]);
+  // 次は、101,001円の2倍まで（組んだ2人が交互に入れても、1回で上げられるのは2倍まで）
+  assert.equal((await m[1].bid(lot.id, 202003)).code, 'TOO_HIGH');
+  const r = await m[1].bid(lot.id, 202002);
+  assert.deepEqual([r.accepted, r.currentPrice], [true, 202002]);
   await A.cmd('close', { lotId: lot.id });
 });
 

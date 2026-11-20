@@ -63,6 +63,8 @@ export class AuctionApp extends DurableObject {
       return new Response(MAINTENANCE_PAGE, { status: 503, headers: { 'content-type': 'text/html; charset=utf-8', 'retry-after': '300', 'cache-control': 'no-store' } });
     }
     // 同時に届いた通信は、1回の起動を待ち合わせる
+    // 公開しているアドレスを覚える（見回りの通信は、内向きの名前なので使わない）
+    { const h = new URL(request.url); if (!this.publicOrigin && h.hostname !== 'internal') this.publicOrigin = `https://${h.host}`; }
     this.starting ??= this.startAndWait().finally(() => { this.starting = undefined; });
     try { await this.starting; } catch (err) {
       // 立ち上がりに時間がかかっているとき（データを戻している最中など）。エラーの画面ではなく、案内を返す
@@ -108,6 +110,8 @@ export class AuctionApp extends DurableObject {
       const env = {
         POC_TRUST_PROXY: '1',
         POC_COOKIE_SECURE: '1',
+        // 公開しているサイトの URL（メールに載せるリンクの先）。設定（SITE_URL）があればそれ。無ければ、最初に届いた通信のアドレス
+        ...(e.SITE_URL || this.publicOrigin ? { POC_SITE_URL: e.SITE_URL || this.publicOrigin } : {}),
         ...(ivs ? {
           POC_IVS_MODE: 'aws', IVS_CHANNEL_ARN: e.IVS_CHANNEL_ARN, IVS_PLAYBACK_URL: e.IVS_PLAYBACK_URL, AWS_REGION: e.AWS_REGION || 'ap-northeast-1',
           AWS_ACCESS_KEY_ID: e.AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY: e.AWS_SECRET_ACCESS_KEY,

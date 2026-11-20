@@ -24,6 +24,7 @@ async function setup(env = {}) {
   /** クッキーを覚える、ブラウザの代わり */
   const browser = () => {
     let cookie = '';
+    const jar = new Map(); // クッキーは、名前ごとに覚える（ログインの印と、端末の印の2つがある）
     const call = async (method, url, body, headers = {}) => {
       const isBuf = Buffer.isBuffer(body);
       const res = await fetch(base + url, {
@@ -32,7 +33,11 @@ async function setup(env = {}) {
         body: method === 'POST' ? (isBuf ? body : JSON.stringify(body ?? {})) : undefined,
       });
       const set = res.headers.get('set-cookie');
-      if (set) cookie = set.split(';')[0].endsWith('=') ? '' : set.split(';')[0];
+      for (const line of res.headers.getSetCookie()) {
+        const pair = line.split(';')[0], name = pair.slice(0, pair.indexOf('='));
+        if (pair.endsWith('=')) jar.delete(name); else jar.set(name, pair);
+      }
+      cookie = [...jar.values()].join('; ');
       const text = await res.text();
       let json = null;
       try { json = JSON.parse(text); } catch { /* 写真やリダイレクト */ }
@@ -477,7 +482,7 @@ test('会員登録を承認しないと、電話番号が空き、もう一度�
 const setupTokenOf = (t, to) => /#setup=([\w-]+)/.exec(t.outbox().filter((m) => m.channel === 'email' && m.to === to && m.kind === 'staff_invite').at(-1).body)[1];
 
 test('スタッフ: 主催者管理者がメールアドレスを登録する。本人は、メールのリンクから、パスワードを決める（メールを受け取れる人だけ）', async () => {
-  const t = await setup();
+  const t = await setup({ POC_SITE_URL: 'https://seri.example.jp' });
   try {
     const admin = await t.staffLogin('admin', 'kanri', null);
     const made = await admin.post('/api/staff/accounts', { email: 'Uketsuke@Example.com', name: '受付 太郎', role: 'reception' });
@@ -519,6 +524,11 @@ test('スタッフ: 主催者管理者がメールアドレスを登録する。
     const before = mails();
     assert.deepEqual((await t.browser().post('/api/staff/setup/request', { email: 'shiranai@example.com' })).json, { ok: true });
     assert.equal(mails(), before, '登録の無いアドレスには、送らない');
+    // 主催者管理者が送ったリンクが新しいうち（1時間以内）は、作り直さない（他人が、この入口で、届いたばかりのリンクを使えなくするのを防ぐ）
+    assert.deepEqual((await t.browser().post('/api/staff/setup/request', { email: 'Uketsuke@example.com' })).json, { ok: true });
+    assert.equal(mails(), before);
+    assert.equal((await t.browser().post('/api/staff/setup/check', { token: token2 })).status, 200, '管理者が送ったリンクは、使えるまま');
+    t.advance(61 * MIN);
     assert.deepEqual((await t.browser().post('/api/staff/setup/request', { email: 'Uketsuke@example.com' })).json, { ok: true });
     assert.equal(mails(), before + 1);
     assert.deepEqual((await t.browser().post('/api/staff/setup/request', { email: 'uketsuke@example.com' })).json, { ok: true });
@@ -536,7 +546,7 @@ test('スタッフ: 主催者管理者がメールアドレスを登録する。
 
 test('スタッフ: 設定にあるメールアドレス（ハッシュ）の人は、メールのリンクから、主催者管理者になる。アドレスを知っているだけの人は、なれない', async () => {
   const hash = crypto.createHash('sha256').update('saisho@example.com').digest('hex');
-  const t = await setup({ POC_ADMIN_EMAIL_SHA256: hash });
+  const t = await setup({ POC_ADMIN_EMAIL_SHA256: hash, POC_SITE_URL: 'https://seri.example.jp' });
   try {
     // アドレスを当てただけでは、パスワードを決められない（前は、これで主催者管理者になれた）
     assert.equal((await t.browser().post('/api/staff/setup', { email: 'saisho@example.com', password: 'nottori-password-9' })).status, 401);
@@ -546,6 +556,7 @@ test('スタッフ: 設定にあるメールアドレス（ハッシュ）の人
     // 本人が頼むと、そのアドレスにリンクが届く
     assert.deepEqual((await t.browser().post('/api/staff/setup/request', { email: 'Saisho@Example.com' })).json, { ok: true });
     const token = setupTokenOf(t, 'saisho@example.com');
+    assert.match(t.outbox().filter((m) => m.kind === 'staff_invite').at(-1).body, /https:\/\/seri\.example\.jp\/staff\.html#setup=/, 'リンクの先は、設定のサイトの URL');
     const b = t.browser();
     assert.equal((await b.post('/api/staff/setup', { token, password: 'tadashii-password-1' })).status, 200);
     assert.equal((await b.get('/api/me')).json.staff.role, 'admin');

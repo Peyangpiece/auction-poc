@@ -67,8 +67,15 @@ jobs:
       - name: 競りの最中でないことを確かめる
         if: env.LIVE_URL != '' && env.FORCE != 'true'
         run: |
-          body="$(curl -fsS --max-time 60 "$LIVE_URL/healthz" || true)"
+          # 取れないときは、3回やり直す。それでも取れなければ、配らない（競りの最中かどうかを確かめられないまま、配らないため）。
+          # サイトが止まっていて、直すために配るときは、手動の実行で force を選ぶ
+          body=""
+          for i in 1 2 3; do body="$(curl -fsS --max-time 60 "$LIVE_URL/healthz" || true)"; [ -n "$body" ] && break; sleep 10; done
           echo "$body"
+          if [ -z "$body" ]; then
+            echo "公開しているサイトの状態を、確かめられません。競りの最中かどうかが分からないので、配りません（それでも配るときは、手動の実行で force を選ぶ）"
+            exit 1
+          fi
           if echo "$body" | grep -q '"busy":true'; then
             echo "競りが進行中です（品の受付中・中断中、または開催の進行中・休憩中）。配ると、全員の接続が切れます。開催を終えてから、やり直してください（手動の実行で force を選ぶと、それでも配ります）"
             exit 1
@@ -119,10 +126,21 @@ jobs:
           fi
           if [ "$PRODUCTION" = "1" ]; then
             if [ -z "$RESEND_API_KEY" ] || [ -z "$MAIL_FROM" ]; then echo "本番の設定（PRODUCTION=1）には、RESEND_API_KEY と MAIL_FROM が要ります"; exit 1; fi
-            $WRANGLER deploy --var BUILD:${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }} --var DEMO:0
+            demo=0
           else
-            $WRANGLER deploy --var BUILD:${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+            demo=1   # お試し用（認証番号を画面に出す）。本番の設定（PRODUCTION=1）でないときだけ
           fi
+          # 前の配りの反映が Cloudflare の側で終わっていないと、「設定が完全には反映されなかった」と言われて失敗することがある。
+          # そのときは、間をあけて、同じ配りをやり直す（3回まで）
+          for attempt in 1 2 3; do
+            set +e
+            $WRANGLER deploy --var BUILD:${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }} --var DEMO:$demo 2>&1 | tee deploy.log
+            rc=${PIPESTATUS[0]}
+            set -e
+            if [ "$rc" = 0 ] && ! grep -q "not fully applied" deploy.log; then break; fi
+            if ! grep -q "not fully applied" deploy.log || [ "$attempt" = 3 ]; then echo "配りに失敗しました"; exit 1; fi
+            echo "Cloudflare の側の反映が終わっていません。90秒待って、やり直します（$attempt 回目）"; sleep 90
+          done
       - name: 管理者の最初のパスワードを入れる
         run: printf '%s' "$ADMIN_PASSWORD" | $WRANGLER secret put ADMIN_PASSWORD
       - name: 最初の主催者管理者のメールアドレスを入れる（GitHub に ADMIN_EMAIL があるときだけ）

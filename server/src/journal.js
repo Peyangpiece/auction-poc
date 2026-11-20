@@ -12,16 +12,24 @@
 // 保存先に届かないあいだは、返事を待たせる。待たせすぎると競りが止まるので、決めた時間（既定 3秒）を超えたら、
 // 返事を先に出して（守りが弱まった状態）、知らせる。届くようになれば、自動で元に戻る。
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 
 export const JOURNAL_PREFIX = 'journal/';
 const pad = (n) => String(n).padStart(12, '0');
-export const journalKey = (first, last) => `${JOURNAL_PREFIX}${pad(first)}-${pad(last)}.json.gz`;
-/** ファイルの名前から、通し番号の範囲を読む。控えのファイルでなければ null */
+// 世代の印: サーバーが起動するたびに、新しい印を付ける。控えのファイルの名前と、データベースの写しの両方に入る。
+// 復元では、写しと同じ印の控えだけを、やり直す（古い写しに戻したあと、別の時間の流れの控えが、番号が合うだけで混ざるのを防ぐ）
+export const journalKey = (epoch, first, last) => `${JOURNAL_PREFIX}${epoch}-${pad(first)}-${pad(last)}.json.gz`;
+/** ファイルの名前から、世代の印と、通し番号の範囲を読む。控えのファイルでなければ null（前の版の、印の無い名前は、印が空になる） */
 export function parseJournalKey(rel) {
-  const m = /^journal\/(\d{12})-(\d{12})\.json\.gz$/.exec(rel);
-  return m ? { first: Number(m[1]), last: Number(m[2]) } : null;
+  const m = /^journal\/(?:([0-9a-f]{12})-)?(\d{12})-(\d{12})\.json\.gz$/.exec(rel);
+  return m ? { epoch: m[1] ?? '', first: Number(m[2]), last: Number(m[3]) } : null;
 }
-const META = 'CREATE TABLE IF NOT EXISTS persist_journal (id INTEGER PRIMARY KEY CHECK (id = 1), seq INTEGER NOT NULL)';
+const META = 'CREATE TABLE IF NOT EXISTS persist_journal (id INTEGER PRIMARY KEY CHECK (id = 1), seq INTEGER NOT NULL, epoch TEXT)';
+function ensureMeta(db, prepare) {
+  db.exec(META);
+  if (!prepare("SELECT 1 FROM pragma_table_info('persist_journal') WHERE name = 'epoch'").get()) db.exec('ALTER TABLE persist_journal ADD COLUMN epoch TEXT');
+  prepare('INSERT OR IGNORE INTO persist_journal (id, seq) VALUES (1, 0)').run();
+}
 
 // 値を、JSON にできる形にする（バイト列と、大きな整数だけ、印を付ける）
 const enc = (v) => (Buffer.isBuffer(v) ? { $b: v.toString('base64') } : typeof v === 'bigint' ? { $n: String(v) }
@@ -41,6 +49,13 @@ export function installWriteHook(db) {
   const begin = prepare('BEGIN IMMEDIATE'), commit = prepare('COMMIT'), rollback = prepare('ROLLBACK');
   const wrap = (stmt, sql) => {
     if (stmt.readonly) return stmt;
+    for (const method of ['bind', 'iterate']) {
+      const call = stmt[method].bind(stmt);
+      stmt[method] = (...args) => {
+        if (hook.sink) throw new Error(`書き込みの文に ${method}() は使えません（書き込みの控えに入らないため）。run()・get()・all() に、値を渡してください`);
+        return call(...args);
+      };
+    }
     for (const method of ['run', 'get', 'all']) {
       const call = stmt[method].bind(stmt);
       stmt[method] = (...args) => {
@@ -58,6 +73,12 @@ export function installWriteHook(db) {
     return stmt;
   };
   db.prepare = (sql) => wrap(prepare(sql), sql);
+  // 控えに入らない書き方は、見張りを始めたあとは、使えないようにする（黙って漏れると、復元したときに、つじつまが合わなくなる）
+  const exec = db.exec.bind(db);
+  db.exec = (sql) => {
+    if (hook.sink) throw new Error('db.exec は、起動のあとは使えません（書き込みの控えに入らないため）。db.prepare(...).run(...) を使ってください');
+    return exec(sql);
+  };
   db.transaction = (fn) => {
     const inner = transaction(function (...args) {
       const mark = hook.buffer.length;
@@ -70,7 +91,9 @@ export function installWriteHook(db) {
       } catch (e) { hook.buffer.length = mark; throw e; } finally { hook.depth--; }
     });
     return (...args) => {
-      const r = inner(...args);
+      let r;
+      // 確定（COMMIT）そのものが失敗したときも、控えにためた分を捨てる（次のトランザクションに混ざらないように）
+      try { r = inner(...args); } catch (e) { if (hook.depth === 0) hook.buffer = []; throw e; }
       if (hook.depth === 0 && hook.buffer.length) { const done = hook.buffer; hook.buffer = []; hook.sink?.committed(done); }
       return r;
     };
@@ -95,9 +118,13 @@ export function journalSeq(db) {
  * @returns { applied, seq, stoppedAt }
  */
 export async function replayJournal(db, files, get, { log = console.log } = {}) {
-  db.exec(META);
-  db.prepare('INSERT OR IGNORE INTO persist_journal (id, seq) VALUES (1, 0)').run();
-  let seq = db.prepare('SELECT seq FROM persist_journal WHERE id = 1').get().seq;
+  ensureMeta(db, db.prepare.bind(db));
+  const meta = db.prepare('SELECT seq, epoch FROM persist_journal WHERE id = 1').get();
+  let seq = meta.seq;
+  // 写しと同じ世代の控えだけを、やり直す。世代の印が無い写し（控えを始める前の写し）には、やり直すものが無い
+  const stale = files.filter((f) => !meta.epoch || f.epoch !== meta.epoch).length;
+  if (stale) log(`書き込みの控えのうち、${stale} 個は、この写しとは別の世代のものなので、使いません`);
+  files = files.filter((f) => meta.epoch && f.epoch === meta.epoch);
   const setSeq = db.prepare('UPDATE persist_journal SET seq = ? WHERE id = 1');
   const todo = files.filter((f) => f.last > seq).sort((a, b) => a.first - b.first);
   let applied = 0;
@@ -132,8 +159,8 @@ export async function replayJournal(db, files, get, { log = console.log } = {}) 
 export function createJournal({ db, put, del, nowMs = () => Date.now(), log = console.error, maxWaitMs = 3000, onDegraded = () => {} }) {
   const hook = installWriteHook(db);
   const raw = hook.raw.prepare;
-  db.exec(META);
-  raw('INSERT OR IGNORE INTO persist_journal (id, seq) VALUES (1, 0)').run();
+  ensureMeta(db, raw);
+  let epoch = raw('SELECT epoch FROM persist_journal WHERE id = 1').get().epoch ?? '';
   let seq = raw('SELECT seq FROM persist_journal WHERE id = 1').get().seq; // 確定した書き込みの、いちばん新しい番号
   let acked = seq;                                                         // 保存先に届いた、いちばん新しい番号
   const setSeq = raw('UPDATE persist_journal SET seq = ? WHERE id = 1');
@@ -143,6 +170,15 @@ export function createJournal({ db, put, del, nowMs = () => Date.now(), log = co
   const shipped = [];    // 保存先にある控えのファイル（写しに入ったら消す）
   const waiters = [];    // { seq, fn }: その番号まで届いたら呼ぶ
 
+  let unackedSince = 0, waitTimer = null;
+  // 届かないまま、決めた時間が過ぎたら、返事を先に出して（守りが弱まった状態）、知らせる
+  const checkWait = () => {
+    if (stopped || degraded || acked >= seq || !unackedSince) return;
+    if (nowMs() - unackedSince < maxWaitMs) { waitTimer = setTimeout(checkWait, maxWaitMs - (nowMs() - unackedSince) + 5); waitTimer.unref?.(); return; }
+    degraded = true; failingSince ||= unackedSince;
+    log(`[journal] 保存先に、${maxWaitMs} ミリ秒のうちに届きません（${lastError ?? '応答なし'}）。返事を先に出します`);
+    onDegraded(true, lastError ?? '応答なし'); release();
+  };
   const release = () => {
     while (waiters.length && (degraded || waiters[0].seq <= acked)) { const w = waiters.shift(); try { w.fn(); } catch (e) { log(`[journal] ${e?.message ?? e}`); } }
   };
@@ -151,23 +187,26 @@ export function createJournal({ db, put, del, nowMs = () => Date.now(), log = co
     shipping = true;
     try {
       while (pending.length) {
-        // 1回に送るのは 200件まで（置き場の、1つの値の大きさの上限に当たらないように）
-        const batch = pending.splice(0, 200);
-        const first = batch[0].seq, last = batch.at(-1).seq, rel = journalKey(first, last);
+        // 1回に送るのは 200件まで、かつ、およそ 512KB まで（置き場の、1つの値の大きさの上限に当たらないように）
+        let take = 0, bytes = 0;
+        while (take < pending.length && take < 200 && (take === 0 || bytes + pending[take].size <= 512 * 1024)) bytes += pending[take++].size;
+        const batch = pending.splice(0, take).map(({ size, ...e }) => e);
+        const first = batch[0].seq, last = batch.at(-1).seq, rel = journalKey(epoch, first, last);
         const body = zlib.gzipSync(JSON.stringify(batch), { level: 1 });
         for (;;) {
           try { const t0 = Date.now(); await put(rel, body); const ms = Date.now() - t0; putMs = putMs === null ? ms : Math.round(putMs * 0.8 + ms * 0.2); putMax = Math.max(putMax, ms); puts++; break; } catch (e) {
             lastError = String(e?.message ?? e);
             failingSince ||= nowMs();
-            // 待たせすぎない: 決めた時間を超えたら、返事を先に出して、知らせる（届くまで、送り直しは続ける）
-            if (!degraded && nowMs() - failingSince >= maxWaitMs) { degraded = true; log(`[journal] 保存先に届きません（${lastError}）。返事を先に出します`); onDegraded(true, lastError); release(); }
+            checkWait(); // 待たせすぎない（届くまで、送り直しは続ける）
             if (stopped) return;
             await new Promise((r) => setTimeout(r, 300));
           }
         }
         shipped.push({ rel, last });
         acked = last;
-        if (failingSince) { failingSince = 0; lastError = null; if (degraded) { degraded = false; onDegraded(false, null); } }
+        unackedSince = acked >= seq ? 0 : (pending[0]?.at ?? nowMs());
+        if (unackedSince) { clearTimeout(waitTimer); waitTimer = setTimeout(checkWait, maxWaitMs + 5); waitTimer.unref?.(); }
+        if (failingSince || degraded) { failingSince = 0; lastError = null; if (degraded) { degraded = false; onDegraded(false, null); } }
         release();
       }
     } finally { shipping = false; }
@@ -177,12 +216,25 @@ export function createJournal({ db, put, del, nowMs = () => Date.now(), log = co
     // 通し番号の記録（書き込みと同じトランザクションの中で呼ばれる）
     mark() { setSeq.run(seq + 1); },
     // 確定した書き込み
-    committed(ops) { seq++; pending.push({ seq, at: nowMs(), ops }); queueMicrotask(ship); },
+    committed(ops) {
+      seq++;
+      pending.push({ seq, at: nowMs(), ops, size: JSON.stringify(ops).length });
+      // 最初に届いていない書き込みができた時刻。ここから決めた時間のうちに届かなければ、返事を先に出す（保存先が、エラーでなく無応答のときも）
+      if (!unackedSince) { unackedSince = nowMs(); clearTimeout(waitTimer); waitTimer = setTimeout(checkWait, maxWaitMs + 5); waitTimer.unref?.(); }
+      queueMicrotask(ship);
+    },
   };
 
   return {
-    /** 見張りを始める（起動のときの準備の書き込みが終わってから呼ぶ。それまでの書き込みは、最初の写しに入る） */
-    start() { if (!stopped) hook.sink = sink; },
+    /**
+     * 新しい世代の印を、データベースに書く（まだ、見張りは始めない）。このあと、写しを保存先へ送ってから、start() を呼ぶ。
+     * 写しに新しい印が入ってから控えを始めるので、復元では、その写しと、その世代の控えが、必ず組になる
+     */
+    begin() { epoch = crypto.randomBytes(6).toString('hex'); raw('UPDATE persist_journal SET epoch = ? WHERE id = 1').run(epoch); return epoch; },
+    get epoch() { return epoch; },
+    /** 見張りを始める（begin() のあと、写しを送ってから呼ぶ。それまでの書き込みは、その写しに入る） */
+    start() { if (stopped) return; if (!epoch) this.begin(); hook.sink = sink; },
+    get started() { return hook.sink === sink; },
     /** いまの番号（確定したもの） */
     get seq() { return seq; },
     /** すべての書き込みが、保存先に届いているか */
@@ -198,6 +250,6 @@ export function createJournal({ db, put, del, nowMs = () => Date.now(), log = co
     status: () => ({ seq, acked, waiting: waiters.length, degraded, failingSince, lastError, putMs, putMax, puts }),
     /** 止める前に、残りを送る */
     async flush(timeoutMs = 10000) { const end = nowMs() + timeoutMs; queueMicrotask(ship); while (acked < seq && nowMs() < end) await new Promise((r) => setTimeout(r, 50)); return acked >= seq; },
-    stop() { stopped = true; hook.sink = null; degraded = true; release(); },
+    stop() { stopped = true; clearTimeout(waitTimer); hook.sink = null; degraded = true; release(); },
   };
 }

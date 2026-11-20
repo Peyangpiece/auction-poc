@@ -31,7 +31,10 @@ export function httpMailSender(url, other) {
     if (!res.ok) {
       let why = '';
       try { why = (await res.json()).error ?? ''; } catch { /* 理由なし */ }
-      throw new Error(`メールを送れませんでした（${res.status}）${why ? ' ' + why : ''}`);
+      const err = new Error(`メールを送れませんでした（${res.status}）${why ? ' ' + why : ''}`);
+      // 宛先や中身がおかしいと言われたとき（400 番台。混雑の 429 と時間切れの 408 は除く）は、送り直しても同じなので、やり直さない
+      err.permanent = res.status >= 400 && res.status < 500 && res.status !== 429 && res.status !== 408;
+      throw err;
     }
     await res.body?.cancel();
   };
@@ -78,6 +81,7 @@ export class Notifier {
         return true;
       } catch (err) {
         lastError = err;
+        if (err?.permanent) break;
       }
       if (attempt < this.retries) await new Promise((r) => setTimeout(r, this.waitMs * (attempt + 1)));
     }

@@ -8,6 +8,8 @@ import { nowMs } from './clock.js';
 import { minimumBid, minimumAllowed, validateTable } from './ladder.js';
 
 const MAX_AMOUNT = 1e10; // 金額の上限（開始値の上限と同じ）
+/** 1回の入札で入れられる、いちばん高い額（min = 入札できる最も低い額） */
+export const maxAllowed = (min) => Math.min(MAX_AMOUNT, Math.max(min * 2, min + 100000));
 
 export const TERMINAL = new Set(['sold', 'unsold', 'not_held']);
 
@@ -149,8 +151,9 @@ export class Auction {
     const min = minimumAllowed(lot.start_price, lot.current_price);
     if (item.amount < min) return 'BELOW_MINIMUM';
     // 上限: 1人の入札で、競りを止められないようにする（けた外れの額を入れると、ほかの人が入札できなくなる）。
-    // 絶対の上限は、開始値と同じ 100億円。1回の入札で上げられるのは、「入札できる最も低い額の10倍」か「＋10万円」の、大きいほうまで
-    if (item.amount > MAX_AMOUNT || item.amount > Math.max(min * 10, min + 100000)) return 'TOO_HIGH';
+    // 絶対の上限は、開始値と同じ 100億円。1回の入札で上げられるのは、「入札できる最も低い額の2倍」か「＋10万円」の、大きいほうまで
+    // （10倍だと、組んだ2人が交互に入れて、1秒たらずで上限まで上げられた。2倍でも、組めば上げられるが、進行役が気づいて「中断」できる速さになる）
+    if (item.amount > MAX_AMOUNT || item.amount > maxAllowed(min)) return 'TOO_HIGH';
     return 'ACCEPTED';
   }
 
@@ -504,6 +507,7 @@ export class Auction {
       // 開始値と同じ最低落札額は、そのまま持つ（最初の入札で届き、ランプが点く。報告書 89 章）
     }
     if (!String(title ?? '').trim()) throw new Error('品名を入力してください');
+    if (String(title).trim().length > 100) throw new Error('品名は、100文字以内にしてください');
     const info = this.store.q.insertLot.run({ event: this.eventId(), title: String(title).trim(), start, unit: unitOverride, reserve, at: nowMs(), pending: pending ? 1 : 0 });
     const lot = this.lotView(Number(info.lastInsertRowid));
     this.broadcast({ type: 'lot', lot });

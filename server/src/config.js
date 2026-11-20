@@ -97,6 +97,8 @@ export function loadConfig(env = process.env) {
     persistUrl: (env.POC_PERSIST_URL || '').replace(/\/$/, ''),
     // 保存の間隔。書き込みがあったときだけ送る
     // 書き込みの控え（受理した入札を、返事の前に、外の保存先へ書く）。0 で止める。保存先に届かないとき、返事を待たせる上限（ミリ秒）
+    // 開いたままの画面の、ログインの確かめ直しの間隔（ミリ秒）
+    sessionRecheckMs: num(env.POC_SESSION_RECHECK_MS, 10000),
     journal: env.POC_JOURNAL !== '0',
     journalMaxWaitMs: num(env.POC_JOURNAL_MAX_WAIT_MS, 3000),
     persistIntervalMs: num(env.POC_PERSIST_INTERVAL_MS, 2000),

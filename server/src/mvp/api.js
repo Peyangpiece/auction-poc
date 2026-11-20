@@ -33,6 +33,7 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const OTP_TTL = 5 * MIN;            // 認証番号の有効期限（FR-AUTH-004）
 const OTP_MAX_ATTEMPTS = 5;         // 入力の誤り5回で無効
+const OTP_MAX_FAILS_PER_HOUR = 10; // 送り直しをまたいだ、誤りの上限（1時間）
 const OTP_SENDS_PER_HOUR = 5;       // 同じ番号へ1時間に5回まで
 // 会員: 一度ログインしたら、その端末では、ログインを求めない（発注者の指示）。最後に操作してから 400 日で切れる
 // （ブラウザがクッキーを覚えておける上限に合わせた。使っているかぎり、延び続ける）
@@ -50,7 +51,7 @@ class HttpError extends Error {
 }
 const bad = (message, extra) => new HttpError(400, message, extra);
 
-export function createApi({ store, config, nowMs, persistStatus = () => null, durable = () => null }) {
+export function createApi({ store, config, nowMs, persistStatus = () => null, durable = () => null, healthDetail = () => ({}) }) {
   const db = store.db;
   // 以前の版のデータベース: スタッフの役割に「開発・運営者」「オークショニア」を足すには、表を作り直すしかない（SQLite の制約）。行の id は変えない
   const oldStaff = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'staff_accounts'").get();
@@ -116,6 +117,11 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = 'pii_purged_at'").get()) db.exec('ALTER TABLE member_accounts ADD COLUMN pii_purged_at REAL');
   // 開催のお知らせメールを送った記録（同じ開催の同じ会員に、2度送らない）
   db.exec('CREATE TABLE IF NOT EXISTS event_mails (event_id INTEGER NOT NULL, account_id INTEGER NOT NULL, at REAL NOT NULL, PRIMARY KEY (event_id, account_id))');
+  for (const [col, type] of [['fails', 'INTEGER NOT NULL DEFAULT 0'], ['fails_from', 'REAL NOT NULL DEFAULT 0']]) {
+    if (!db.prepare("SELECT 1 FROM pragma_table_info('otp_codes') WHERE name = ?").get(col)) db.exec(`ALTER TABLE otp_codes ADD COLUMN ${col} ${type}`);
+  }
+  // ログイン ID は、会員のあいだで重ならない（承認のときに発行する「rw＋番号」と、本人が決めた ID がぶつからないように）
+  try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS member_accounts_login_id ON member_accounts(login_id) WHERE login_id IS NOT NULL'); } catch (e) { console.error('[migrate] ログイン ID が重なっている会員がいるため、重なりを防ぐ索引を作れません:', e.message); }
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
   // お試し用（認証番号を画面に出す設定）から本番の設定に切り替えたら、お試しのあいだのログインをすべて消し、送ったメールの控えも消す
   // （お試しのあいだに、他人に作られたログインを、本番に持ち込まない。本番運用の評価 A1。報告書 102 章）
@@ -197,7 +203,11 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   db.exec('CREATE TABLE IF NOT EXISTS app_secrets (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
   db.prepare('INSERT OR IGNORE INTO app_secrets (key, value) VALUES (?, ?)').run('device', crypto.randomBytes(32).toString('hex'));
   const deviceKey = db.prepare("SELECT value FROM app_secrets WHERE key = 'device'").get().value;
-  const deviceSig = (kind, id) => crypto.createHmac('sha256', deviceKey).update(`${kind}:${id}`).digest('base64url');
+  // 印には、いまのパスワード（のハッシュ）も混ぜる。パスワードを変える・再発行すると、前の端末の印は使えなくなる
+  const deviceSig = (kind, id) => {
+    const row = kind === 's' ? db.prepare('SELECT password_hash AS h FROM staff_accounts WHERE id = ?').get(id) : db.prepare('SELECT password_hash AS h FROM member_accounts WHERE id = ?').get(id);
+    return crypto.createHmac('sha256', deviceKey).update(`${kind}:${id}:${row?.h ?? ''}`).digest('base64url');
+  };
   function trustDevice(ctx, kind, id) {
     const secure = config.cookieSecure || ctx.req.headers['x-forwarded-proto'] === 'https';
     const prev = ctx.res.getHeader('set-cookie');
@@ -272,8 +282,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
     const sent = db.prepare('SELECT COUNT(*) AS n FROM otp_sends WHERE phone = ? AND at > ?').get(phone, now - HOUR).n;
     if (sent >= OTP_SENDS_PER_HOUR) throw new HttpError(429, '認証番号の送信が上限（1時間に5回）に達しました。1時間ほど待ってから、もう一度お試しください');
     const code = newOtpCode();
-    db.prepare('INSERT INTO otp_codes (phone, code_hash, expires_at, attempts) VALUES (?,?,?,0) ON CONFLICT(phone) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0')
-      .run(phone, sha256(phone + ':' + code), now + OTP_TTL);
+    db.prepare('INSERT INTO otp_codes (phone, code_hash, expires_at, attempts, fails, fails_from) VALUES (?,?,?,0,0,?) ON CONFLICT(phone) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, fails = CASE WHEN otp_codes.fails_from > excluded.fails_from - 3600000 THEN otp_codes.fails ELSE 0 END, fails_from = CASE WHEN otp_codes.fails_from > excluded.fails_from - 3600000 THEN otp_codes.fails_from ELSE excluded.fails_from END')
+      .run(phone, sha256(phone + ':' + code), now + OTP_TTL, now);
     db.prepare('INSERT INTO otp_sends (phone, at) VALUES (?, ?)').run(phone, now);
     // 送信の失敗による自動の再送（IF-EXT-003）は、上の回数に数えない（1回の送信として記録済み）
     let delivered;
@@ -292,9 +302,11 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   function checkOtp(phone, code) {
     const row = db.prepare('SELECT * FROM otp_codes WHERE phone = ?').get(phone);
     const fail = new HttpError(400, '認証番号が正しくないか、期限が切れています。番号を送り直してください', { resend: true });
+    // 送り直しても、誤りの回数は消えない: 1時間に、合わせて10回まちがえたら、その宛先は1時間使えない（送り直しを挟んだ総当たりを防ぐ）
+    if (row && row.fails >= OTP_MAX_FAILS_PER_HOUR && nowMs() - row.fails_from < HOUR) throw new HttpError(429, '認証番号のまちがいが続いたため、しばらく使えません。1時間ほど待ってから、もう一度お試しください');
     if (!row || nowMs() > row.expires_at || row.attempts >= OTP_MAX_ATTEMPTS) throw fail;
     if (!safeEqual(row.code_hash, sha256(phone + ':' + String(code ?? '').trim()))) {
-      db.prepare('UPDATE otp_codes SET attempts = attempts + 1 WHERE phone = ?').run(phone);
+      db.prepare('UPDATE otp_codes SET attempts = attempts + 1, fails = fails + 1 WHERE phone = ?').run(phone);
       const left = OTP_MAX_ATTEMPTS - (row.attempts + 1);
       throw left > 0 ? new HttpError(400, `認証番号が違います（あと ${left} 回）`) : fail;
     }
@@ -324,6 +336,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
     if (!need && !loginId && !password) return null;
     if (!/^[a-z0-9._-]{4,32}$/.test(loginId)) errors.loginId = 'ログイン ID は、半角の英数字と . _ - で、4〜32文字にしてください';
     else if (db.prepare('SELECT 1 FROM member_accounts WHERE login_id = ? AND id IS NOT ?').get(loginId, memberId)) errors.loginId = 'このログイン ID は、使われています。別の ID にしてください';
+    // 「rw＋数字」は、承認のときに発行する ID の形。自分に発行されたもの以外は、選べない（これから承認される人の ID を、先に取られないように）
+    else if (/^rw\d+$/.test(loginId) && db.prepare('SELECT login_id FROM member_accounts WHERE id IS ?').get(memberId)?.login_id !== loginId) errors.loginId = 'このログイン ID は、使えません。別の ID にしてください';
     if (password.length < 8) errors.password = 'パスワードは、8文字以上にしてください';
     else if (password.length > 200) errors.password = 'パスワードが長すぎます';
     else if (password.toLowerCase() === loginId) errors.password = 'ログイン ID と同じパスワードは、使えません';
@@ -637,6 +651,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
     db.prepare('UPDATE member_accounts SET login_id = ?, password_hash = ?, login_failed = 0, login_locked_until = 0, updated_at = ? WHERE id = ?').run(cred.loginId, hashPassword(cred.password), nowMs(), m.id);
     // ほかの端末のログインは切る（パスワードを変えたのに、古い端末が入ったままにならないように）
     db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ? AND id_hash <> ?").run(m.id, ctx.sessionHash);
+    trustDevice(ctx, 'm', m.id); // この端末の印を、新しいパスワードで作り直す（ほかの端末の印は、使えなくなる）
     audit(ctx, 'member.credentials', { target: `member:${m.id}` });
     return { ok: true, member: memberView(db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(m.id)) };
   });
@@ -722,6 +737,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   };
   const setupFail = () => new HttpError(401, 'このリンクでは、パスワードを決められません。すでに決めてあるか、期限（7日）が過ぎています。主催者管理者に、メールの送り直しを頼んでください');
   // リンクを開いたときに、だれのパスワードを決めるのかを出す
+  // 保存と、書き込みの控えの、細かい状態（主催者管理者だけ）
+  route('GET', '/api/staff/health', (ctx) => { needStaff(ctx, 'admin'); return { ok: true, ...healthDetail() }; });
   route('POST', '/api/staff/setup/check', (ctx, body) => {
     throttle(ctx);
     const staff = pendingByToken(body.token);
@@ -743,7 +760,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   // 「はじめての方」: メールアドレスを入れると、パスワードを決めるためのメールを送る。
   // 送るのは、(1) 招待されていて、まだパスワードを決めていないスタッフ、(2) 設定にあるメールアドレス（ハッシュで照らす）の、最初の主催者管理者。
   // 返事は、どの場合も同じ（登録があるかどうかを、教えない）。同じ宛先には、10分に1通まで
-  const setupMailAt = new Map();
+  const setupMailAt = new Map(), setupMailDay = new Map();
   route('POST', '/api/staff/setup/request', async (ctx, body) => {
     throttle(ctx);
     const mail = String(body.email ?? '').trim().toLowerCase();
@@ -760,7 +777,15 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
       staff = staffByLogin(mail);
     }
     if (!staff || !staff.active || !staff.email || staff.password_hash) return same;
+    // 主催者管理者が送ったリンクが、まだ新しい（1時間以内）うちは、作り直さない（他人が、この入口を呼んで、届いたばかりのリンクを使えなくするのを防ぐ）。
+    // 同じ宛先に送るのは、1日に3通まで
+    const issuedAt = staff.setup_hash ? staff.setup_expires - SETUP_LIFETIME : 0;
+    if (issuedAt && nowMs() - issuedAt < HOUR) return same;
+    const day = setupMailDay.get(mail)?.filter((t) => nowMs() - t < DAY) ?? [];
+    if (day.length >= 3) return same;
+    setupMailDay.set(mail, [...day, nowMs()]);
     if (setupMailAt.size > 5000) setupMailAt.clear();
+    if (setupMailDay.size > 5000) setupMailDay.clear();
     setupMailAt.set(mail, nowMs());
     await sendStaffInvite(ctx, { id: staff.id, email: staff.email, role: staff.role, name: staff.name });
     return same;
@@ -776,6 +801,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
     db.prepare('UPDATE staff_accounts SET password_hash = ? WHERE id = ?').run(hashPassword(next), me.id);
     // ほかの端末のログインは切る（この端末だけを残す）
     db.prepare("DELETE FROM sessions WHERE kind = 'staff' AND subject_id = ? AND id_hash <> ?").run(me.id, ctx.sessionHash);
+    trustDevice(ctx, 's', me.id);
     audit(ctx, 'staff.password_change', { target: `staff:${me.id}` });
     return { ok: true };
   });
@@ -860,7 +886,11 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   }
   async function sendStaffInvite(ctx, s, { reset = false } = {}) {
     // リンクの先は、設定のサイトの URL。無ければ、主催者管理者が開いているページの URL（入口の Worker が付ける値。利用者は書き換えられない）
-    const origin = config.siteUrl || setting('site_url') || `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
+    // ログインしていない人の要求（「はじめての方」）では、要求のヘッダー（Host）を、リンクの先に使わない。
+    // 入口（プロキシ）が付けた値だけを信用する。どれも無ければ、送らない（偽のサイトへのリンクを、本人あてに送らせないため）
+    const trusted = config.siteUrl || setting('site_url') || (config.trustProxy && ctx.req.headers['x-forwarded-host'] ? `https://${ctx.req.headers['x-forwarded-host']}` : '');
+    if (!ctx.staff && !trusted && !config.devShowCodes) { console.error('[staff] サイトの URL が決まっていないので、設定用のメールを送りません（POC_SITE_URL を入れてください）'); return {}; }
+    const origin = trusted || `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${ctx.req.headers.host}`;
     // 1回だけ使える合言葉を作り直す（前のリンクは、使えなくなる）。期限は7日
     const token = randomToken(32);
     db.prepare('UPDATE staff_accounts SET setup_hash = ?, setup_expires = ? WHERE id = ?').run(sha256('setup:' + token), nowMs() + SETUP_LIFETIME, s.id);

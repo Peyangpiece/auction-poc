@@ -18,6 +18,8 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'auction-journal-'));
 const dump = (db) => Object.fromEntries(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 't_%' ORDER BY name").all()
   .map(({ name }) => [name, db.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all()]));
 const filesOf = (map) => [...map.keys()].map((rel) => ({ rel, ...parseJournalKey(rel) })).filter((f) => f.first);
+// 世代の印を書いてから写しを取り、控えを始める（本物の起動と同じ順）
+const beginWith = async (journal, db, snap) => { journal.begin(); if (snap) await db.backup(snap); journal.start(); };
 async function until(cond, ms = 5000) { const end = Date.now() + ms; while (!cond()) { if (Date.now() > end) throw new Error('until: 時間切れ'); await sleep(10); } }
 
 test('控え: 1文・トランザクション・取り消されたトランザクション・入れ子を、写しの上にやり直すと、元と同じになる', async () => {
@@ -28,7 +30,7 @@ test('控え: 1文・トランザクション・取り消されたトランザ�
   const remote = new Map();
   const journal = createJournal({ db, put: async (rel, body) => { remote.set(rel, body); }, del: async (rel) => { remote.delete(rel); } });
   db.prepare('INSERT INTO t_a (v, n) VALUES (?, ?)').run('始める前', 0); // 見張りを始める前の書き込みは、控えない
-  journal.start();
+  await beginWith(journal, db, null);
   const ins = db.prepare('INSERT INTO t_a (v, n) VALUES (?, ?)');
   ins.run('1文', 1);
   db.transaction(() => { ins.run('まとめて1', 2); ins.run('まとめて2', 3); db.prepare('INSERT INTO t_b VALUES (@k, @blob)').run({ k: 'x', blob: Buffer.from([1, 2, 3]) }); })();
@@ -68,10 +70,9 @@ test('控え: 番号が途切れていたら、そこで止める', async () => 
   const dir = tmp();
   const { db } = openDb(path.join(dir, 'a.db'));
   db.exec('CREATE TABLE t_a (v TEXT)');
-  await db.backup(path.join(dir, 'snap.db'));
   const remote = new Map();
   const journal = createJournal({ db, put: async (rel, body) => { remote.set(rel, body); }, del: async () => {} });
-  journal.start();
+  await beginWith(journal, db, path.join(dir, 'snap.db'));
   for (const v of ['一', '二', '三']) { db.prepare('INSERT INTO t_a VALUES (?)').run(v); await journal.durable(); }
   const files = filesOf(remote).sort((a, b) => a.first - b.first);
   assert.equal(files.length, 3);
@@ -192,4 +193,74 @@ test('突然落ちても、受理した入札と落札は残る（写しを送�
     remote.server.close(); remote.server.closeAllConnections?.();
     cleanup(ctx);
   }
+});
+
+test('控え: 古い写しに戻したあと、前の世代の控えは混ざらない（番号が合っていても、使わない）', async () => {
+  const dir = tmp();
+  const remote = new Map();
+  const put = async (rel, body) => { remote.set(rel, body); }, del = async (rel) => { remote.delete(rel); };
+  // 第1世代: 写し（番号2）のあと、3〜4 を控えに書いて、落ちる
+  const g1 = openDb(path.join(dir, 'g1.db'));
+  g1.db.exec('CREATE TABLE t_a (v TEXT)');
+  const j1 = createJournal({ db: g1.db, put, del });
+  await beginWith(j1, g1.db, null);
+  for (const v of ['1', '2']) g1.db.prepare('INSERT INTO t_a VALUES (?)').run(v);
+  await j1.durable();
+  await g1.db.backup(path.join(dir, 'old.db'));     // これが「古い写し」
+  for (const v of ['3（前の世代）', '4（前の世代）']) g1.db.prepare('INSERT INTO t_a VALUES (?)').run(v);
+  await j1.durable();
+  g1.db.close();
+  // 運用者が、古い写しに戻して、起動し直す（第2世代）。番号は 2 から続き、3 を書いて、落ちる
+  fs.copyFileSync(path.join(dir, 'old.db'), path.join(dir, 'g2.db'));
+  const g2 = openDb(path.join(dir, 'g2.db'));
+  const j2 = createJournal({ db: g2.db, put, del });
+  await beginWith(j2, g2.db, path.join(dir, 'snap2.db'));
+  assert.notEqual(j2.epoch, j1.epoch);
+  g2.db.prepare('INSERT INTO t_a VALUES (?)').run('3（新しい世代）');
+  await j2.durable();
+  g2.db.close();
+  // 第2世代の写しに、控えをやり直す: 前の世代の「4」は、番号が続いていても、入らない
+  const copy = new Database(path.join(dir, 'snap2.db'));
+  const logs = [];
+  const r = await replayJournal(copy, filesOf(remote), async (rel) => remote.get(rel), { log: (m) => logs.push(m) });
+  assert.deepEqual(copy.prepare('SELECT v FROM t_a ORDER BY rowid').all().map((x) => x.v), ['1', '2', '3（新しい世代）']);
+  assert.deepEqual([r.applied, r.stoppedAt], [1, null]);
+  assert.ok(logs.some((m) => /別の世代/.test(m)));
+  copy.close();
+});
+
+test('控え: 保存先が、エラーでなく無応答でも、決めた時間で返事を先に出す', async () => {
+  const dir = tmp();
+  const { db } = openDb(path.join(dir, 'a.db'));
+  db.exec('CREATE TABLE t_a (v TEXT)');
+  const degraded = [];
+  let hang = true;
+  const journal = createJournal({ db, maxWaitMs: 120, log: () => {}, onDegraded: (on) => degraded.push(on), del: async () => {},
+    put: () => (hang ? new Promise((resolve) => { const t = setInterval(() => { if (!hang) { clearInterval(t); resolve(); } }, 10); }) : Promise.resolve()) });
+  await beginWith(journal, db, null);
+  const t0 = Date.now();
+  db.prepare('INSERT INTO t_a VALUES (?)').run('入札');
+  let answered = 0;
+  journal.after(() => { answered = Date.now() - t0; });
+  await until(() => answered > 0, 2000);
+  assert.ok(answered >= 100 && answered < 600, `返事まで ${answered}ms`);
+  assert.deepEqual(degraded, [true]);
+  hang = false;
+  await until(() => journal.status().degraded === false, 3000);
+  assert.equal(journal.clean(), true);
+  journal.stop(); db.close();
+});
+
+test('控え: 控えに入らない書き方（exec・bind・iterate）は、見張りを始めたあとは、エラーにする', async () => {
+  const dir = tmp();
+  const { db } = openDb(path.join(dir, 'a.db'));
+  db.exec('CREATE TABLE t_a (v TEXT)');
+  const journal = createJournal({ db, put: async () => {}, del: async () => {} });
+  await beginWith(journal, db, null);
+  assert.throws(() => db.exec("INSERT INTO t_a VALUES ('x')"), /db\.exec は、起動のあとは使えません/);
+  assert.throws(() => db.prepare('INSERT INTO t_a VALUES (?)').bind('x'), /bind\(\) は使えません/);
+  assert.throws(() => db.prepare('INSERT INTO t_a VALUES (?) RETURNING v').iterate('x'), /iterate\(\) は使えません/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM t_a').get().n, 0);
+  assert.equal([...db.prepare('SELECT v FROM t_a').iterate()].length, 0, '読むだけの文は、これまでどおり使える');
+  journal.stop(); db.close();
 });
