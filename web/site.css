@@ -593,3 +593,5 @@ body:not(.app) main.narrow { max-width: 520px; }
 @media (min-width: 960px) { .sitefoot { padding-left: max(32px, env(safe-area-inset-left)); padding-right: max(32px, env(safe-area-inset-right)); } }
 /* スタッフのログインの欄も、会員のログインと同じく、中央に置く */
 body.staffpage #login { margin-inline: auto; }
+/* 画面いっぱいでないものは、中央に置く（発注者の指示。報告書 127 章） */
+.lead, .narrowcol, body.staffpage #panel .form { margin-inline: auto; }
