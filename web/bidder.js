@@ -121,7 +121,8 @@ function render() {
   // 良い知らせも、目で分かるようにする: 最高入札者のあいだは金の枠、落札したら金の帯と、お支払いへの入口
   $('board').classList.toggle('lead', mine && st === 'open');
   $('board').classList.toggle('won', mine && st === 'sold');
-  $('toPay').hidden = !(mine && st === 'sold') || !!token;
+  // お支払いへの入口は、その日の競りが終わってから出す（競りの最中に、画面を離れさせない。本番運用の評価 C）
+  $('toPay').hidden = !(mine && st === 'sold' && S.ended) || !!token;
 
   // 入札ボタン。観戦中は「応札に切り替える」ボタンとして働く（切り替えの場所を探させない）
   const watching = S.mode !== 'bid';
@@ -298,9 +299,11 @@ setInterval(() => {
 // ---- サーバーからのメッセージ
 // 休憩と開催終了の知らせ（FR-CON-003、FR-EVT-003）
 function renderEvent(event, ended = false) {
+  const changed = S.ended !== ended;
   S.ended = ended;
   $('eventNote').textContent = ended ? '本日の競りは終了しました。ご参加ありがとうございました。'
     : event?.phase === 'break' ? `休憩中です。再開の予定は ${event.resumeAt} です。` : '';
+  if (changed) render(); // 終わったら、落札した品の「お支払いの確認へ」を出す
 }
 function onMessage(msg, at) {
   switch (msg.type) {

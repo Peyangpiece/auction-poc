@@ -208,6 +208,8 @@ main:focus { outline: none; }
   position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; text-align: center;
   padding: 24px; background: rgba(0, 0, 0, .86); color: #fff; font-size: 32px; font-weight: 700; overscroll-behavior: contain;
 }
+/* 切れているあいだは、後ろの画面（価格など）をぼかして読めなくする。動きを減らす設定でも、ぼかしは変わらない（動きではないため） */
+body.offline > :not(.overlay):not(script):not(dialog) { filter: blur(10px); }
 .overlay__action { display: flex; width: fit-content; margin: 20px auto 0; font-size: 17px; }
 .overlay small { display: block; font-size: 15px; font-weight: 400; color: rgba(255, 255, 255, .78); margin-top: 8px; }
 

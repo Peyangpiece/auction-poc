@@ -81,9 +81,14 @@ function invoiceItems(lines) {
       note ? el('span', { class: l.pickupLate ? 'warn' : 'note', text: note }) : null);
   }));
 }
-function showInvoices(list, lines = []) {
+function showInvoices(list, lines = [], bank = null) {
   if (!list.length) return;
-  $('#invoices').replaceChildren(el('ul', { class: 'rows invlist' }, list.map((i) => el('li', {},
+  // お支払い前の請求書があれば、振込先を一覧の上に出す（請求書の PDF を開かなくても振り込めるように。本番運用の評価 C）
+  const unpaid = list.filter((i) => i.state === 'billed' || i.state === 'overdue');
+  const bankBox = bank && unpaid.length ? el('div', { class: 'banner bankbox', role: 'note' },
+    el('b', { text: 'お振込先' }), el('p', { class: 'dyn bank', text: bank }),
+    el('p', { class: 'note', text: `ご依頼人名の前に、請求書番号（${unpaid.map((i) => i.number).join('・')}）を入れてください。` })) : null;
+  $('#invoices').replaceChildren(...[bankBox].filter(Boolean), el('ul', { class: 'rows invlist' }, list.map((i) => el('li', {},
     el('div', { class: 'invlist__main' },
       el('b', { text: `${jpDay(i.issuedOn)}の請求書` }),
       el('span', { class: 'note', text: [`No.${i.number}`, i.dueDate && i.state !== 'paid' && i.state !== 'cancelled' ? `お支払期限 ${jpDay(i.dueDate)}` : ''].filter(Boolean).join('　') })),
@@ -119,7 +124,7 @@ function answerOffer(o, answer) {
 }
 async function loadBilling() {
   const res = await api('GET', '/api/my/billing');
-  if (res.ok) showInvoices(res.invoices ?? [], res.lines ?? []);
+  if (res.ok) showInvoices(res.invoices ?? [], res.lines ?? [], res.bank);
   if (!res.ok) return;
   // 「落札した品」には、まだ請求書になっていない品と、繰り上げのご案内だけを出す
   res.lines = res.lines.filter((l) => !l.invoice);

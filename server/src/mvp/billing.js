@@ -847,6 +847,8 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const offers = db.prepare("SELECT o.id, o.amount, o.premium, o.deadline, o.state, l.label FROM offers o JOIN bill_lines l ON l.id = o.line_id WHERE o.account_id = ? ORDER BY o.id DESC").all(me.id);
     return {
       suspension: suspension(me.id),
+      // 振込先（マイページの請求書に出す。請求書の PDF と同じ値。本番運用の評価 C）
+      bank: setting('bank_account') || null,
       lines: db.prepare('SELECT * FROM bill_lines WHERE account_id = ? ORDER BY id DESC').all(me.id).map(lineView),
       // 繰り上げのご案内: 払う金額（買歩銭込み）も返す。承諾の前に、画面で確かめてもらうため
       offers: offers.map((o) => ({ ...o, premium: offerPremiumOf(o), payable: o.amount + offerPremiumOf(o) })),

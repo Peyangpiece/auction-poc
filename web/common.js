@@ -60,6 +60,8 @@ function overlayAction(code, page) {
 /** 接続の状態を、画面いっぱいの帯で出す。行き先があれば、ボタンを付ける */
 function showOverlay(up, why, code, page) {
   document.getElementById('overlay').style.display = up ? 'none' : 'flex';
+  // 切れているあいだは、後ろの画面をぼかす（古い価格を、いまの価格と読み違えないように。本番運用の評価 C）
+  document.body.classList.toggle('offline', !up);
   // 帯を出しているあいだは、後ろの画面に Tab で移れないようにする（押しても通らない操作に、迷い込まないように。報告書 82 章）
   for (const node of document.body.children) if (node.id !== 'overlay' && node.id !== 'gate' && !['SCRIPT', 'DIALOG'].includes(node.tagName)) node.inert = !up;
   const text = document.getElementById('overlayText');

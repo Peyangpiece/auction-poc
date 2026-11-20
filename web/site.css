@@ -398,6 +398,8 @@ th { font-size: 12px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; 
 .tabs button { appearance: none; cursor: pointer; white-space: nowrap; font-family: var(--font); min-height: 36px; padding: 6px 12px; border: 0; margin: 0; border-radius: 8px; font-size: 14px; font-weight: 500; color: var(--ink); background: none; transition: background-color .15s var(--ease); }
 .tabs button[aria-selected="true"] { background: var(--ground); color: var(--ink); font-weight: 600; border: 0; box-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 0 0 .5px rgba(0, 0, 0, .04); }
 @media (prefers-color-scheme: dark) { .tabs button[aria-selected="true"] { background: #636366; } }
+/* スマホ（受付など）では、タブを指で押しやすい高さにする（44px。本番運用の評価 C） */
+@media (max-width: 640px), (pointer: coarse) { .tabs button { min-height: 44px; font-size: 15px; } }
 /* ダイアログのボタンは、やめるが左、実行が右（Apple の並び） */
 dialog .actions > :is(.btn-primary, .btn-danger) { order: 2; }
 /* スマホでは、入力の多いダイアログ（登録内容の変更など）は、下から出る面にする */
@@ -413,6 +415,8 @@ dialog .actions > :is(.btn-primary, .btn-danger) { order: 2; }
 #tabs { display: flex; grid-auto-flow: unset; gap: 6px; padding: 0; background: none; overflow-x: auto; scrollbar-width: none; margin-bottom: 20px; }
 #tabs button { flex: none; min-height: 36px; padding: 6px 14px; border-radius: 999px; background: var(--ground-alt); font-size: 14px; }
 #tabs button[aria-selected="true"] { background: var(--action); color: var(--action-ink); box-shadow: none; }
+/* スマホ（受付など）では、管理画面の札も、指で押しやすい高さにする（44px。本番運用の評価 C） */
+@media (max-width: 640px), (pointer: coarse) { #tabs button { min-height: 44px; font-size: 15px; } }
 @media (min-width: 900px) {
   #app:not([hidden]) { display: grid; grid-template-columns: 200px minmax(0, 1fr); column-gap: 36px; align-items: start; }
   #app > .toolbar, #app > #releaseWarn { grid-column: 1 / -1; }
@@ -550,3 +554,7 @@ td.act { white-space: nowrap; }
 .scanresult:empty { display: none; }
 .scanwho { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin: 0; font-size: 20px; }
 .scandone { margin: 0; font-weight: 600; }
+
+/* 振込先（改行をそのまま出す） */
+.bank { white-space: pre-line; margin: 4px 0; }
+.bankbox { flex-direction: column; align-items: flex-start; gap: 4px; }
