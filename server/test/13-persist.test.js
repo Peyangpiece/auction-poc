@@ -216,3 +216,29 @@ test('保存先から取るのに失敗しただけでは、古い控えに戻�
   assert.ok(!fs.existsSync(c.dbPath));
   server.close();
 });
+
+test('書き込みの控え（journal/）は、速い置き場に置く。ほかは R2。一覧は両方。前の版が R2 に置いた控えも読める', async () => {
+  const bucket = fakeBucket();
+  const quick = new Map();
+  const fast = {
+    async list() { return [...quick].map(([key, v]) => ({ key, size: v.byteLength })); },
+    async get(key) { return quick.get(key) ?? null; },
+    async put(key, body) { quick.set(key, new Uint8Array(body)); },
+    async delete(key) { quick.delete(key); },
+  };
+  const call = (method, p, body) => handleStore(new Request(`http://store${p}`, { method, body }), bucket, fast);
+  assert.equal((await call('PUT', '/file/journal/000000000001-000000000002.json.gz', '新しい控え')).status, 200);
+  assert.equal((await call('PUT', '/file/db/auction.db.gz', '写し')).status, 200);
+  assert.deepEqual([...quick.keys()], ['journal/000000000001-000000000002.json.gz']);
+  assert.deepEqual([...bucket.objects.keys()], ['data/db/auction.db.gz'], '控えは、R2 には置かない');
+  // 前の版が R2 に置いた控え
+  bucket.objects.set('data/journal/000000000000-000000000000.json.gz', Buffer.from('前の版の控え'));
+  const files = (await (await call('GET', '/manifest')).json()).files.map((f) => f.path).sort();
+  assert.deepEqual(files, ['db/auction.db.gz', 'journal/000000000000-000000000000.json.gz', 'journal/000000000001-000000000002.json.gz']);
+  assert.equal(await (await call('GET', '/file/journal/000000000001-000000000002.json.gz')).text(), '新しい控え');
+  assert.equal(await (await call('GET', '/file/journal/000000000000-000000000000.json.gz')).text(), '前の版の控え');
+  // 消すときは、両方から
+  for (const f of files.filter((x) => x.startsWith('journal/'))) assert.equal((await call('DELETE', '/file/' + f)).status, 200);
+  assert.equal(quick.size, 0);
+  assert.deepEqual([...bucket.objects.keys()], ['data/db/auction.db.gz']);
+});

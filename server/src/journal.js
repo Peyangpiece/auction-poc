@@ -138,6 +138,7 @@ export function createJournal({ db, put, del, nowMs = () => Date.now(), log = co
   let acked = seq;                                                         // 保存先に届いた、いちばん新しい番号
   const setSeq = raw('UPDATE persist_journal SET seq = ? WHERE id = 1');
   let pending = [];      // まだ送っていない書き込み
+  let putMs = null, putMax = 0, puts = 0; // 保存先に1回書くのにかかった時間（ならした値・最大・回数）
   let shipping = false, degraded = false, failingSince = 0, lastError = null, stopped = false;
   const shipped = [];    // 保存先にある控えのファイル（写しに入ったら消す）
   const waiters = [];    // { seq, fn }: その番号まで届いたら呼ぶ
@@ -150,11 +151,12 @@ export function createJournal({ db, put, del, nowMs = () => Date.now(), log = co
     shipping = true;
     try {
       while (pending.length) {
-        const batch = pending; pending = [];
+        // 1回に送るのは 200件まで（置き場の、1つの値の大きさの上限に当たらないように）
+        const batch = pending.splice(0, 200);
         const first = batch[0].seq, last = batch.at(-1).seq, rel = journalKey(first, last);
         const body = zlib.gzipSync(JSON.stringify(batch), { level: 1 });
         for (;;) {
-          try { await put(rel, body); break; } catch (e) {
+          try { const t0 = Date.now(); await put(rel, body); const ms = Date.now() - t0; putMs = putMs === null ? ms : Math.round(putMs * 0.8 + ms * 0.2); putMax = Math.max(putMax, ms); puts++; break; } catch (e) {
             lastError = String(e?.message ?? e);
             failingSince ||= nowMs();
             // 待たせすぎない: 決めた時間を超えたら、返事を先に出して、知らせる（届くまで、送り直しは続ける）
@@ -193,7 +195,7 @@ export function createJournal({ db, put, del, nowMs = () => Date.now(), log = co
     async prune(upto) {
       while (shipped.length && shipped[0].last <= upto) { const f = shipped.shift(); await del(f.rel).catch(() => {}); }
     },
-    status: () => ({ seq, acked, waiting: waiters.length, degraded, failingSince, lastError }),
+    status: () => ({ seq, acked, waiting: waiters.length, degraded, failingSince, lastError, putMs, putMax, puts }),
     /** 止める前に、残りを送る */
     async flush(timeoutMs = 10000) { const end = nowMs() + timeoutMs; queueMicrotask(ship); while (acked < seq && nowMs() < end) await new Promise((r) => setTimeout(r, 50)); return acked >= seq; },
     stop() { stopped = true; hook.sink = null; degraded = true; release(); },

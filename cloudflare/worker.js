@@ -20,7 +20,10 @@ const MAINTENANCE_PAGE = '<!doctype html><html lang="ja"><meta charset="utf-8"><
 // コンテナからの「保存先」あての通信を受けて、R2 に出し入れする
 export class DataStore extends WorkerEntrypoint {
   fetch(request) {
-    return handleStore(request, this.env.DATA);
+    // 書き込みの控え（journal/）は、入口の Durable Object の保存に置く（R2 より、ずっと速い）
+    const app = this.env.AUCTION_APP.getByName('main');
+    const fast = { list: () => app.journalList(), get: (key) => app.journalGet(key), put: (key, body) => app.journalPut(key, body), delete: (key) => app.journalDelete(key) };
+    return handleStore(request, this.env.DATA, fast);
   }
 }
 
@@ -33,6 +36,13 @@ export class MailSender extends WorkerEntrypoint {
 
 export class AuctionApp extends DurableObject {
   starting;
+
+  // ---- 書き込みの控えの置き場（この Durable Object の保存）。コンテナの中のアプリが、入札のたびに書く。
+  // 返事は、書き込みが消えない形で保存されてから返る（Durable Object の決まり）
+  async journalPut(key, body) { await this.ctx.storage.put('j:' + key, new Uint8Array(body)); }
+  async journalGet(key) { return (await this.ctx.storage.get('j:' + key)) ?? null; }
+  async journalDelete(key) { await this.ctx.storage.delete('j:' + key); }
+  async journalList() { return [...(await this.ctx.storage.list({ prefix: 'j:' }))].map(([key, value]) => ({ key: key.slice(2), size: value.byteLength })); }
 
   constructor(ctx, env) {
     super(ctx, env);
