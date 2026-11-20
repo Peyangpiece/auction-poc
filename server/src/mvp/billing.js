@@ -289,6 +289,10 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
 
   // 請求書のファイルは、別のスレッドで作る（競りの最中の精算で、入札の受け付けを止めない。報告書 118 章）。
   // スレッドを使えないとき・途中で落ちたときは、これまでどおり、同じスレッドで作る
+  // 作っている最中のもの。止まる前（と、テストの後始末の前）に、書き終わりを待てるようにする
+  const pendingFiles = new Set();
+  const track = (p) => { const q = Promise.resolve(p).catch(() => {}).finally(() => pendingFiles.delete(q)); pendingFiles.add(q); return p; };
+  const filesIdle = async () => { while (pendingFiles.size) await Promise.all([...pendingFiles]); };
   let worker = null, jobSeq = 0;
   const jobs = new Map();
   function filesWorker() {
@@ -345,10 +349,11 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     // 送付用のメールの下書き（FR-INV-007）。送信は、利用会社の担当者が自分で行う。当日現金の精算では作らない
     if (draft) {
       const mail = invoiceMail(inv, lines, shipping, a, org);
-      files.done.then(() => notifier.draft(a.email, mail.subject, mail.body, [files.pdf]))
+      track(files.done.then(() => notifier.draft(a.email, mail.subject, mail.body, [files.pdf]))
         .then((ok) => db.prepare('UPDATE invoices SET draft_state = ? WHERE id = ?').run(ok ? 'made' : 'failed', inv.id))
-        .catch(() => db.prepare("UPDATE invoices SET draft_state = 'failed' WHERE id = ?").run(inv.id));
+        .catch(() => db.prepare("UPDATE invoices SET draft_state = 'failed' WHERE id = ?").run(inv.id)));
     }
+    track(files.done);
     return { ...inv, done: files.done };
   }
 
@@ -514,5 +519,5 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     for (const id of ids) renderInvoice(id).done.catch((err) => console.error('[invoice] 作り直しに失敗しました', id, err?.message ?? err));
     return ids.length;
   }
-  return { syncLines, onEventEnd, suspension, sweep, feeSummary, premiumRate, fixedKeys, sealFixed, rerenderUnsent };
+  return { syncLines, onEventEnd, suspension, sweep, feeSummary, premiumRate, fixedKeys, sealFixed, rerenderUnsent, filesIdle };
 }

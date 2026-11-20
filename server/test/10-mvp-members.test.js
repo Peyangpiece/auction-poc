@@ -60,7 +60,7 @@ async function setup(env = {}) {
   return {
     api, store, base, browser, outbox, lastCode, staffLogin, dataDir,
     advance: (ms) => { shift += ms; },
-    close: async () => { await new Promise((r) => server.close(r)); store.db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); },
+    close: async () => { await new Promise((r) => server.close(r)); await api.billing.filesIdle(); store.db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); },
   };
 }
 const MIN = 60000;

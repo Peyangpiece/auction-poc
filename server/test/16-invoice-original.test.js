@@ -37,7 +37,7 @@ async function start(original) {
   };
   const s = api.createStaff({ loginId: 'kanri', name: '管理', role: 'admin' });
   assert.equal((await call('POST', '/api/staff/login', { loginId: 'kanri', password: s.initialPassword, code: totp(s.totpSecret) })).status, 200);
-  return { dataDir, call, close: async () => { await new Promise((r) => server.close(r)); store.db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); } };
+  return { dataDir, call, close: async () => { await new Promise((r) => server.close(r)); await api.billing.filesIdle(); store.db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); } };
 }
 
 test('原本の値があれば、起動のときに設定と印鑑に入れ、画面からは変えられない', async () => {

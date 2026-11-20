@@ -727,6 +727,8 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     await metrics.close();
     // 止まる前に、まだ送っていない分を保存先へ送る
     // 1回で送れなければ、送れるまで（50秒まで）くり返す
+    // 作っている最中の請求書があれば、書き終わりを待つ（最後の保存に入るように）
+    await Promise.race([api.billing.filesIdle(), new Promise((r) => setTimeout(r, 5000))]);
     if (journal) { await journal.flush(10000); journal.stop(); }
     if (saver) {
       saver.stop();

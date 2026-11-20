@@ -88,7 +88,7 @@ async function setup() {
     api, store, admin, browser, staffLogin, member, sold, lines, line, endEvent, outbox, today, eventId,
     // 日を進める。スタッフのログインは12時間で切れるので、進めたらログインし直す
     advance: async (days) => { now += days * DAY; for (const b of staff) await b.login(); },
-    close: async () => { await new Promise((r) => server.close(r)); store.db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); },
+    close: async () => { await new Promise((r) => server.close(r)); await api.billing.filesIdle(); store.db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); },
   };
 }
 

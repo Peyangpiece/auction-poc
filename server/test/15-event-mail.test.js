@@ -51,7 +51,7 @@ async function setup(env = {}) {
   return {
     api, store, admin, member, event, mails, base,
     at: (iso) => { now = Date.parse(iso); },
-    close: async () => { await new Promise((r) => server.close(r)); store.db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); },
+    close: async () => { await new Promise((r) => server.close(r)); await api.billing.filesIdle(); store.db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); },
   };
 }
 

@@ -20,7 +20,7 @@ async function boot(dataDir, env) {
     const r = await fetch(base + u, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify(b ?? {}) });
     return { status: r.status, json: await r.json().catch(() => null), cookie: (r.headers.get('set-cookie') ?? '').split(';')[0] };
   };
-  return { store, post, close: async () => { await new Promise((r) => server.close(r)); store.db.close(); } };
+  return { store, post, close: async () => { await new Promise((r) => server.close(r)); await api.billing.filesIdle(); store.db.close(); } };
 }
 
 test('お試し用でも、ログインの認証番号は返事に入れない。本番の設定に切り替えると、お試しのあいだのログインを消す', async () => {
