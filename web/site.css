@@ -577,3 +577,19 @@ td.act { white-space: nowrap; }
 .grouprow th { text-align: left; background: var(--ground-alt); padding: 10px 12px; font-weight: 400; }
 .grouprow th > * { margin-right: 16px; }
 .grouprow__no { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ==== 画面の幅いっぱいに使う（発注者の指示。報告書 127 章） ====
+   これまでは、中身に最大の幅（1080px など）を決めていたので、広い画面では、左右に余白ができていた。
+   すべての画面で、幅の上限をなくす。左右は、端に付かないだけの余白（24px〜）を残す */
+.brandbar > div, main, main.narrow, body.staffpage main, body.staffpage .brandbar > div { max-width: none; }
+/* 入力の欄は、画面いっぱいにしない（発注者の指示）: ログイン・会員登録・規約など、入力と文章が中心の画面は、これまでの幅（520px）で中央に置く。
+   管理画面の入力の欄（760px）・ログインの欄（520px）も、これまでの幅のまま。マイページは、幅いっぱい */
+body:not(.app) main.narrow { max-width: 520px; }
+@media (min-width: 960px) {
+  .brandbar > div { padding-left: max(32px, env(safe-area-inset-left)); padding-right: max(32px, env(safe-area-inset-right)); }
+  main { padding-left: max(32px, env(safe-area-inset-left)); padding-right: max(32px, env(safe-area-inset-right)); }
+}
+.sitefoot { max-width: none; }
+@media (min-width: 960px) { .sitefoot { padding-left: max(32px, env(safe-area-inset-left)); padding-right: max(32px, env(safe-area-inset-right)); } }
+/* スタッフのログインの欄も、会員のログインと同じく、中央に置く */
+body.staffpage #login { margin-inline: auto; }

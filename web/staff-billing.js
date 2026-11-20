@@ -100,7 +100,7 @@ async function billingPanel() {
   // 選んでいる開催を、欄にも映す（最初は、サーバーが選んだ、いちばん新しい開催）
   billingFilter.event = res.event === null && (res.events ?? []).length ? 'all' : String(res.event ?? '');
   const filterBar = el('div', { class: 'filters', role: 'search', 'aria-label': '請求の絞り込み' },
-    pick('開催', 'event', [...evOptions, ['all', 'すべての開催']]),
+    pick('開催', 'event', evOptions.length ? [...evOptions, ['all', 'すべての開催']] : [['', '（明細のある開催は、まだありません）']]),
     el('label', { class: 'filter filter--wide' }, el('span', { text: '会員・品' }), search),
     pick('受け取り', 'receive', [['', 'すべて'], ['pickup', '現地受け取り'], ['ship', '配送']]),
     pick('支払', 'payment', [['', 'すべて'], ['transfer', '銀行振込'], ['cash', '当日現金']]),

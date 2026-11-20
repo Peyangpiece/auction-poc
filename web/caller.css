@@ -168,3 +168,6 @@ dialog.sheet { background: var(--glass-tint-strong); }
 .offhours__label { font-size: 0.875rem; font-weight: 600; color: var(--ink-2); }
 .offhours__date { font-size: clamp(28px, 4.4dvh, 44px); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; }
 .offhours__info { font-size: 0.9375rem; color: var(--ink-2); text-wrap: balance; }
+
+/* ==== 画面の幅いっぱいに使う（発注者の指示。報告書 127 章） ==== */
+.stage { max-width: none; }

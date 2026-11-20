@@ -194,3 +194,6 @@ section[aria-labelledby="histTitle"]:has(tbody:empty), section[aria-labelledby="
 .evacts [hidden], .meta [hidden] { display: none; }
 #elapsed { white-space: nowrap; }
 #elapsed b { font-family: var(--digits); font-variant-numeric: tabular-nums; }
+
+/* ==== 画面の幅いっぱいに使う（発注者の指示。報告書 127 章） ==== */
+.brandbar > div, main { max-width: none; }

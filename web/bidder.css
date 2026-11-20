@@ -423,3 +423,11 @@ body.ended #cmtForm, body.ended #cmtCount, body.ended #modeLine { display: none;
 #videoBox .tapzone, #videoBox .cmtlayer, #videoBox .cmttoast, #videoBox #sound { z-index: 2; }
 @media (prefers-reduced-motion: reduce) { .standby__glow, .standby__dots i { animation: none; } .standby__dots i { opacity: .6; } }
 @media (max-height: 520px) { #standby { gap: 6px; padding: 12px; } .standby__logo { width: min(30%, 140px); } }
+
+/* ==== 画面の幅いっぱいに使う（発注者の指示。報告書 127 章） ==== */
+@media (min-width: 960px), (min-width: 700px) and (orientation: landscape) {
+  .brandbar > div, .top, main { max-width: none; }
+  /* 映像の枠は、広い画面でも、画面の高さからはみ出さない（はみ出す分は、枠を横長にして、映像の左右を黒くする） */
+  #videoBox { max-height: calc(100dvh - 128px); }
+}
+@media (min-width: 960px) { .brandbar > div, .top, main { padding-left: 32px; padding-right: 32px; } }
