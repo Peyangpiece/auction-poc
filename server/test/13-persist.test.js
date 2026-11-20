@@ -187,3 +187,32 @@ test('保存先のデータベースが壊れていたら、日ごとの控え�
   storeB.db.close();
   server.close();
 });
+
+test('保存先から取るのに失敗しただけでは、古い控えに戻さない（やり直して、だめなら起動を止める）', async () => {
+  const bucket = fakeBucket();
+  const { server, url } = await storeServer(bucket);
+  const a = machine(url);
+  const storeA = openDb(a.dbPath);
+  storeA.db.exec('CREATE TABLE t_persist (v TEXT)');
+  storeA.db.prepare('INSERT INTO t_persist VALUES (?)').run('朝の控えにある');
+  const saver = createSaver({ db: storeA.db, config: a });
+  await saver.flush();                                   // 日ごとの控えにも入る
+  storeA.db.prepare('INSERT INTO t_persist VALUES (?)').run('そのあとの書き込み');
+  await saver.flush();                                   // 最新の写しにだけ入る（控えは、1時間に1回）
+  storeA.db.close();
+  const get = bucket.get;
+  // 1) 最新の写しを取るのが、2回だけ失敗する → やり直して、最新を戻す
+  let fails = 2;
+  bucket.get = async (key) => { if (key === 'data/' + DB_KEY && fails-- > 0) throw new Error('一時的な失敗'); return get(key); };
+  const b = machine(url);
+  await restore(b, { retries: 5, waitMs: 5, log: () => {} });
+  const storeB = openDb(b.dbPath);
+  assert.deepEqual(storeB.db.prepare('SELECT v FROM t_persist ORDER BY rowid').all().map((r) => r.v), ['朝の控えにある', 'そのあとの書き込み']);
+  storeB.db.close();
+  // 2) ずっと取れない → 古い控えには戻さず、失敗で終わる
+  bucket.get = async (key) => { if (key === 'data/' + DB_KEY) throw new Error('取れない'); return get(key); };
+  const c = machine(url);
+  await assert.rejects(restore(c, { retries: 2, waitMs: 5, log: () => {} }), /取れません/);
+  assert.ok(!fs.existsSync(c.dbPath));
+  server.close();
+});

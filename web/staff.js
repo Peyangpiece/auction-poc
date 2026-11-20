@@ -511,7 +511,10 @@ async function feesPanel() {
 // メールアドレスを登録した（または、パスワードを決め直せるようにした）あとの知らせ
 function inviteDialog(title, res) {
   openDialog(title,
-    el('p', { class: 'dyn', text: `${res.email} を登録しました。本人に、スタッフのログインの画面の「はじめての方」から、このメールアドレスを入れて、パスワードを決めるよう、お伝えください。` }),
+    el('p', { class: 'dyn', text: `${res.email} に、パスワードを決めるためのメールを送りました。本人が、メールの中のリンクを開いて、パスワードを決めます（7日以内。リンクは、1回だけ使えます）。` }),
+    // お試し用の設定のあいだは、メールが実際には届かないので、リンクをここに出す
+    res.devSetupUrl && el('p', { class: 'note', text: '【お試し用】メールは、実際には届きません。次のリンクを、本人に渡してください。' }),
+    res.devSetupUrl && el('p', { class: 'copyrow' }, noTranslate(el('span', { class: 'secret dyn', id: 'devSetupUrl', text: res.devSetupUrl }))),
     el('div', { class: 'actions' }, closeBtn('閉じる')));
 }
 async function staffPanel() {
@@ -740,18 +743,42 @@ onSubmit($('#loginForm'), async (data) => {
   else $('#loginForm').elements.password.value = '';
   return res;
 });
-// はじめての方: 登録されたメールアドレスを入れて、パスワードを自分で決める
+// メールのリンク（#setup=合言葉）を開いた人: パスワードを自分で決める。合言葉は、アドレスの # より後ろにあるので、サーバーの記録には残らない
+let setupToken = '';
 onSubmit($('#setupForm'), async (data) => {
   if (data.password !== data.password2) return { ok: false, message: '入力を確かめてください', errors: { password2: '新しいパスワードが、2つの欄で違っています' } };
-  const res = await api('POST', '/api/staff/setup', { email: data.email, password: data.password });
-  if (res.ok) afterLogin(res.staff.role);
+  const res = await api('POST', '/api/staff/setup', { token: setupToken, password: data.password });
+  if (res.ok) { history.replaceState(null, '', location.pathname); afterLogin(res.staff.role); }
   return res;
 });
-$('#firstTime').addEventListener('click', () => { $('#loginForm').hidden = true; $('#setupForm').hidden = false; $('#setupForm').elements.email.value = $('#loginForm').elements.email.value; $('#setupForm').elements.email.focus(); });
-$('#backToLogin').addEventListener('click', () => { $('#setupForm').hidden = true; $('#loginForm').hidden = false; $('#loginForm').elements.email.focus(); });
+// すでにこのページを開いているタブで、メールのリンクを開いたとき（アドレスの # だけが変わる）は、読み込み直す
+addEventListener('hashchange', () => { if (/^#setup=/.test(location.hash)) location.reload(); });
+// はじめての方: メールアドレスを入れると、パスワードを決めるためのメールが届く
+onSubmit($('#requestForm'), async (data) => {
+  const res = await api('POST', '/api/staff/setup/request', { email: data.email });
+  if (res.ok) { const msg = $('.msg', $('#requestForm')); msg.textContent = 'スタッフとして登録されているアドレスであれば、メールをお送りしました。メールの中のリンクを開いて、パスワードを決めてください。'; msg.classList.add('ok'); }
+  return res;
+});
+$('#firstTime').addEventListener('click', () => { $('#loginForm').hidden = true; $('#requestForm').hidden = false; $('#requestForm').elements.email.value = $('#loginForm').elements.email.value; $('#requestForm').elements.email.focus(); });
+$('#backToLogin').addEventListener('click', () => { $('#requestForm').hidden = true; $('#loginForm').hidden = false; $('#loginForm').elements.email.focus(); });
 (async () => {
   const state = await setupNav();
   me = state.staff;
+  // メールのリンク（#setup=合言葉）から来た人には、パスワードを決める欄を出す
+  const fromMail = /^#setup=([\w-]{20,200})$/.exec(location.hash);
+  if (fromMail && !me) {
+    $('#login').hidden = false; $('#loginForm').hidden = true;
+    const who = await api('POST', '/api/staff/setup/check', { token: fromMail[1] });
+    if (who.ok) {
+      setupToken = fromMail[1];
+      $('#setupWho').textContent = `${who.email}（${who.roleLabel}）のパスワードを決めます`;
+      $('#setupForm').hidden = false; $('#setupForm').elements.password.focus();
+    } else {
+      $('#loginForm').hidden = false;
+      const msg = $('.msg', $('#loginForm')); msg.textContent = who.message; msg.focus();
+    }
+    return;
+  }
   if (!me) { $('#login').hidden = false; $('#loginForm').elements.email.focus(); return; }
   if (me.role === 'caller') { location.replace('/caller.html'); return; }
   // 「公開の前に入れておく項目」の帯は、画面を出す前に用意する（出したあとに差し込むと、中身が下にずれる。

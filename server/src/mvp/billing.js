@@ -561,9 +561,16 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     audit(ctx, 'invoice.unsent', { target: `invoice:${i.number}`, before: { sentOn: jst(i.sent_at), dueDate: i.due_date } });
     return { ok: true };
   });
-  const sendFile = (i, kind) => {
-    const file = kind === 'pdf' ? i.pdf_file : i.xlsx_file;
-    if (!file || !fs.existsSync(file)) throw new HttpError(404, 'ファイルが見つかりません');
+  const sendFile = async (i, kind) => {
+    let file = kind === 'pdf' ? i.pdf_file : i.xlsx_file;
+    // ファイルが無いとき（作っている最中にサーバーが落ちた・保存先へ送る前に入れ替わった）は、その場で作り直す。
+    // 作り直しは、いまの明細の内容になる
+    if (!file || !fs.existsSync(file)) {
+      await renderInvoice(i.id).done;
+      const again = db.prepare('SELECT pdf_file, xlsx_file FROM invoices WHERE id = ?').get(i.id);
+      file = kind === 'pdf' ? again.pdf_file : again.xlsx_file;
+      if (!file || !fs.existsSync(file)) throw new HttpError(404, 'ファイルが見つかりません');
+    }
     return { file: { body: fs.readFileSync(file), type: kind === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: `${i.number}.${kind}` } };
   };
   route('GET', '/api/billing/invoices/:id/pdf', (ctx, body, id) => {

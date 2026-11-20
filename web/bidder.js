@@ -17,6 +17,7 @@ let link, audioCtx = null, wakeLock = null, player = null, playerLoading = false
 const REJECT = {
   LOT_NOT_OPEN: () => 'この品は入札を受け付けていません',
   AFTER_CLOSE: () => '締めに間に合いませんでした',
+  TOO_HIGH: (r) => { const min = r.minAllowed ?? r.minBid ?? 0; return `一度に入れられるのは、${yen(Math.min(1e10, Math.max(min * 10, min + 100000)))} までです`; },
   BELOW_MINIMUM: (r) => `価格が更新されました：${yen(r.minAllowed ?? r.minBid)} 以上で入札できます`,
   OFF_LADDER: () => '入札できる金額ではありません',
   ALREADY_HIGHEST: () => 'あなたが最高入札者です',

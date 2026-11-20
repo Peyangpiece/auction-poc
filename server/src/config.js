@@ -96,6 +96,9 @@ export function loadConfig(env = process.env) {
     // データの置き場が消える環境（Cloudflare のコンテナなど）で、外の保存先へ保存・復元する（server/src/persist.js）。空なら使わない
     persistUrl: (env.POC_PERSIST_URL || '').replace(/\/$/, ''),
     // 保存の間隔。書き込みがあったときだけ送る
+    // 書き込みの控え（受理した入札を、返事の前に、外の保存先へ書く）。0 で止める。保存先に届かないとき、返事を待たせる上限（ミリ秒）
+    journal: env.POC_JOURNAL !== '0',
+    journalMaxWaitMs: num(env.POC_JOURNAL_MAX_WAIT_MS, 3000),
     persistIntervalMs: num(env.POC_PERSIST_INTERVAL_MS, 2000),
 
     // ---- 会員・スタッフ（MVP の 1・2）

@@ -122,6 +122,12 @@ test('当日現金の精算と、開催終了の請求書（AC-FR-PAY-010-1、AC
     const pdf = await a.get(`/api/billing/invoices/${settled.json.invoice.id}/pdf`);
     assert.equal(pdf.type, 'application/pdf');
     assert.equal(pdf.buf.subarray(0, 5).toString(), '%PDF-');
+    // ファイルが無くなっていても（作っている最中に落ちた・保存先へ送る前に入れ替わった）、開くときに作り直す
+    const pdfFile = t.store.db.prepare('SELECT pdf_file FROM invoices WHERE id = ?').get(settled.json.invoice.id).pdf_file;
+    fs.rmSync(pdfFile);
+    const again = await a.get(`/api/billing/invoices/${settled.json.invoice.id}/pdf`);
+    assert.deepEqual([again.status, again.buf.subarray(0, 5).toString()], [200, '%PDF-']);
+    assert.ok(fs.existsSync(pdfFile));
     assert.ok(pdf.buf.includes(Buffer.from('/FontFile2')), '日本語の書体を埋め込んでいる');
     assert.equal((await b.get(`/api/billing/invoices/${settled.json.invoice.id}/pdf`)).status, 404, 'ほかの会員の請求書は開けない');
     assert.equal((await a.get(`/api/billing/invoices/${settled.json.invoice.id}/xlsx`)).status, 401);

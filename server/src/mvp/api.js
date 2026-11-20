@@ -50,7 +50,7 @@ class HttpError extends Error {
 }
 const bad = (message, extra) => new HttpError(400, message, extra);
 
-export function createApi({ store, config, nowMs, persistStatus = () => null }) {
+export function createApi({ store, config, nowMs, persistStatus = () => null, durable = () => null }) {
   const db = store.db;
   // 以前の版のデータベース: スタッフの役割に「開発・運営者」「オークショニア」を足すには、表を作り直すしかない（SQLite の制約）。行の id は変えない
   const oldStaff = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'staff_accounts'").get();
@@ -424,6 +424,19 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   }));
 
   // 登録: 電話番号 → SMS 認証 → 入力
+  // 登録を始める認証番号は、だれにでも送れてしまうので、数を絞る（架空の宛先で送り続けて、認証メールを止めたり、他人に迷惑メールを送らせたりするのを防ぐ）。
+  // 同じ接続元から 10分に20通まで（会場の Wi-Fi で、何人かが続けて登録できる数）。全体で 1分に30通まで
+  const registerSends = { byIp: new Map(), all: [] };
+  function limitRegister(ctx) {
+    if (!(config.authRatePerMin > 0)) return;
+    const now = nowMs();
+    const mine = (registerSends.byIp.get(ctx.ip) ?? []).filter((t) => now - t < 10 * MIN);
+    registerSends.all = registerSends.all.filter((t) => now - t < MIN);
+    if (mine.length >= 20 || registerSends.all.length >= 30) throw new HttpError(429, 'ただいま、登録が混み合っています。数分待ってから、やり直してください');
+    mine.push(now); registerSends.all.push(now);
+    if (registerSends.byIp.size > 5000) for (const [k, v] of registerSends.byIp) if (!v.some((t) => now - t < 10 * MIN)) registerSends.byIp.delete(k);
+    registerSends.byIp.set(ctx.ip, mine);
+  }
   route('POST', '/api/register/start', async (ctx, body) => {
     throttle(ctx);
     const phone = registerKey(body);
@@ -436,6 +449,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       // 確かめ済みの番号の会員がいれば、ログインへ。メールで登録した人の（確かめていない）番号とは、重なってもよい
       if (db.prepare('SELECT 1 FROM member_accounts WHERE phone = ? AND phone_verified = 1').get(phone)) throw new HttpError(409, 'この電話番号は登録済みです。ログインしてください', { login: true });
     }
+    limitRegister(ctx);
     const code = await sendOtp(phone);
     // お試し用の設定のときだけ、認証番号を画面に出せるように返す（本番では返さない）
     return { ok: true, via: phone.startsWith('email:') ? 'email' : 'sms', ...(config.devShowCodes ? { devCode: code } : {}) };
@@ -697,32 +711,59 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     audit({ ...ctx, staff }, 'staff.login', { target: `staff:${staff.id}` });
     return { ok: true, staff: staffOut(staff) };
   });
-  // 最初のログイン: 登録されたメールアドレスを入れて、パスワードを自分で決める（発注者の決定で、確認コードは使わない）。
-  // 決められるのは、主催者管理者がメールアドレスを登録してから 7 日のあいだで、パスワードがまだ無いときだけ。
-  // 【注意】メールアドレスを知っている他人が、本人より先にパスワードを決めると、その人がスタッフとして入れる。
-  //         登録したら、本人が早めにパスワードを決めること。だれが決めたかは、記録（staff.setup）に残る
+  // パスワードを決められるのは、招待（またはリセット）のメールに入っているリンクを開いた人だけ。
+  // リンクには、1回だけ使える合言葉が入っている（データベースには、ハッシュだけを持つ）。メールを受け取れる人＝本人、と確かめる。
+  // （前は、メールアドレスを知っているだけで決められた。公開している設定のハッシュから、最初の主催者管理者を先取りできた）
+  const pendingByToken = (token) => {
+    const t = String(token ?? '');
+    if (t.length < 20 || t.length > 200) return null;
+    const staff = db.prepare('SELECT * FROM staff_accounts WHERE setup_hash = ?').get(sha256('setup:' + t));
+    return staff && staff.active && staff.email && !staff.password_hash && nowMs() <= staff.setup_expires ? staff : null;
+  };
+  const setupFail = () => new HttpError(401, 'このリンクでは、パスワードを決められません。すでに決めてあるか、期限（7日）が過ぎています。主催者管理者に、メールの送り直しを頼んでください');
+  // リンクを開いたときに、だれのパスワードを決めるのかを出す
+  route('POST', '/api/staff/setup/check', (ctx, body) => {
+    throttle(ctx);
+    const staff = pendingByToken(body.token);
+    if (!staff) throw setupFail();
+    return { ok: true, email: staff.email, roleLabel: ROLE_LABEL[staff.role] };
+  });
   route('POST', '/api/staff/setup', (ctx, body) => {
     throttle(ctx);
-    const mail = String(body.email ?? '').trim().toLowerCase();
-    let staff = staffByLogin(mail);
-    // 最初の主催者管理者: 設定にあるメールアドレス（ハッシュで照らす）なら、ここで登録する（まだ登録が無いときだけ）
-    // メールアドレスの主催者管理者が1人でもできたら、この道は閉じる（2人目は、主催者管理者が登録する）
-    const hasEmailAdmin = () => !!db.prepare("SELECT 1 FROM staff_accounts WHERE role = 'admin' AND email IS NOT NULL").get();
-    if (!staff && config.adminEmailHash && isEmail(mail) && safeEqual(sha256(mail), config.adminEmailHash) && !hasEmailAdmin()) {
-      const made = inviteStaff({ email: mail, name: '管理者', role: 'admin' });
-      audit({ ...ctx, system: true }, 'staff.create', { target: `staff:${made.id}`, after: { role: 'admin', by: '最初の主催者管理者' } });
-      staff = staffByLogin(mail);
-    }
-    const fail = new HttpError(401, 'このメールアドレスでは、パスワードを決められません。登録されていないか、すでに決めてあるか、期限（7日）が過ぎています。主催者管理者に、登録をご確認ください');
-    const now = nowMs();
-    if (!staff || !staff.active || !staff.email || staff.password_hash || now > staff.setup_expires) throw fail;
+    const staff = pendingByToken(body.token);
+    if (!staff) throw setupFail();
     const password = String(body.password ?? '');
     if (password.length < 12 || password.length > 200) throw bad('入力を確かめてください', { errors: { password: 'パスワードは、12文字以上にしてください' } });
-    // パスワードは、元に戻せない形（scrypt のハッシュ）で保存する
+    // パスワードは、元に戻せない形（scrypt のハッシュ）で保存する。合言葉は、ここで使えなくなる
     db.prepare('UPDATE staff_accounts SET password_hash = ?, setup_hash = NULL, setup_expires = 0, failed_count = 0, locked_until = 0 WHERE id = ?').run(hashPassword(password), staff.id);
     startSession(ctx, 'staff', staff.id, STAFF_LIFETIME);
     audit({ ...ctx, staff }, 'staff.setup', { target: `staff:${staff.id}` });
     return { ok: true, staff: staffOut(staff) };
+  });
+  // 「はじめての方」: メールアドレスを入れると、パスワードを決めるためのメールを送る。
+  // 送るのは、(1) 招待されていて、まだパスワードを決めていないスタッフ、(2) 設定にあるメールアドレス（ハッシュで照らす）の、最初の主催者管理者。
+  // 返事は、どの場合も同じ（登録があるかどうかを、教えない）。同じ宛先には、10分に1通まで
+  const setupMailAt = new Map();
+  route('POST', '/api/staff/setup/request', async (ctx, body) => {
+    throttle(ctx);
+    const mail = String(body.email ?? '').trim().toLowerCase();
+    const same = { ok: true };
+    if (!isEmail(mail)) return same;
+    const last = setupMailAt.get(mail) ?? 0;
+    if (nowMs() - last < 10 * MIN) return same;
+    let staff = staffByLogin(mail);
+    // メールアドレスの主催者管理者が1人でもできたら、最初の主催者管理者の道は閉じる（2人目からは、主催者管理者が登録する）
+    const hasEmailAdmin = () => !!db.prepare("SELECT 1 FROM staff_accounts WHERE role = 'admin' AND email IS NOT NULL").get();
+    if (!staff && config.adminEmailHash && safeEqual(sha256(mail), config.adminEmailHash) && !hasEmailAdmin()) {
+      const made = inviteStaff({ email: mail, name: '管理者', role: 'admin' });
+      audit({ ...ctx, system: true }, 'staff.create', { target: `staff:${made.id}`, after: { role: 'admin', by: '最初の主催者管理者' } });
+      staff = staffByLogin(mail);
+    }
+    if (!staff || !staff.active || !staff.email || staff.password_hash) return same;
+    if (setupMailAt.size > 5000) setupMailAt.clear();
+    setupMailAt.set(mail, nowMs());
+    await sendStaffInvite(ctx, { id: staff.id, email: staff.email, role: staff.role, name: staff.name });
+    return same;
   });
   // パスワードの変更（最初に渡された仮のパスワードを、本人が変える）
   route('POST', '/api/staff/password', (ctx, body) => {
@@ -754,8 +795,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     // 主催者管理者が、新しいスタッフのメールアドレスを登録する（発注者の指示）。パスワードは、本人が最初のログインで決める
     const created = inviteStaff({ email: body.email, name: body.name, role: body.role, phone: body.phone });
     audit(ctx, 'staff.create', { target: `staff:${created.id}`, after: { email: created.email, role: created.role } });
-    await sendStaffInvite(ctx, { ...created, name: String(body.name ?? '').trim() });
-    return { ok: true, ...created };
+    const link = await sendStaffInvite(ctx, { ...created, name: String(body.name ?? '').trim() });
+    return { ok: true, ...created, ...link };
   });
   // パスワードと認証アプリの再発行（端末をなくした・忘れたとき）。それまでのログインは、すべて切る
   route('POST', '/api/staff/accounts/:id/reset', async (ctx, body, id) => {
@@ -768,8 +809,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       db.prepare("DELETE FROM sessions WHERE kind = 'staff' AND subject_id = ?").run(id);
       audit(ctx, 'staff.reset', { target: `staff:${id}` });
       const out = { id: Number(id), email: target.email, role: target.role };
-      await sendStaffInvite(ctx, { ...out, name: target.name }, { reset: true });
-      return { ok: true, ...out };
+      const link = await sendStaffInvite(ctx, { ...out, name: target.name }, { reset: true });
+      return { ok: true, ...out, ...link };
     }
     const password = randomToken(12), secret = newTotpSecret();
     db.prepare('UPDATE staff_accounts SET password_hash = ?, totp_secret = ?, failed_count = 0, locked_until = 0 WHERE id = ?').run(hashPassword(password), secret, id);
@@ -818,17 +859,24 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return { id, email: mail, role };
   }
   async function sendStaffInvite(ctx, s, { reset = false } = {}) {
-    const origin = `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
+    // リンクの先は、設定のサイトの URL。無ければ、主催者管理者が開いているページの URL（入口の Worker が付ける値。利用者は書き換えられない）
+    const origin = config.siteUrl || setting('site_url') || `${ctx.req.headers['x-forwarded-proto'] ?? 'http'}://${(config.trustProxy && ctx.req.headers['x-forwarded-host']) || ctx.req.headers.host}`;
+    // 1回だけ使える合言葉を作り直す（前のリンクは、使えなくなる）。期限は7日
+    const token = randomToken(32);
+    db.prepare('UPDATE staff_accounts SET setup_hash = ?, setup_expires = ? WHERE id = ?').run(sha256('setup:' + token), nowMs() + SETUP_LIFETIME, s.id);
+    const url = `${origin}/staff.html#setup=${token}`;
     const end = new Date(nowMs() + 9 * HOUR + SETUP_LIFETIME).toISOString();
     const by = `${jpDay(end)} ${end.slice(11, 16)}`;
     await notifier.email(s.email, 'staff_invite', subjectOf(reset ? 'スタッフのパスワードを決め直してください' : 'スタッフとして登録しました'), compose(setting, { name: s.name || null, lines: [
       reset ? `主催者管理者が、スタッフ（${ROLE_LABEL[s.role]}）のパスワードを、リセットしました。` : `令和の競りのスタッフ（${ROLE_LABEL[s.role]}）として、登録しました。`,
-      `次のページの「はじめての方」から、このメールアドレスを入れて、パスワードを決めてください（${by}まで）。`,
+      `次のリンクを開いて、パスワードを決めてください（${by}まで。リンクは、1回だけ使えます）。`,
       '',
-      `${origin}/staff.html`,
+      url,
       '',
       'お心当たりがない場合は、このメールを破棄してください。',
     ] }));
+    // お試し用の設定のときだけ、登録した主催者管理者の画面に、リンクを返す（メールの送信がつながる前に、動きを確かめるため）
+    return config.devShowCodes && ctx.staff ? { devSetupUrl: url } : {};
   }
   function createStaff({ loginId, name, role, phone, password: given }) {
     const id = String(loginId ?? '').trim();
@@ -1445,6 +1493,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
         if (body === null || typeof body !== 'object' || Array.isArray(body)) throw bad('JSON のオブジェクトで送ってください');
       }
       const result = await hit.r.handler(ctx, body, ...hit.m.slice(1).map(Number));
+      // 書き込みをした操作の返事は、その書き込みの控えが、外の保存先に届いてから出す（返事のあとで、無かったことにならないように）
+      if (req.method !== 'GET') await durable();
       if (result?.redirect) { res.writeHead(302, { location: result.redirect }); return res.end(); }
       if (result?.file) { res.writeHead(200, { 'content-type': result.file.type, 'content-disposition': `attachment; filename="${result.file.name}"`, 'cache-control': 'no-store' }); return res.end(result.file.body); }
       if (result?.image) { res.writeHead(200, { 'content-type': result.image.type, 'cache-control': 'no-store' }); return res.end(result.image.body); }

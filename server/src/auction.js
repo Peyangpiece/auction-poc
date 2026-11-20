@@ -7,6 +7,8 @@
 import { nowMs } from './clock.js';
 import { minimumBid, minimumAllowed, validateTable } from './ladder.js';
 
+const MAX_AMOUNT = 1e10; // 金額の上限（開始値の上限と同じ）
+
 export const TERMINAL = new Set(['sold', 'unsold', 'not_held']);
 
 /**
@@ -144,7 +146,11 @@ export class Auction {
     if (blocked) return blocked;
     if (lot.highest_member_id === item.member.id) return 'ALREADY_HIGHEST';
     // 開始価格以上なら、1円単位で入札できる（発注者の決定）。入札があれば、現在価格より高い額だけ。価格の段には合わせなくてよい
-    if (item.amount < minimumAllowed(lot.start_price, lot.current_price)) return 'BELOW_MINIMUM';
+    const min = minimumAllowed(lot.start_price, lot.current_price);
+    if (item.amount < min) return 'BELOW_MINIMUM';
+    // 上限: 1人の入札で、競りを止められないようにする（けた外れの額を入れると、ほかの人が入札できなくなる）。
+    // 絶対の上限は、開始値と同じ 100億円。1回の入札で上げられるのは、「入札できる最も低い額の10倍」か「＋10万円」の、大きいほうまで
+    if (item.amount > MAX_AMOUNT || item.amount > Math.max(min * 10, min + 100000)) return 'TOO_HIGH';
     return 'ACCEPTED';
   }
 

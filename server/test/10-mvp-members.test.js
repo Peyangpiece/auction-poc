@@ -473,59 +473,83 @@ test('会員登録を承認しないと、電話番号が空き、もう一度�
   } finally { await t.close(); }
 });
 
-test('スタッフ: 主催者管理者がメールアドレスを登録する。本人は、最初のログインで、パスワードを決める（確認コードは無い）', async () => {
+// 招待のメールから、パスワードを決めるリンクの合言葉を取り出す
+const setupTokenOf = (t, to) => /#setup=([\w-]+)/.exec(t.outbox().filter((m) => m.channel === 'email' && m.to === to && m.kind === 'staff_invite').at(-1).body)[1];
+
+test('スタッフ: 主催者管理者がメールアドレスを登録する。本人は、メールのリンクから、パスワードを決める（メールを受け取れる人だけ）', async () => {
   const t = await setup();
   try {
     const admin = await t.staffLogin('admin', 'kanri', null);
     const made = await admin.post('/api/staff/accounts', { email: 'Uketsuke@Example.com', name: '受付 太郎', role: 'reception' });
     assert.equal(made.status, 200);
     assert.equal(made.json.email, 'uketsuke@example.com');
-    assert.equal(made.json.setupCode, undefined);
+    assert.equal(made.json.devSetupUrl, undefined, 'お試し用の設定でなければ、リンクは画面に返さない');
     assert.equal((await admin.post('/api/staff/accounts', { email: 'uketsuke@example.com', name: '二重', role: 'reception' })).status, 409);
     assert.equal((await admin.post('/api/staff/accounts', { email: 'x', name: 'x', role: 'reception' })).status, 400);
-    const mail = t.outbox().filter((m) => m.channel === 'email' && m.to === 'uketsuke@example.com').at(-1);
-    assert.match(mail.body, /はじめての方/);
-    assert.doesNotMatch(mail.body, /確認コード/);
+    const token = setupTokenOf(t, 'uketsuke@example.com');
     const row = () => t.store.db.prepare('SELECT * FROM staff_accounts WHERE email = ?').get('uketsuke@example.com');
     assert.equal(row().password_hash, '');
+    assert.ok(row().setup_hash && !row().setup_hash.includes(token), '合言葉は、ハッシュで持つ');
     const b = t.browser();
-    // パスワードを決める前は、ログインできない。登録の無いメールアドレスでは、決められない
+    // パスワードを決める前は、ログインできない。メールアドレスを知っているだけでは、決められない
     assert.equal((await b.post('/api/staff/login', { email: 'uketsuke@example.com', password: '' })).status, 401);
-    assert.equal((await b.post('/api/staff/setup', { email: 'shiranai@example.com', password: 'tadashii-password-1' })).status, 401);
-    assert.ok((await b.post('/api/staff/setup', { email: 'uketsuke@example.com', password: 'short' })).json.errors.password);
-    const ok = await b.post('/api/staff/setup', { email: 'UKETSUKE@example.com', password: 'tadashii-password-1' });
+    assert.equal((await b.post('/api/staff/setup', { email: 'uketsuke@example.com', password: 'tadashii-password-1' })).status, 401, 'リンクの合言葉が無い');
+    assert.equal((await b.post('/api/staff/setup', { token: 'x'.repeat(43), password: 'tadashii-password-1' })).status, 401, '合言葉が違う');
+    assert.deepEqual((await b.post('/api/staff/setup/check', { token })).json, { ok: true, email: 'uketsuke@example.com', roleLabel: '受付係' });
+    assert.ok((await b.post('/api/staff/setup', { token, password: 'short' })).json.errors.password);
+    const ok = await b.post('/api/staff/setup', { token, password: 'tadashii-password-1' });
     assert.equal(ok.status, 200);
     assert.equal((await b.get('/api/me')).json.staff.role, 'reception');
     assert.ok(row().password_hash.length > 40 && !row().password_hash.includes('tadashii-password-1'), 'パスワードは、ハッシュで保存する');
-    // 決めたあとは、もう決め直せない（他人が、上書きできない）
-    assert.equal((await t.browser().post('/api/staff/setup', { email: 'uketsuke@example.com', password: 'betsuno-password-2' })).status, 401);
+    // リンクは、1回だけ
+    assert.equal((await t.browser().post('/api/staff/setup', { token, password: 'betsuno-password-2' })).status, 401);
+    assert.equal((await t.browser().post('/api/staff/setup/check', { token })).status, 401);
     // 次からは、メールアドレスとパスワード
     assert.equal((await t.browser().post('/api/staff/login', { email: 'uketsuke@example.com', password: 'chigau' })).status, 401);
     assert.equal((await t.browser().post('/api/staff/login', { email: 'Uketsuke@example.com', password: 'tadashii-password-1' })).status, 200);
-    // 決め直し: パスワードが消え、それまでのログインは切れる。本人が、もう一度決める
+    // 決め直し: パスワードが消え、それまでのログインは切れる。新しいリンクのメールが届く
     const id = (await admin.get('/api/staff/accounts')).json.staff.find((x) => x.email === 'uketsuke@example.com').id;
-    const reset = await admin.post(`/api/staff/accounts/${id}/reset`);
-    assert.equal(reset.status, 200);
+    assert.equal((await admin.post(`/api/staff/accounts/${id}/reset`)).status, 200);
     assert.equal((await b.get('/api/me')).json.staff, null);
     assert.equal((await t.browser().post('/api/staff/login', { email: 'uketsuke@example.com', password: 'tadashii-password-1' })).status, 401);
-    assert.equal((await t.browser().post('/api/staff/setup', { email: 'uketsuke@example.com', password: 'atarashii-password-3' })).status, 200);
+    const token2 = setupTokenOf(t, 'uketsuke@example.com');
+    assert.notEqual(token2, token);
+    // 「はじめての方」から頼むと、リンクを作り直して送る（前のリンクは、使えなくなる）。返事は、登録が無いアドレスでも同じ
+    const mails = () => t.outbox().filter((m) => m.kind === 'staff_invite').length;
+    const before = mails();
+    assert.deepEqual((await t.browser().post('/api/staff/setup/request', { email: 'shiranai@example.com' })).json, { ok: true });
+    assert.equal(mails(), before, '登録の無いアドレスには、送らない');
+    assert.deepEqual((await t.browser().post('/api/staff/setup/request', { email: 'Uketsuke@example.com' })).json, { ok: true });
+    assert.equal(mails(), before + 1);
+    assert.deepEqual((await t.browser().post('/api/staff/setup/request', { email: 'uketsuke@example.com' })).json, { ok: true });
+    assert.equal(mails(), before + 1, '同じ宛先には、10分に1通まで');
+    const token3 = setupTokenOf(t, 'uketsuke@example.com');
+    assert.equal((await t.browser().post('/api/staff/setup', { token: token2, password: 'atarashii-password-3' })).status, 401);
+    assert.equal((await t.browser().post('/api/staff/setup', { token: token3, password: 'atarashii-password-3' })).status, 200);
     // 決められる期限は 7 日
     await admin.post('/api/staff/accounts', { email: 'osoi@example.com', name: '遅い', role: 'operator' });
+    const late = setupTokenOf(t, 'osoi@example.com');
     t.advance(8 * 24 * 60 * MIN);
-    assert.equal((await t.browser().post('/api/staff/setup', { email: 'osoi@example.com', password: 'tadashii-password-1' })).status, 401);
+    assert.equal((await t.browser().post('/api/staff/setup', { token: late, password: 'tadashii-password-1' })).status, 401);
   } finally { await t.close(); }
 });
 
-test('スタッフ: 設定にあるメールアドレス（ハッシュ）の人は、最初のログインで、主催者管理者として登録される（1回だけ）', async () => {
+test('スタッフ: 設定にあるメールアドレス（ハッシュ）の人は、メールのリンクから、主催者管理者になる。アドレスを知っているだけの人は、なれない', async () => {
   const hash = crypto.createHash('sha256').update('saisho@example.com').digest('hex');
   const t = await setup({ POC_ADMIN_EMAIL_SHA256: hash });
   try {
-    assert.equal((await t.browser().post('/api/staff/setup', { email: 'chigau@example.com', password: 'tadashii-password-1' })).status, 401);
-    const b = t.browser();
-    assert.equal((await b.post('/api/staff/setup', { email: 'Saisho@Example.com', password: 'tadashii-password-1' })).status, 200);
-    assert.equal((await b.get('/api/me')).json.staff.role, 'admin');
-    // 2回目は、通らない（すでに決めてある）
+    // アドレスを当てただけでは、パスワードを決められない（前は、これで主催者管理者になれた）
     assert.equal((await t.browser().post('/api/staff/setup', { email: 'saisho@example.com', password: 'nottori-password-9' })).status, 401);
+    assert.equal(t.store.db.prepare("SELECT COUNT(*) AS n FROM staff_accounts WHERE email = 'saisho@example.com'").get().n, 0);
+    assert.deepEqual((await t.browser().post('/api/staff/setup/request', { email: 'chigau@example.com' })).json, { ok: true });
+    assert.equal(t.outbox().filter((m) => m.kind === 'staff_invite').length, 0);
+    // 本人が頼むと、そのアドレスにリンクが届く
+    assert.deepEqual((await t.browser().post('/api/staff/setup/request', { email: 'Saisho@Example.com' })).json, { ok: true });
+    const token = setupTokenOf(t, 'saisho@example.com');
+    const b = t.browser();
+    assert.equal((await b.post('/api/staff/setup', { token, password: 'tadashii-password-1' })).status, 200);
+    assert.equal((await b.get('/api/me')).json.staff.role, 'admin');
+    assert.equal((await t.browser().post('/api/staff/setup', { token, password: 'nottori-password-9' })).status, 401);
     assert.equal((await t.browser().post('/api/staff/login', { email: 'saisho@example.com', password: 'tadashii-password-1' })).status, 200);
   } finally { await t.close(); }
 });
@@ -549,7 +573,8 @@ test('メールアドレスの主催者管理者ができたあとは、設定�
   try {
     const admin = await t.staffLogin('admin', 'kanri', null);
     assert.equal((await admin.post('/api/staff/accounts', { email: 'betsu@example.com', name: '別の管理者', role: 'admin' })).status, 200);
-    assert.equal((await t.browser().post('/api/staff/setup', { email: 'saisho@example.com', password: 'tadashii-password-1' })).status, 401);
+    assert.deepEqual((await t.browser().post('/api/staff/setup/request', { email: 'saisho@example.com' })).json, { ok: true });
+    assert.equal(t.store.db.prepare("SELECT COUNT(*) AS n FROM staff_accounts WHERE email = 'saisho@example.com'").get().n, 0, '2人目の主催者管理者は、この道では作れない');
   } finally { await t.close(); }
 });
 

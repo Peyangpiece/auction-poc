@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
+import { installWriteHook } from './journal.js';
 
 export const hashToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 
@@ -127,6 +128,8 @@ function migrate(db) {
 export function openDb(dbPath) {
   if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
+  // 書き込みの見張り（外の保存先への控え）。文を用意する前に付ける。相手が付くまでは、何もしない
+  installWriteHook(db);
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = FULL'); // コミットごとに fsync する。電源断でも受理済みの入札を失わない
   db.pragma('foreign_keys = ON');

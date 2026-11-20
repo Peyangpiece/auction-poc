@@ -49,8 +49,25 @@ export class Notifier {
     this.waitMs = waitMs;
     // メールは、1通ずつ、決まった間隔をあけて送る（送信サービスの速さの上限に当たって、一斉に送ったお知らせが落ちないように。本番運用の評価 B11）
     this.intervalMs = intervalMs;
-    this.queue = Promise.resolve();
+    // 待ちの列は2本。急ぎ（認証番号）は、ふつうのメール（お知らせ・請求）より先に送る。
+    // 1本だけだと、大量のお知らせや、いたずらの登録が、認証番号を何分も待たせてしまう
+    this.urgent = []; this.normal = []; this.pumping = false;
   }
+
+  async #pump() {
+    if (this.pumping) return;
+    this.pumping = true;
+    try {
+      for (;;) {
+        const job = this.urgent.shift() ?? this.normal.shift();
+        if (!job) break;
+        job.resolve(await this.#deliver(job.message));
+        await new Promise((r) => setTimeout(r, this.intervalMs));
+      }
+    } finally { this.pumping = false; }
+  }
+  /** まだ送っていないメールの数（急ぎ・ふつう） */
+  get waiting() { return { urgent: this.urgent.length, normal: this.normal.length }; }
 
   async #deliver(message) {
     let lastError = null;
@@ -82,8 +99,9 @@ export class Notifier {
 
   email(to, kind, subject, body) {
     if (!this.intervalMs) return this.#deliver({ channel: 'email', to, kind, subject, body });
-    const run = this.queue.then(() => this.#deliver({ channel: 'email', to, kind, subject, body }));
-    this.queue = run.catch(() => {}).then(() => new Promise((r) => setTimeout(r, this.intervalMs)));
-    return run;
+    return new Promise((resolve) => {
+      (kind === 'otp' ? this.urgent : this.normal).push({ message: { channel: 'email', to, kind, subject, body }, resolve });
+      this.#pump();
+    });
   }
 }

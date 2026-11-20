@@ -9,7 +9,8 @@ import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { loadConfig } from './config.js';
 import { openDb, hashToken } from './db.js';
-import { createSaver } from './persist.js';
+import { createSaver, storePut, storeDel } from './persist.js';
+import { createJournal } from './journal.js';
 import { Metrics } from './metrics.js';
 import { StreamControl } from './stream.js';
 import { Auction } from './auction.js';
@@ -30,7 +31,17 @@ if (config.agentToken) {
   })();
 }
 // 外の保存先への保存（Cloudflare など、置き場が消える環境だけ）
-const saver = config.persistUrl ? createSaver({ db: store.db, config }) : null;
+// 書き込みの控え: 受理した入札や落札を、返事の前に、外の保存先にも書く（データの置き場が消える環境で、失わないため）
+let journalAlert = null; // 保存先に届かなくなったときの知らせ（api ができてから入れる）
+const journal = config.persistUrl && config.journal
+  ? createJournal({ db: store.db, put: (rel, body) => storePut(config, rel, body), del: (rel) => storeDel(config, rel), maxWaitMs: config.journalMaxWaitMs, onDegraded: (on, why) => journalAlert?.(on, why) })
+  : null;
+const saver = config.persistUrl ? createSaver({ db: store.db, config, journal }) : null;
+// 利用者へ送る: 書き込みの控えが保存先に届いてから送る（届いていれば、すぐ送る）。順番は、変わらない
+const out = (ws, text) => {
+  if (!journal || journal.clean()) return ws.send(text);
+  journal.after(() => { if (ws.readyState === 1) ws.send(text); });
+};
 const metrics = new Metrics(config.metricsDir, { level: config.metricsLevel, fileMb: config.metricsFileMb, maxMb: config.metricsMaxMb });
 
 // ---------------------------------------------------------------- 接続の管理
@@ -66,7 +77,7 @@ function broadcast(msg) {
       c.ws.terminate();
       continue;
     }
-    c.ws.send(c.role === 'auctioneer' ? staffText : memberText);
+    out(c.ws, c.role === 'auctioneer' ? staffText : memberText);
   }
   return nowMs();
 }
@@ -132,7 +143,7 @@ function onComment(conn, msg, send) {
 
 const stream = new StreamControl({ config, metrics, broadcast });
 // 会員登録・ログイン・スタッフ・開催・参加手続き。商品は、進行コンソールからその場で登録する
-const api = createApi({ store, config, nowMs, persistStatus: () => saver?.status() ?? null });
+const api = createApi({ store, config, nowMs, persistStatus: () => saver?.status() ?? null, durable: () => journal?.durable() });
 // 本日の開催を終えたあとは、品の登録・開始を断る（開催に属さない品が残り、次の開催を止めないように。本番運用の評価 A6）
 const lotGate = () => (api.endedToday() ? '本日の開催は終了しています。品の登録・開始はできません' : null);
 const auction = new Auction({ store, config, metrics, broadcast, stream, crashPoint, eventId: api.eventId, bidGate: api.bidGate, lotGate });
@@ -213,7 +224,7 @@ const server = http.createServer((req, res) => {
     res.statusCode = db ? 200 : 503;
     return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, busy: auction.snapshot().lots.some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status)) || ['running', 'break'].includes(api.eventState()?.phase), errors: errorCount, agent: stream.view().agentConnected,
       // 外からの見張り（死活監視）が、気づけるように: 保存が1分以上失敗している（本番運用の評価 A8）
-      alerts: saver && saver.status().failingSince && nowMs() - saver.status().failingSince > 60000 ? ['persist_failing'] : [], ...(saver ? { persist: saver.status() } : {}) }));
+      alerts: [...(saver && saver.status().failingSince && nowMs() - saver.status().failingSince > 60000 ? ['persist_failing'] : []), ...(journal?.status().degraded ? ['journal_degraded'] : [])], ...(saver ? { persist: saver.status() } : {}), ...(journal ? { journal: journal.status() } : {}) }));
   }
   if (url.pathname === '/hooks/ivs' && req.method === 'POST') return handleEventBridge(req, res);
   if (url.pathname.startsWith('/api/')) return api.handle(req, res, url);
@@ -335,7 +346,8 @@ function onClient(ws, req) {
   const leavePending = () => { if (conn.pendingLeft) return; conn.pendingLeft = true; const n = (pending.get(pendingKey) ?? 1) - 1; if (n > 0) pending.set(pendingKey, n); else pending.delete(pendingKey); };
   // 会場の Wi-Fi のように、大勢が同じ接続元から一斉につなぎ直すこともある。利用者のせいではないので、4503（混雑）で切り、画面は少し待ってつなぎ直す（報告書 81 章）
   if (pending.get(pendingKey) > 20) { leavePending(); return ws.close(4503, 'busy'); }
-  const send = (msg) => ws.readyState === 1 && ws.send(JSON.stringify(msg));
+  // 時刻合わせの返事は、待たせない（往復の時間を測るため）。ほかは、書き込みの控えが届いてから送る
+  const send = (msg) => { if (ws.readyState !== 1) return; if (msg.type === 'time') ws.send(JSON.stringify(msg)); else out(ws, JSON.stringify(msg)); };
   const allow = limiter(config.messageRate);
   // 名乗らないままの接続を残さない
   const helloTimer = config.helloTimeoutMs > 0 ? setTimeout(() => { if (!conn.role) ws.close(4408, 'hello timeout'); }, config.helloTimeoutMs) : null;
@@ -499,7 +511,7 @@ function onClient(ws, req) {
 // 監査ログに残す操作者。ログインしたスタッフならその人、検証用の合言葉で入った進行役なら「システム」扱い
 const staffRef = (conn) => (conn.staff.account ? { id: conn.staff.id, role: conn.staff.role } : null);
 const PROXY_REJECT = {
-  LOT_NOT_OPEN: 'この品は入札を受け付けていません', AFTER_CLOSE: '締めに間に合いませんでした', BELOW_MINIMUM: '最低入札額より低い金額です',
+  LOT_NOT_OPEN: 'この品は入札を受け付けていません', AFTER_CLOSE: '締めに間に合いませんでした', TOO_HIGH: '一度に入れられる金額を超えています', BELOW_MINIMUM: '最低入札額より低い金額です',
   OFF_LADDER: '入札できる金額ではありません', ALREADY_HIGHEST: 'この参加者が、すでに最高入札者です', NOT_CHECKED_IN: '受付で、来場の確認を受けてください', SUSPENDED: 'この参加者は、参加が停止されています', NOT_JOINED: 'この参加者は、いまの開催の参加者ではありません',
 };
 const CALLER_ACTIONS = new Set(['start', 'set_start', 'urikiri', 'close', 'pass', 'suspend', 'resume', 'sold_list']);
@@ -637,6 +649,19 @@ if (saver) setInterval(() => {
   }
 }, 30000).unref();
 
+// 書き込みの控えを始める。その前に、いまのデータベース（起動のときの準備の書き込みを含む）の写しを、保存先へ送っておく
+if (journal) {
+  journalAlert = (on, why) => {
+    if (on) api.alertAdmins('journal', '入札の控えを、保存先に書けていません', [
+      '受理した入札や落札を、返事の前に、保存先（Cloudflare R2）へ書く処理が、失敗しています。',
+      '競りは続けられますが、このあいだにサーバーが止まると、直前の数秒の入札や落札が失われるおそれがあります。',
+      '競りの最中なら、進行中の品を締めてから、開発の担当者に連絡してください。',
+      `理由: ${why ?? '不明'}`,
+    ]);
+  };
+  await saver.flush();
+  journal.start();
+}
 server.listen(config.port, config.host, () => {
   saver?.start();
   console.log(`[server] listening on ${config.host}:${server.address().port} ivsMode=${config.ivsMode} db=${config.dbPath}`);
@@ -666,6 +691,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     await metrics.close();
     // 止まる前に、まだ送っていない分を保存先へ送る
     // 1回で送れなければ、送れるまで（50秒まで）くり返す
+    if (journal) { await journal.flush(10000); journal.stop(); }
     if (saver) {
       saver.stop();
       const until = Date.now() + 50000;
