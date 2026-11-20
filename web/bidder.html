@@ -93,6 +93,16 @@
   <div id="videoBox">
     <video id="video" playsinline muted aria-label="会場のライブ映像"></video>
     <div id="break"><strong id="breakTitle">映像は停止中です</strong></div>
+    <!-- 待機中の画面（発注者の指示。報告書 126 章）: 開催を始める前・休憩中・終了後に、映像の枠に出す。カウントダウンは出さない。
+         同じ内容は、下の知らせ（#eventNote）が読み上げるので、ここは読み上げない -->
+    <div id="standby" hidden aria-hidden="true">
+      <span class="standby__glow"></span>
+      <img class="standby__logo" src="logo-dark.svg" width="178" height="48" alt="">
+      <strong id="standbyTitle"></strong>
+      <span id="standbyEvent" class="dyn"></span>
+      <span id="standbySub"></span>
+      <span class="standby__dots"><i></i><i></i><i></i></span>
+    </div>
     <button class="tapzone" id="cmtTap" type="button" aria-pressed="true" aria-label="コメントの表示と非表示を切り替える"></button>
     <div class="cmtlayer" id="cmtLayer"></div>
     <p class="cmttoast" id="cmtToast" role="status"></p>

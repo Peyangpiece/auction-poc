@@ -186,10 +186,20 @@ function renderHistory() {
 function renderStream() {
   // 配信が設定されていない（映像の再生先がない）ときは、映像の枠ごと出さない（「映像を準備しています」が出続けるだけになるため。報告書 86 章）
   const streaming = !!S.stream?.playbackUrl || (!!S.stream && S.stream.mode !== 'always-live'); // always-live は「配信を使わない」設定
-  const show = $('showVideo').checked && !venue && streaming;
+  // 待機中の画面（発注者の指示。報告書 126 章）: 開催を始める前・休憩中・終了後は、映像の枠に、待機中の画面を出す（配信の設定が無くても出す）。
+  // 品と品のあいだは、出さない。待機中は、配信が流れていても、待機中の画面を上に出す（再生は止める）
+  const wait = standbyKind();
+  const show = $('showVideo').checked && !venue && (streaming || !!wait);
   $('videoBox').style.display = show ? 'block' : 'none';
   document.querySelector('main').classList.toggle('novideo', !show);
-  const live = !!S.stream?.live && !!S.stream?.playbackUrl;
+  $('standby').hidden = !wait;
+  if (wait) {
+    $('standby').dataset.kind = wait;
+    $('standbyTitle').textContent = { before: 'まもなく始まります', break: '休憩中', ended: '本日の競りは終了しました' }[wait];
+    $('standbyEvent').textContent = S.eventTitle ?? '';
+    $('standbySub').textContent = wait === 'before' ? `開始の予定 ${S.eventNow.startsAt}` : wait === 'break' ? `再開の予定 ${S.eventNow.resumeAt}` : 'ご参加ありがとうございました';
+  }
+  const live = !wait && !!S.stream?.live && !!S.stream?.playbackUrl;
   $('break').style.display = live ? 'none' : 'flex';
   $('breakTitle').textContent = S.stream?.live ? '映像を準備しています' : '映像は停止中です';
   renderSound();
@@ -286,8 +296,10 @@ async function startPlayer() {
     link.event('player_error', { message: err.message });
   } finally { playerLoading = false; }
 }
+// いま、待機中の画面を出す場面か（before: 開催を始める前 / break: 休憩中 / ended: 終了後）
+function standbyKind() { return S.ended ? 'ended' : S.eventNow && !S.eventNow.phase ? 'before' : S.eventNow?.phase === 'break' ? 'break' : null; }
 function renderSound() {
-  const live = !!S.stream?.live && !!S.stream?.playbackUrl;
+  const live = !standbyKind() && !!S.stream?.live && !!S.stream?.playbackUrl;
   $('sound').hidden = !(live && $('showVideo').checked && !venue);
   $('sound').textContent = S.sound ? '音声を消す' : '音声を出す';
   $('sound').setAttribute('aria-pressed', String(S.sound));
@@ -320,6 +332,8 @@ setInterval(() => {
 function renderEvent(event, ended = false) {
   const changed = S.ended !== ended;
   S.ended = ended;
+  S.eventNow = event ?? null;
+  if (event?.title) S.eventTitle = event.title; // 終了後も、待機中の画面に、開催の名前を出す
   $('eventNote').textContent = ended ? '本日の競りは終了しました。ご参加ありがとうございました。'
     : event?.phase === 'break' ? `休憩中です。再開の予定は ${event.resumeAt} です。`
     // 始まる前に入った人には、開始の予定を伝える（発注者の決定: 始まる前も、入れる・コメントできる）
@@ -331,6 +345,7 @@ function renderEvent(event, ended = false) {
     getJson('/api/my/wins').then((w) => { if (w.status === 200 && w.lines?.length) { S.wins = { count: w.lines.length, payable: w.total.payable }; render(); } }).catch(() => {});
   }
   if (changed) render(); // 終わったら、落札した品の「お支払いの確認へ」を出す
+  renderStream(); // 待機中の画面を、出す・しまう
 }
 function onMessage(msg, at) {
   switch (msg.type) {
