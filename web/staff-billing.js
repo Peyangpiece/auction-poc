@@ -141,9 +141,16 @@ async function billingPanel() {
   const nodes = [
     // 書き出しは、月に一度ほどの作業なので、ひとつの「書き出す」の中にまとめる（報告書 83 章）
     el('div', { class: 'toolbar' }, el('div', { class: 'toolbar__acts' }, settleBtn), isAdmin() && exportMenu([
-      el('a', { class: 'btn', href: '/api/billing/shipping.csv', text: '配送の一覧（CSV）' }),
-      el('a', { class: 'btn', href: `/api/billing/ledger.csv?month=${res.today.slice(0, 7)}`, text: '帳簿用の記録（CSV）' }),
-      el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（Excel）' })])),
+      // 書き出しは、上で選んだ開催の分（発注者の決定。報告書 125 章）。「すべての開催」のときは、これまでどおり（配送は全部、帳簿と請求書は今月）
+      ...(res.event !== null && res.event !== undefined ? [
+        el('a', { class: 'btn', href: `/api/billing/shipping.csv?event=${res.event}`, text: '配送の一覧（この開催・CSV）' }),
+        el('a', { class: 'btn', href: `/api/billing/ledger.csv?event=${res.event}`, text: '帳簿用の記録（この開催・CSV）' }),
+        el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?event=${res.event}`, text: '請求書の一覧（この開催・Excel）' }),
+      ] : [
+        el('a', { class: 'btn', href: '/api/billing/shipping.csv', text: '配送の一覧（すべての開催・CSV）' }),
+        el('a', { class: 'btn', href: `/api/billing/ledger.csv?month=${res.today.slice(0, 7)}`, text: '帳簿用の記録（今月・CSV）' }),
+        el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（今月・Excel）' }),
+      ])])),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     filterBar,
     summary,

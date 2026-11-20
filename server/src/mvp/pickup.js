@@ -1,5 +1,5 @@
 // 未引き取り（現地受け取りの期限）と配送の一覧（報告書 119 章で、billing.js から分けた。中身は、分ける前と同じ）
-import { csvCell } from './shared.js';
+import { csvCell, HttpError } from './shared.js';
 import { makeInvoiceList } from './invoice-files.js';
 
 export function createPickup(deps) {
@@ -25,17 +25,26 @@ export function createPickup(deps) {
     if (a.postal_code && a.address1) return [zipCsv(a.postal_code), `${a.prefecture ?? ''}${a.address1}${a.address2 ? ' ' + a.address2 : ''}`];
     return ['', a.address ?? ''];
   }
+  // 書き出しは、画面で選んだ開催に合わせる（発注者の決定。報告書 125 章）: ?event=番号 があれば、その開催の分だけ。無ければ、これまでどおり（全部・月ごと）
+  const exportEvent = (ctx) => {
+    const want = ctx.url.searchParams.get('event');
+    if (!want || want === 'all') return null;
+    const e = db.prepare('SELECT id, title, substr(starts_at, 1, 10) AS date FROM events WHERE id = ?').get(Number(want));
+    if (!e) throw new HttpError(404, '開催が見つかりません');
+    return e;
+  };
   route('GET', '/api/billing/shipping.csv', (ctx) => {
     needStaff(ctx, 'admin');
-    const rows = db.prepare("SELECT * FROM bill_lines WHERE receive = 'ship' AND cancelled_at IS NULL AND kind IN ('lot','promote') ORDER BY account_id, id").all();
+    const ev = exportEvent(ctx);
+    const rows = db.prepare("SELECT * FROM bill_lines WHERE receive = 'ship' AND cancelled_at IS NULL AND kind IN ('lot','promote') ORDER BY account_id, id").all().filter((l) => !ev || l.event_id === ev.id);
     const out = rows.map((l) => {
       const a = account(l.account_id), lot = lotOf.get(l.lot_id) ?? {};
       const [zip, addr] = addressParts(a);
       return [lot.starts_at?.slice(0, 10) ?? '', lot.lot_no ?? '', lot.title ?? l.label, l.amount, displayName(a), zip, addr, telCsv(a.withdrawn_phone ?? a.phone),
         l.cleared_at ? jst(l.cleared_at) : '', l.delivered_at ? jst(l.delivered_at) : ''];
     });
-    audit(ctx, 'billing.shipping_export', { target: 'shipping.csv', after: { rows: rows.length } });
-    return csvFile(['開催日', '品番', '品名', '落札額（税込）', '氏名・会社名', '郵便番号', '配送先の住所', '電話番号', '入金の確認日', '引き渡しの日'], out, `shipping-${today()}.csv`);
+    audit(ctx, 'billing.shipping_export', { target: ev ? `shipping:event:${ev.id}` : 'shipping.csv', after: { rows: rows.length } });
+    return csvFile(['開催日', '品番', '品名', '落札額（税込）', '氏名・会社名', '郵便番号', '配送先の住所', '電話番号', '入金の確認日', '引き渡しの日'], out, ev ? `shipping-${ev.date}-event${ev.id}.csv` : `shipping-${today()}.csv`);
   });
 
   // 古物営業法16条の帳簿に使うための、取引の記録（FR-LEG-001）。引き渡した品を、日付・品目・数量・特徴・相手方で出す
@@ -43,19 +52,22 @@ export function createPickup(deps) {
     needStaff(ctx, 'admin');
     const month = ctx.url.searchParams.get('month') ?? today().slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(month)) throw bad('月を、2026-12 の形で指定してください');
-    const rows = db.prepare("SELECT * FROM bill_lines WHERE kind IN ('lot','promote') AND delivered_at IS NOT NULL ORDER BY delivered_at").all().filter((l) => jst(l.delivered_at).startsWith(month));
+    const ev = exportEvent(ctx);
+    // 開催を選んでいるときは、その開催の品のうち、引き渡したもの（月をまたいで引き渡した分も入る）。選んでいないときは、その月に引き渡したもの
+    const rows = db.prepare("SELECT * FROM bill_lines WHERE kind IN ('lot','promote') AND delivered_at IS NOT NULL ORDER BY delivered_at").all().filter((l) => (ev ? l.event_id === ev.id : jst(l.delivered_at).startsWith(month)));
     const out = rows.map((l) => {
       const a = account(l.account_id), lot = lotOf.get(l.lot_id) ?? {};
       return [jst(l.delivered_at), lot.lot_no ?? '', lot.title ?? l.label, 1, '', l.amount, displayName(a), a.address, telCsv(a.withdrawn_phone ?? a.phone)];
     });
-    audit(ctx, 'billing.ledger_export', { target: `ledger:${month}`, after: { rows: rows.length } });
-    return csvFile(['引き渡しの日', '品番', '品目', '数量', '特徴', '代金（税込）', '相手方の氏名・名称', '相手方の住所', '相手方の電話番号'], out, `ledger-${month}.csv`);
+    audit(ctx, 'billing.ledger_export', { target: ev ? `ledger:event:${ev.id}` : `ledger:${month}`, after: { rows: rows.length } });
+    return csvFile(['引き渡しの日', '品番', '品目', '数量', '特徴', '代金（税込）', '相手方の氏名・名称', '相手方の住所', '相手方の電話番号'], out, ev ? `ledger-${ev.date}-event${ev.id}.csv` : `ledger-${month}.csv`);
   });
   // 月ごとに、全請求書を1つの Excel にまとめた一覧（FR-INV-007）
   route('GET', '/api/billing/invoices.xlsx', async (ctx) => {
     needStaff(ctx, 'admin');
     const month = ctx.url.searchParams.get('month') ?? today().slice(0, 7);
-    const list = db.prepare('SELECT * FROM invoices ORDER BY id').all().filter((i) => jst(i.issued_at).startsWith(month));
+    const ev = exportEvent(ctx);
+    const list = db.prepare('SELECT * FROM invoices ORDER BY id').all().filter((i) => (ev ? i.event_id === ev.id : jst(i.issued_at).startsWith(month)));
     const KIND = { cash: '現金の精算', transfer: '振込', promote: '繰り上げ', penalty: '違約金など' };
     const rows = list.map((i) => {
       // 解除した明細は、請求額にも入金にも数えない。すべて解除した請求書は「解除」
@@ -63,8 +75,8 @@ export function createPickup(deps) {
       const state = m.cancelled === m.lines ? '解除' : m.paid === m.due ? '支払済み' : m.paid > 0 ? '一部支払済み' : '未払い';
       return [i.number, KIND[i.kind], displayName(account(i.account_id)), jst(i.issued_at), i.sent_at ? jst(i.sent_at) : '', i.due_date ?? '', m.due, m.paid, m.cancelled && m.cancelled < m.lines ? `${state}（一部解除）` : state];
     });
-    audit(ctx, 'billing.invoices_export', { target: `invoices:${month}`, after: { rows: rows.length } });
-    return { file: { body: await makeInvoiceList(month, rows), type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: `invoices-${month}.xlsx` } };
+    audit(ctx, 'billing.invoices_export', { target: ev ? `invoices:event:${ev.id}` : `invoices:${month}`, after: { rows: rows.length } });
+    return { file: { body: await makeInvoiceList(ev ? ev.date : month, rows), type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: ev ? `invoices-${ev.date}-event${ev.id}.xlsx` : `invoices-${month}.xlsx` } };
   });
   return {  };
 }

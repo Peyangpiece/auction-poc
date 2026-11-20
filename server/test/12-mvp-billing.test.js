@@ -361,6 +361,19 @@ test('受け取り方法・支払方法の変更は、開催終了まで本人�
     await t.admin.post(`/api/billing/lines/${l.id}/receive`, { receive: 'ship' });
     const csv = await t.admin.get('/api/billing/shipping.csv');
     assert.match(csv.type, /text\/csv/);
+    // 画面で選んだ開催に合わせた書き出し（発注者の決定。報告書 125 章）: その開催の分だけ。無い開催は 404
+    const one = await t.admin.get(`/api/billing/shipping.csv?event=${t.eventId}`);
+    assert.match(one.buf.toString('utf8'), /"飯ごう"/);
+    assert.equal((await t.admin.get('/api/billing/shipping.csv?event=99999')).status, 404);
+    { // 別の開催の明細は、入らない
+      const other = t.store.db.prepare("INSERT INTO events (title, starts_at, ends_at, venue_name, venue_address, highlights, notified, status, phase, created_at) VALUES ('前の競り','2026-11-01T09:00','2026-11-01T18:00','x','x','',1,'published','ended',1)").run().lastInsertRowid;
+      t.store.db.prepare("INSERT INTO bill_lines (kind, event_id, account_id, label, amount, receive, created_at) SELECT 'lot', ?, account_id, 'No.9 前の開催の品', 700, 'ship', 1 FROM bill_lines LIMIT 1").run(other);
+      assert.match((await t.admin.get('/api/billing/shipping.csv')).buf.toString('utf8'), /前の開催の品/, '開催を選ばなければ、全部');
+      assert.doesNotMatch((await t.admin.get(`/api/billing/shipping.csv?event=${t.eventId}`)).buf.toString('utf8'), /前の開催の品/);
+      assert.match((await t.admin.get(`/api/billing/shipping.csv?event=${other}`)).buf.toString('utf8'), /前の開催の品/);
+      assert.deepEqual((await t.admin.get('/api/billing/lines')).json.events.map((e) => e.id), [t.eventId, Number(other)], '開催は、新しい順');
+      t.store.db.prepare('DELETE FROM bill_lines WHERE event_id = ?').run(other);
+    }
     assert.match(csv.buf.toString('utf8'), /"2026-12-07","1","飯ごう","2000","検証 1郎","","東京都千代田区1","090-6666-0001","",""/);
     // 配送先を別に書いた会員: 先頭の郵便番号を、郵便番号の列に分ける。電話番号は、表計算ソフトで先頭の 0 が消えない形
     await a.post('/api/my/profile', { name: '検証 1郎', email: 'a1@example.com', address: '東京都千代田区1', shipTo: '〒1500001 東京都渋谷区神宮前1-1' });
@@ -580,6 +593,8 @@ test('違約金・遅延損害金の金額の案、帳簿の出力、請求書�
     assert.equal(ledger.buf.toString('utf8').includes('飯ごう'), false);
     const xlsx = await t.admin.get('/api/billing/invoices.xlsx?month=2026-12');
     assert.equal(xlsx.buf.subarray(0, 2).toString(), 'PK');
+    assert.match((await t.admin.get(`/api/billing/ledger.csv?event=${t.eventId}`)).buf.toString('utf8'), /"寝袋"/, '開催で選んだ帳簿');
+    assert.equal((await t.admin.get(`/api/billing/invoices.xlsx?event=${t.eventId}`)).buf.subarray(0, 2).toString(), 'PK');
     const reception = await t.staffLogin('reception', 'uketsuke');
     assert.equal((await reception.get('/api/billing/ledger.csv')).status, 403);
   } finally { await t.close(); }
