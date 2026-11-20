@@ -245,6 +245,7 @@ test('繰り上げ: 次点の1人だけに打診し、承諾で請求書を1通�
     assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/offer`)).status, 409, '打診は1人だけ（3番目の人には打診しない）');
     assert.equal((await b.get('/api/my/billing')).json.offers.length, 0);
     const mine = (await c.get('/api/my/billing')).json.offers;
+    assert.equal((await c.post('/api/my/withdraw')).status, 409, '繰り上げの打診に答えていないあいだは、退会できない（本番運用の評価 B5）');
     assert.deepEqual([mine[0].state, mine[0].amount], ['open', 1800]);
     assert.equal((await b.post(`/api/my/offers/${mine[0].id}`, { answer: 'accept' })).status, 404, 'ほかの人は、回答できない');
     const accepted = await c.post(`/api/my/offers/${mine[0].id}`, { answer: 'accept' });
@@ -306,7 +307,9 @@ test('手数料の集計: 消し込み済みだけ・消し込みの月で区切
     assert.ok(pen.json.invoice);
     // 1月に、12月の消し込み（D）を取り消し、A を返金した → 1月の手数料から差し引く（1件ごとに切り上げ）
     await t.admin.post(`/api/billing/lines/${d.id}/unclear`, { reason: '別の人の入金だった' });
-    await t.admin.post(`/api/billing/lines/${ids[0]}/refund`, { amount: 1010, date: t.today(), method: 'cash', reason: '返品' });
+    assert.equal((await t.admin.post(`/api/billing/lines/${ids[0]}/refund`, { amount: 1112, date: t.today(), method: 'cash', reason: '返品' })).status, 400, '払う金額（1,010＋買歩銭101）を超える返金は断る');
+    assert.equal((await t.admin.post(`/api/billing/lines/${ids[0]}/refund`, { amount: 1111, date: '2099-01-01', method: 'cash', reason: '返品' })).status, 400, '未来の日の返金は断る');
+    await t.admin.post(`/api/billing/lines/${ids[0]}/refund`, { amount: 1111, date: t.today(), method: 'cash', reason: '返品' }); // 全額の返金
     const jan = (await t.admin.get(`/api/billing/fees?month=${t.today().slice(0, 7)}`)).json;
     assert.deepEqual([jan.base, jan.deduction, jan.fee], [0, 50 + 51, 0], '990×5%=49.5→50、1,010×5%=50.5→51。手数料は0円より下にはしない');
     assert.equal((await t.admin.get('/api/billing/fees?month=2026-12')).json.fee, 150, '締めた月の金額は、あとから変わらない');
@@ -314,6 +317,11 @@ test('手数料の集計: 消し込み済みだけ・消し込みの月で区切
     assert.equal((await t.admin.post('/api/billing/fees/confirm', { month: t.today().slice(0, 7) })).status, 409, '今月は、まだ確認済みにできない');
     assert.equal((await t.admin.post('/api/billing/fees/confirm', { month: '2026-12' })).status, 200);
     assert.equal((await t.admin.get('/api/billing/fees?month=2026-12')).json.confirmedOn, t.today());
+    assert.equal((await t.admin.post(`/api/billing/lines/${ids[1]}/refund`, { amount: 100, date: '2026-12-20', method: 'cash', reason: '一部返品' })).status, 409, '確認済みの月の日付の返金は断る');
+    // 一部の返金は、返金額のうち落札額にあたる分の 5% を差し引く（落札額全体ではない。本番運用の評価 B1）
+    await t.admin.post(`/api/billing/lines/${ids[1]}/refund`, { amount: 555, date: t.today(), method: 'cash', reason: '一部返品' });
+    const jan2 = (await t.admin.get(`/api/billing/fees?month=${t.today().slice(0, 7)}`)).json;
+    assert.equal(jan2.deduction, 50 + 51 + 26, '555円の返金のうち落札額の分は 505円 → 5%=25.25→26');
     await t.admin.post('/api/settings', { orgName: '株式会社レイワ', returnPolicy: '仮', shippingNotice: '仮', feeTaxMode: 'inclusive', feeMinimum: '1000' });
     const min = (await t.admin.get('/api/billing/fees?month=2026-12')).json;
     assert.deepEqual([min.charge, min.tax, min.total], [1000, 0, 1000], '手数料と最低保証額の大きいほう。内税なら消費税を足さない');
@@ -609,5 +617,49 @@ test('終了の操作を忘れた開催を、管理画面から終えて請求�
     assert.equal(t.api.eventState(), null, '今日を終えたら、きのうの開催には戻らない');
     assert.equal(t.api.endedToday(), true);
     await new Promise((r) => setTimeout(r, 500)); // 請求書の PDF の書き出しを待つ
+  } finally { await t.close(); }
+});
+
+test('本番運用の評価の指摘（B2〜B6・違約金の重複）: 送っていない請求書は期限切れにしない・送料の更新が重なっても PDF が壊れない・現金の精算の取り消しで請求が漏れない・退会と受付の条件（報告書 104 章）', async () => {
+  const t = await setup();
+  try {
+    const a = await t.member(1, { receive: 'ship' }), b = await t.member(2, { venue: true }), c = await t.member(3);
+    t.sold('飯ごう', [[a, 2000]]);
+    t.sold('水筒', [[b, 500]]);
+    // B4: 当日現金の精算を取り消すと、未精算に戻り、もう一度精算できる
+    const water = await t.line('水筒');
+    assert.equal((await t.admin.post('/api/billing/settle', { lineIds: [water.id] })).status, 200);
+    assert.equal((await t.admin.post(`/api/billing/lines/${water.id}/unclear`, { reason: 'まちがえて精算した' })).status, 200);
+    assert.deepEqual([(await t.line('水筒')).state, (await t.line('水筒')).invoice], ['unsettled', null], '請求書から外れて、未精算に戻る');
+    assert.equal((await t.admin.post('/api/billing/settle', { lineIds: [water.id] })).status, 200, 'もう一度精算できる');
+    const [inv] = await t.endEvent();
+    // B2: 送っていない請求書は、期限を過ぎても未払いにしない（停止・督促・解除に進まない）
+    await t.advance(6);
+    assert.notEqual((await t.line('飯ごう')).state, 'unpaid', '送っていない請求書は、期限切れにしない');
+    assert.equal((await a.get('/api/me')).json.member.suspended, false, '停止しない');
+    // B3: 送料の更新が重なっても、PDF が壊れない。送料を足すと、支払期限を決め直す
+    const acct = t.store.db.prepare('SELECT account_id FROM bill_lines WHERE label LIKE ?').get('%飯ごう%').account_id;
+    const rs = await Promise.all([600, 700, 800, 900].map((amount) => t.admin.post('/api/billing/shipping', { accountId: acct, eventId: t.eventId, amount, label: 'ヤマト' })));
+    assert.ok(rs.every((r) => r.status === 200));
+    const fresh = t.store.db.prepare('SELECT * FROM invoices WHERE id = ?').get(inv.id);
+    const pdf = fs.readFileSync(fresh.pdf_file);
+    assert.ok(pdf.subarray(0, 5).toString() === '%PDF-' && pdf.subarray(-6).toString().includes('%%EOF'), 'PDF が壊れていない');
+    assert.ok(fresh.due_date > t.today(), '送料を足した日に、支払期限を決め直す');
+    // 送ってから期限を過ぎると、未払い → 停止
+    await t.admin.post(`/api/billing/invoices/${inv.id}/sent`);
+    await t.advance(6);
+    assert.equal((await t.line('飯ごう')).state, 'unpaid');
+    // 違約金は、同じ明細に1回まで
+    const l = await t.line('飯ごう');
+    await t.admin.post(`/api/billing/lines/${l.id}/cancel`, { reason: '未払い' });
+    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/penalty`, { amount: 300 })).status, 200);
+    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/penalty`, { amount: 300 })).status, 409, '2度目の違約金は断る');
+    const pen = (await t.lines()).find((x) => x.kind === 'penalty');
+    assert.equal((await t.admin.post(`/api/billing/lines/${pen.id}/penalty`, { amount: 100 })).status, 409, '違約金の明細に違約金はかけない');
+    // B6: 承認されていない会員は、受付で参加手続きできない
+    t.store.db.prepare('UPDATE member_accounts SET approved_at = NULL WHERE email = ?').run(c.email);
+    assert.equal((await t.admin.post('/api/reception/join', { phone: '09066660003', receive: 'pickup', payment: 'cash' })).status, 409);
+    assert.ok(t.api.bidGate(t.store.db.prepare('SELECT * FROM members WHERE id = ?').get(c.pid)), '承認されていない会員は、入札（代理入札を含む）できない');
+    await new Promise((r) => setTimeout(r, 500));
   } finally { await t.close(); }
 });

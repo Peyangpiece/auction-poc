@@ -475,6 +475,11 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const m = needMember(ctx);
     const open = db.prepare('SELECT COUNT(*) AS n FROM bill_lines WHERE account_id = ? AND cleared_at IS NULL AND cancelled_at IS NULL').get(m.id).n;
     if (open) throw new HttpError(409, 'お支払いが済んでいない落札があるため、退会できません。お支払いのあとに、もう一度お手続きください');
+    // 競りの最中の品で最高入札者のあいだ、繰り上げの打診に答えていないあいだは、退会できない（退会した人に落札・請求が付かないように。本番運用の評価 B5）
+    const leading = db.prepare(`SELECT l.lot_no FROM lots l JOIN bids b ON b.seq = l.current_bid_seq JOIN members p ON p.id = b.member_id
+      WHERE p.account_id = ? AND l.status IN ('preparing','preparing_warn','open','suspended') LIMIT 1`).get(m.id);
+    if (leading) throw new HttpError(409, `いま競りの最中の品（No.${leading.lot_no}）で、最高入札者になっています。競りが終わってから、もう一度お手続きください`);
+    if (db.prepare("SELECT 1 FROM offers WHERE account_id = ? AND state = 'open'").get(m.id)) throw new HttpError(409, '繰り上げ落札のご案内に、まだお答えいただいていません。お答えのあとに、もう一度お手続きください');
     db.transaction(() => {
       // 電話番号を空けて、同じ番号でもう一度登録できるようにする。元の番号は、記録として残す
       db.prepare('UPDATE member_accounts SET withdrawn_at = ?, withdrawn_phone = phone, phone = ?, updated_at = ? WHERE id = ?').run(nowMs(), `退会:${m.id}`, nowMs(), m.id);
@@ -1159,6 +1164,9 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (!event) throw new HttpError(409, '本日の開催はありません');
     const m = db.prepare('SELECT * FROM member_accounts WHERE phone = ?').get(phoneOf(body));
     if (!m) throw new HttpError(404, 'この電話番号の会員が見つかりません。先に、会員登録をしてもらってください');
+    // 承認済みで、退会・却下・停止になっていない会員だけ（本番運用の評価 B6）
+    if (!m.approved_at || m.rejected_at || m.withdrawn_at) throw new HttpError(409, 'この会員は、まだ承認されていないか、退会・却下されています。主催者管理者に確かめてください');
+    if (billing.suspension(m.id)) throw new HttpError(409, 'この会員は、参加が停止されています。主催者管理者に確かめてください');
     if (!Object.hasOwn(RECEIVE, body.receive) || !Object.hasOwn(PAYMENT, body.payment)) throw bad('受け取り方法と支払方法を、本人に聞いて選んでください');
     const existing = participant(m.id, event.id);
     if (existing) throw new HttpError(409, `この会員は、参加番号 ${existing.paddle_no} で参加手続きが済んでいます`);
@@ -1207,6 +1215,9 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     if (!m.account_id) return null; // 検証用の参加者（合言葉の URL）
     // つないだあとで開催が切り替わったら、前の開催の参加番号では入札できない（新しい開催で、参加手続きをやり直す）
     if (m.event_id !== (activeEvent()?.id ?? null)) return 'NOT_JOINED';
+    // 承認済みで、退会・却下になっていない会員だけ（代理入札も含む。本番運用の評価 B6）
+    const acc = db.prepare('SELECT approved_at, rejected_at, withdrawn_at FROM member_accounts WHERE id = ?').get(m.account_id);
+    if (!acc?.approved_at || acc.rejected_at || acc.withdrawn_at) return 'NOT_JOINED';
     // 手動の停止か、未払いによる自動の停止（FR-AUTH-009・015）。どちらか一方でもかかっていれば、入札できない
     if (billing.suspension(m.account_id)) return 'SUSPENDED';
     // つないだあとで会場参加に切り替えた人は、来場確認が済むまで入札できない（別のタブを開いたままでも）

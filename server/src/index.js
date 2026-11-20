@@ -113,6 +113,8 @@ const lastCommentAt = new Map(); // member id -> 最後に書き込んだ時刻
 function onComment(conn, msg, send) {
   const fail = (message) => send({ type: 'comment_result', reqId: msg.reqId ?? null, ok: false, message });
   if (conn.role !== 'member') return fail('コメントは会員だけが書き込めます');
+  // 参加を停止された会員は、コメントも書き込めない（本番運用の評価 S-6）
+  if (conn.member.account_id && api.billing.suspension(conn.member.account_id)) return fail('参加が停止されているため、コメントは書き込めません');
   // 制御文字を除き、前後の空白を落とす。長さは文字（書記素ではなくコードポイント）で数える
   const text = String(msg.text ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
   if (!text) return fail('コメントを入力してください');
