@@ -213,9 +213,7 @@ setInterval(() => {
   const setText = (id, t) => { if ($(id).textContent !== t) $(id).textContent = t; }; // 変わったときだけ書く（読み上げの繰り返しと、無駄な描き直しを避ける）
   setText('clock', S.dev ? jst(link.serverNow()) : jst(link.serverNow()).slice(0, 8));
   // 開催を始めてからの経過時間（休憩のあいだも進む）
-  const from = S.event?.startedAt ?? null;
-  $('elapsed').hidden = !from;
-  if (from) { const sec = Math.max(0, Math.floor((link.serverNow() - from) / 1000)); setText('elapsedTime', `${Math.floor(sec / 3600)}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`); }
+  showElapsed();
   // 配信の止め忘れ: 競りがないまま配信が続いた時間が長くなったら知らせる（自動では止めない）
   const st = S.stream;
   const idleMs = st && st.idleSince && (st.obsActive || st.live) && st.mode !== 'always-live' ? link.serverNow() - st.idleSince : 0;
@@ -387,7 +385,17 @@ async function renderOffHours() {
   $('offDate').textContent = `${m}月${dd}日（${'日月火水木金土'[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()]}）`;
   $('offInfo').textContent = `${next.title}　${next.startsAt.slice(11, 16)}〜　${next.venueName}`;
 }
+// 開催を始めてからの経過時間（休憩のあいだも進む）。時計の更新のたびと、開催の状態が変わったとき（始めた直後に、すぐ出す）に呼ぶ
+function showElapsed() {
+  const from = S.event?.startedAt ?? null;
+  $('elapsed').hidden = !from;
+  if (!from || !link) return;
+  const sec = Math.max(0, Math.floor((link.serverNow() - from) / 1000));
+  const t = `${Math.floor(sec / 3600)}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+  if ($('elapsedTime').textContent !== t) $('elapsedTime').textContent = t;
+}
 function renderEvent() {
+  showElapsed();
   renderOffHours();
   const e = S.event;
   // 本日の公開中の開催がないと、追加した品は、どの開催にも入らず、会員から見えない。知らせて、追加を止める（検証用の合言葉で入ったときは止めない）

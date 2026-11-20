@@ -276,7 +276,7 @@ try {
   check(await con.isVisible('#b_evstart') && await con.isHidden('#b_break') && await con.isHidden('#b_end'), '始める前の進行コンソールには、「開催を始める」だけが出る（休憩・終了は出ない）');
   check(await con.isDisabled('#b_next'), '開催を始める前は、品を開始するボタンが押せない');
   await con.click('#b_evstart'); await con.click('#dlgOk');
-  await con.waitForFunction(() => !document.getElementById('b_next').disabled);
+  await con.waitForFunction(() => !document.getElementById('b_next').disabled && !document.getElementById('elapsed').hidden);
   check(await con.isHidden('#b_evstart') && await con.isVisible('#b_end') && await con.isVisible('#elapsed'), '始めると、休憩・終了が出て、右上に、開始からの経過時間が出る');
   await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
