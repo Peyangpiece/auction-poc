@@ -148,9 +148,12 @@ export function openDb(dbPath) {
       LEFT JOIN members m ON m.id = b.member_id
       WHERE l.event_id IS ?
       ORDER BY l.lot_no`),
+    // 進行中の品は、同じ開催の中だけで数える（前の開催に残った品が、次の開催を止めないように。本番運用の評価 A6）
     busyLot: db.prepare(
-      `SELECT id FROM lots WHERE status IN ('preparing','preparing_warn','open','suspended') AND id <> ? LIMIT 1`),
+      `SELECT id FROM lots WHERE status IN ('preparing','preparing_warn','open','suspended') AND id <> ? AND event_id IS ? LIMIT 1`),
     activeLots: db.prepare(`SELECT id, status FROM lots WHERE status IN ('preparing','preparing_warn','open','suspended')`),
+    activeLotsOf: db.prepare(`SELECT id, status FROM lots WHERE status IN ('preparing','preparing_warn','open','suspended') AND event_id IS ?`),
+    openLotsOf: db.prepare(`SELECT id FROM lots WHERE status IN ('waiting','preparing','preparing_warn','open','suspended') AND event_id = ?`),
     insertBid: db.prepare(
       `INSERT INTO bids (seq, lot_id, member_id, amount, received_at, result, proxy_by) VALUES (?, ?, ?, ?, ?, ?, ?)`),
     setCurrentBid: db.prepare(`UPDATE lots SET current_bid_seq = ?, updated_at = ? WHERE id = ?`),

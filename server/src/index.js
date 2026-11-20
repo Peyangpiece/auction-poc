@@ -131,7 +131,18 @@ function onComment(conn, msg, send) {
 const stream = new StreamControl({ config, metrics, broadcast });
 // 会員登録・ログイン・スタッフ・開催・参加手続き。商品は、進行コンソールからその場で登録する
 const api = createApi({ store, config, nowMs, persistStatus: () => saver?.status() ?? null });
-const auction = new Auction({ store, config, metrics, broadcast, stream, crashPoint, eventId: api.eventId, bidGate: api.bidGate });
+// 本日の開催を終えたあとは、品の登録・開始を断る（開催に属さない品が残り、次の開催を止めないように。本番運用の評価 A6）
+const lotGate = () => (api.endedToday() ? '本日の開催は終了しています。品の登録・開始はできません' : null);
+const auction = new Auction({ store, config, metrics, broadcast, stream, crashPoint, eventId: api.eventId, bidGate: api.bidGate, lotGate });
+// 管理画面からの開催終了（本番運用の評価 A5）
+api.hooks.closeOut = (eventId, { current, actor }) => {
+  if (current) {
+    if (auction.hasActiveLot()) return { error: '進行中の品があるあいだは、開催を終了できません。進行コンソールで締めるか中断してから、やり直してください' };
+    return { notHeld: auction.closeOutWaiting(actor) };
+  }
+  return { notHeld: auction.closeOutEvent(eventId, actor) };
+};
+api.hooks.afterEnd = (current) => { if (current) { stream.manual('stop'); broadcast({ type: 'event', event: null, ended: true }); } };
 const recovered = auction.recover();
 if (recovered.length) console.log('[recovery]', JSON.stringify(recovered));
 

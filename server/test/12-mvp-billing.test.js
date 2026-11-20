@@ -578,3 +578,36 @@ test('請求書の件名は「開催日 令和の競り」だけ（開催の名�
     assert.ok(cells.includes('件名 : 12.7 令和の競り'), cells.find((c) => c.startsWith('件名')));
   } finally { await t.close(); }
 });
+
+test('終了の操作を忘れた開催を、管理画面から終えて請求書を作る。今日の開催を終えたら、前日の開催に戻らない（本番運用の評価 A5。報告書 103 章）', async () => {
+  const t = await setup();
+  try {
+    const a = await t.member(1);
+    t.sold('飯ごう', [[a, 2000]]);
+    // 終了を押し忘れたまま2日たつ
+    await t.advance(2);
+    t.api.hooks.closeOut = () => ({ notHeld: 0 });
+    const list = (await t.admin.get('/api/events')).json.events;
+    assert.deepEqual(list.map((e) => [e.stale, e.ended]), [[true, false]], '過ぎた日の、終わっていない開催として出る');
+    const reception = await t.staffLogin('reception', 'uketsuke');
+    assert.equal((await reception.post(`/api/events/${t.eventId}/end`)).status, 403, '受付係は、開催を終えられない');
+    const ended = await t.admin.post(`/api/events/${t.eventId}/end`);
+    assert.equal(ended.status, 200);
+    assert.equal(ended.json.invoices, 1, '請求書のない落札を、請求書にまとめる');
+    assert.equal((await t.line('飯ごう')).invoice.kind, 'transfer');
+    assert.equal((await t.admin.post(`/api/events/${t.eventId}/end`)).status, 409, '2度は終えられない');
+    assert.deepEqual((await t.admin.get('/api/events')).json.events.map((e) => [e.stale, e.ended]), [[false, true]]);
+
+    // 2日続けて開催する: 今日の開催を終えたら、きのうの（終わっていない）開催に戻らない
+    const day = (n) => new Date(Date.parse(t.today() + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+    const y = (await t.admin.post('/api/events', { title: 'きのう', startsAt: `${day(-1)}T09:00`, endsAt: `${day(-1)}T18:00`, venueName: '会場', venueAddress: '住所', notified: true })).json.id;
+    await t.admin.post(`/api/events/${y}/publish`);
+    const d = (await t.admin.post('/api/events', { title: 'きょう', startsAt: `${day(0)}T09:00`, endsAt: `${day(0)}T18:00`, venueName: '会場', venueAddress: '住所', notified: true })).json.id;
+    await t.admin.post(`/api/events/${d}/publish`);
+    assert.equal(t.api.eventState().title, 'きょう');
+    t.api.setPhase(null, 'ended');
+    assert.equal(t.api.eventState(), null, '今日を終えたら、きのうの開催には戻らない');
+    assert.equal(t.api.endedToday(), true);
+    await new Promise((r) => setTimeout(r, 500)); // 請求書の PDF の書き出しを待つ
+  } finally { await t.close(); }
+});

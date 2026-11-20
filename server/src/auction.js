@@ -37,7 +37,7 @@ export class Auction {
    * @param {import('./stream.js').StreamControl} deps.stream
    * @param {(point: string) => void} deps.crashPoint 障害の模擬用（本番では何もしない）
    */
-  constructor({ store, config, metrics, broadcast, stream, crashPoint = () => {}, eventId = () => null, bidGate = () => null }) {
+  constructor({ store, config, metrics, broadcast, stream, crashPoint = () => {}, eventId = () => null, bidGate = () => null, lotGate = () => null }) {
     validateTable(config.incrementTable);
     this.store = store;
     this.config = config;
@@ -46,6 +46,7 @@ export class Auction {
     this.stream = stream;
     this.crashPoint = crashPoint;
     this.eventId = eventId;   // いまの開催（なければ null）
+    this.lotGate = lotGate;   // 品の登録・開始を断る理由（本日の開催が終了したあと など。なければ null）
     this.bidGate = bidGate;   // 入札してよい参加者か（だめなら理由コードを返す）
     this.queues = new Map(); // lotId -> 処理待ちの出来事
     this.draining = new Set();
@@ -208,7 +209,9 @@ export class Auction {
     switch (item.action) {
       case 'start': {
         if (s !== 'waiting') return fail(`「${stateName}」の品は競りを開始できません`);
-        if (q.busyLot.get(lot.id)) return fail('進行中の品がほかにあります（同時に1つまで）');
+        { const why = this.lotGate(); if (why) return fail(why); }
+        if (this.eventId() !== null && lot.event_id !== this.eventId()) return fail('この品は、いまの開催の品ではありません');
+        if (q.busyLot.get(lot.id, lot.event_id)) return fail('進行中の品がほかにあります（同時に1つまで）');
         // 開始値をいっしょに送ってきたら、先に開始値を決めてから始める（1つの操作で。オークショニアの「開始値を入力 → 競りを開始」）
         if (item.amount !== undefined && item.amount !== null && item.amount !== '') {
           const amount = Number(item.amount);
@@ -471,10 +474,20 @@ export class Auction {
     return ids.length;
   }
   hasActiveLot() {
-    return this.store.q.activeLots.all().length > 0;
+    return this.store.q.activeLotsOf.all(this.eventId()).length > 0;
+  }
+  /**
+   * 終了の操作を忘れた開催を、管理画面から終える（本番運用の評価 A5）: その開催の、待機の品と、進行中のまま残った品を、すべて未実施にする。
+   * 進行中のまま残った品（中断など）は、落札にしない（だれが落札か、進行役が確かめていないため）
+   */
+  closeOutEvent(eventId, actor) {
+    const ids = this.store.q.openLotsOf.all(eventId).map((r) => r.id);
+    for (const id of ids) this.#transition(this.store.q.lot.get(id), 'not_held', actor, { reason: '開催終了（管理画面）' }, this.nextSeq());
+    return ids.length;
   }
 
   createLot({ title, startPrice, unitOverride = null, reservePrice = null }) {
+    { const why = this.lotGate(); if (why) throw new Error(why); }
     // 開始価格は、空でもよい（品名だけ登録し、オークショニアが開始のときに決める。発注者の指示。報告書 76 章）。そのあいだは仮に 1 を入れておく
     const pending = startPrice === null || startPrice === undefined || startPrice === '' || startPrice === 0;
     const start = pending ? 1 : Number(startPrice);

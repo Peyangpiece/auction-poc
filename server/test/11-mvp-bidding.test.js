@@ -467,6 +467,10 @@ test('休憩と開催終了（FR-CON-003、FR-EVT-003）', async () => {
     assert.equal((await online.get('/api/participation')).json.event, null, '終了した開催には、参加できない');
     assert.match((await con.cmd('event_end')).message, /本日の開催はありません/, '開催終了は、やり直せない');
     assert.equal((await w1.bid(a.id, 2000)).accepted, false);
+    // 終えたあとは、品の登録も断る（開催に属さない品が残り、次の開催を止めないように。本番運用の評価 A6。報告書 103 章）
+    const late = await con.cmd('create_lot', { title: '終わったあとの品', startPrice: 1000 });
+    assert.equal(late.ok, false);
+    assert.match(late.message, /終了しています/);
     // 終わったあとにつなぎ直したスタッフの画面（会場モニターなど）には、「本日は終了」を最初の状態で送る（報告書 80 章）
     const con2 = new Client(t.srv.url, undefined, { ack: false, headers: { cookie: t.staff.cookie } });
     con2.hello = { as: 'console' };

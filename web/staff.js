@@ -119,6 +119,8 @@ function confirmDo(title, body, okText, run, { danger = false, then = null } = {
 }
 
 // ------------------------------------------------------------ 開催
+// 今日の日付（日本時間。YYYY-MM-DD）
+const todayStr = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 async function eventsPanel() {
   const res = await api('GET', '/api/events');
   const rows = res.events.map((e) => el('tr', {},
@@ -126,11 +128,21 @@ async function eventsPanel() {
     el('td', { class: 'n', text: `${jpDay(e.startsAt)} ${e.startsAt.slice(11)} 〜 ${e.endsAt.slice(11)}` }),
     el('td', { class: 'dyn', text: e.venueName }),
     el('td', { text: e.notified ? '届出済み' : '未届出' }),
-    el('td', {}, el('span', { class: 'state', 'data-on': e.status === 'published' ? '1' : '0', text: e.status === 'published' ? '公開中' : '準備中' })),
-    act(smallBtn('編集', () => eventDialog(e)),
-      e.status !== 'published' && smallBtn('公開する', async () => { const r = await api('POST', `/api/events/${e.id}/publish`); if (!r.ok) alertLine(r.message); else show('events'); }, 'btn-primary'))));
+    el('td', {}, el('span', { class: e.stale ? 'state warn' : 'state', 'data-on': e.status === 'published' && !e.ended ? '1' : '0', text: e.ended ? '終了' : e.stale ? '終了していません' : e.status === 'published' ? '公開中' : '準備中' })),
+    act(!e.ended && smallBtn('編集', () => eventDialog(e)),
+      // 公開は、取り消せず、お知らせメールが出るので、確かめる（本番運用の評価 B18）
+      e.status !== 'published' && smallBtn('公開する', () => confirmDo(`「${e.title}」を公開しますか？`,
+        '会員のトップページに出ます。開催の前日・当日には、受け取りに同意した会員へ、お知らせメールが届きます。公開は取り消せません。', '公開する',
+        () => api('POST', `/api/events/${e.id}/publish`), { then: () => show('events') }), 'btn-primary'),
+      // 終了の操作を忘れた開催を、ここから終える（本番運用の評価 A5）
+      e.status === 'published' && !e.ended && e.startsAt.slice(0, 10) <= todayStr() && smallBtn('開催を終了…', () => confirmDo(`「${e.title}」を終了しますか？`,
+        `待機の品${e.stale ? 'と、進行中のまま残った品' : ''}を、未実施にします（落札にはしません）。まだ請求書のない落札は、落札者ごとに振込の請求書にまとめます。終了は取り消せません。`, '終了して、請求書を作る',
+        () => api('POST', `/api/events/${e.id}/end`), { danger: true, then: () => show('events') })))));
+  const stale = res.events.filter((e) => e.stale);
   return [
     el('div', { class: 'toolbar' }, smallBtn('開催を作る', () => eventDialog(null), 'btn-primary')),
+    stale.length ? el('p', { class: 'notice', role: 'status' }, el('span', { class: 'notice__icon', 'aria-hidden': 'true' }),
+      el('span', { text: `終了の操作をしていない、過ぎた日の開催が ${stale.length} 件あります。終了すると、請求書を作れます。` })) : null,
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['名前', '日時', '会場', '届出', '状態', ''], rows, '開催はまだありません。'),
   ];

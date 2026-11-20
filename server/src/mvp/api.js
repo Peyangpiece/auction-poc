@@ -843,7 +843,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   // 認証番号の送信の制限を、スタッフが解く操作は、なくした（発注者の決定。報告書 84 章）。1時間たてば、また送れる
 
   // ------------------------------------------------------------ 開催（FR-EVT-001・002。主催者管理者だけ）
-  const eventView = (e) => ({ id: e.id, title: e.title, startsAt: e.starts_at, endsAt: e.ends_at, venueName: e.venue_name, venueAddress: e.venue_address, highlights: e.highlights, notified: !!e.notified, status: e.status });
+  const eventView = (e) => ({ id: e.id, title: e.title, startsAt: e.starts_at, endsAt: e.ends_at, venueName: e.venue_name, venueAddress: e.venue_address, highlights: e.highlights, notified: !!e.notified, status: e.status,
+    ended: e.phase === 'ended', stale: e.status === 'published' && e.phase !== 'ended' && e.starts_at.slice(0, 10) < todayJst() });
   function eventInput(body) {
     const text = (v, max = 200) => String(v ?? '').trim().slice(0, max);
     const e = { title: text(body.title), startsAt: text(body.startsAt, 16), endsAt: text(body.endsAt, 16), venueName: text(body.venueName), venueAddress: text(body.venueAddress, 300), highlights: text(body.highlights, 1000), notified: body.notified === true ? 1 : 0 };
@@ -885,6 +886,27 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     rememberSiteUrl(ctx);
     sendEventMails().catch((err) => console.error('[event-mail]', err)); // 前日を過ぎてから公開した開催にも、すぐ知らせる
     return { ok: true };
+  });
+
+  // 開催を、管理画面から終える（本番運用の評価 A5）。進行コンソールの「開催終了」を押し忘れた開催の、請求書を出すため。
+  // いまの開催（今日・進行中）なら、進行コンソールと同じ条件（進行中の品がないこと）。過ぎた日の開催なら、残った品をすべて未実施にして終える
+  const hooks = { closeOut: null, afterEnd: null };
+  route('POST', '/api/events/:id/end', (ctx, body, id) => {
+    const staff = needStaff(ctx, 'admin');
+    const e = db.prepare('SELECT * FROM events WHERE id = ?').get(id);
+    if (!e) throw new HttpError(404, '開催が見つかりません');
+    if (e.status !== 'published') throw new HttpError(409, '公開していない開催は、終了できません');
+    if (e.phase === 'ended') throw new HttpError(409, 'この開催は、すでに終了しています');
+    if (e.starts_at.slice(0, 10) > todayJst()) throw new HttpError(409, 'まだ始まっていない開催は、終了できません');
+    if (!hooks.closeOut) throw new HttpError(503, 'いまは終了できません。しばらくしてから、やり直してください');
+    const current = activeEvent()?.id === e.id;
+    const closed = hooks.closeOut(e.id, { current, actor: staff.name });
+    if (closed.error) throw new HttpError(409, closed.error);
+    const invoices = billing.onEventEnd(e.id, { ...ctx, system: true });
+    db.prepare("UPDATE events SET phase = 'ended', resume_at = NULL WHERE id = ?").run(e.id);
+    audit(ctx, 'event.ended', { target: `event:${e.id}`, before: { phase: e.phase ?? null }, after: { phase: 'ended', via: 'admin', notHeld: closed.notHeld, invoices: invoices.length } });
+    hooks.afterEnd?.(current);
+    return { ok: true, notHeld: closed.notHeld, invoices: invoices.length };
   });
 
   // ------------------------------------------------------------ 参加手続き（FR-MODE-005、FR-SHIP-007、FR-PAY-009、FR-NUM-001）
@@ -968,10 +990,15 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
    */
   // 日付をまたいでも続けられるように、今日の開催が無ければ、きのう始まって、まだ「開催終了」していない開催を、いまの開催とする
   // （終了の操作を忘れても、翌日のうちは、終了して請求書を出せる）
+  // ただし、今日の開催があるとき（終了したものを含む）は、きのうの開催に戻らない（本番運用の評価 A5: 2日続けて開催すると、
+  // 2日目を終了した直後に、前日の開催が「いまの開催」に戻っていた）。終了を忘れた開催は、管理画面の「開催」から終えられる
   const activeEvent = () => {
     const q = db.prepare("SELECT * FROM events WHERE status = 'published' AND substr(starts_at, 1, 10) = ? AND (phase IS NULL OR phase <> 'ended') ORDER BY starts_at, id LIMIT 1");
     const today = todayJst();
-    return q.get(today) ?? q.get(new Date(Date.parse(today + 'T00:00:00Z') - DAY).toISOString().slice(0, 10)) ?? null;
+    const now = q.get(today);
+    if (now) return now;
+    if (db.prepare("SELECT 1 FROM events WHERE status = 'published' AND substr(starts_at, 1, 10) = ?").get(today)) return null;
+    return q.get(new Date(Date.parse(today + 'T00:00:00Z') - DAY).toISOString().slice(0, 10)) ?? null;
   };
   // 開催の予定（トップページのカレンダー用）。公開中の開催だけ。だれでも見られる
   route('GET', '/api/schedule', () => {
@@ -1357,7 +1384,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return p;
   }
   return {
-    handle, createStaff, inviteStaff, audit, participantFromCookie, bidGate, sendEventMails, eventId: () => activeEvent()?.id ?? null,
+    hooks, handle, createStaff, inviteStaff, audit, participantFromCookie, bidGate, sendEventMails, eventId: () => activeEvent()?.id ?? null,
     staffFromCookie, viewerFromCookie, signedIn, memberIdFromCookie, eventState, endedToday, setPhase, proxyTarget, billing,
   };
 }
