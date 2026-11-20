@@ -275,9 +275,14 @@ try {
   // 開催を始める前は、品を開始できない（発注者の決定。報告書 124 章）
   check(await con.isVisible('#b_evstart') && await con.isHidden('#b_break') && await con.isHidden('#b_end'), '始める前の進行コンソールには、「開催を始める」だけが出る（休憩・終了は出ない）');
   check(await con.isDisabled('#b_next'), '開催を始める前は、品を開始するボタンが押せない');
+  // 待機中の画面（発注者の指示。報告書 126 章）: 開催を始める前は、映像の枠に「まもなく始まります」。カウントダウンは出さない
+  const standby = (p) => p.evaluate(() => { const e = document.getElementById('standby'); return e.hidden ? '' : e.innerText.replace(/\s+/g, ' '); });
+  { const t = await standby(phone); check(t.includes('まもなく始まります') && t.includes('開始の予定') && !/あと|残り|\d+:\d\d:\d\d/.test(t) && await phone.isVisible('#standby'), '開催を始める前は、待機中の画面が出る（開催の名前と、開始の予定。カウントダウンは無い）'); }
   await con.click('#b_evstart'); await con.click('#dlgOk');
   await con.waitForFunction(() => !document.getElementById('b_next').disabled && !document.getElementById('elapsed').hidden);
   check(await con.isHidden('#b_evstart') && await con.isVisible('#b_end') && await con.isVisible('#elapsed'), '始めると、休憩・終了が出て、右上に、開始からの経過時間が出る');
+  await phone.waitForFunction(() => document.getElementById('standby').hidden);
+  check(true, '開催を始めると、待機中の画面は消える');
   await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
   await phone.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');
@@ -466,6 +471,7 @@ try {
   await guest.waitForFunction(() => document.getElementById('eventNote').textContent.includes('13:00'));
   await con.waitForFunction(() => document.getElementById('evPhase').textContent.includes('休憩中'));
   check(true, '休憩に入ると、参加者の画面に再開の予定時刻が出る');
+  { const t = await standby(guest); check(t.includes('休憩中') && t.includes('再開の予定 13:00'), '休憩中は、待機中の画面に「休憩中」と再開の予定が出る'); }
   await shot(guest, 'mvp-22-bidder-break');
   await shot(con, 'mvp-23-console-event', { fullPage: true });
   await con.click('#b_end');
@@ -475,6 +481,7 @@ try {
   await guest.waitForFunction(() => document.getElementById('eventNote').textContent.includes('終了しました'));
   await con.waitForSelector('#eventBar', { state: 'hidden' });
   check(true, '開催を終了すると、参加者の画面に終了の知らせが出る');
+  check((await standby(guest)).includes('本日の競りは終了しました'), '終了後は、待機中の画面に「本日の競りは終了しました」が出る');
   const after = await admin.context().newPage();
   await after.goto(sys.base + '/');
   await after.waitForSelector('#nextList li');
