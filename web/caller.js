@@ -265,6 +265,9 @@ $('sheetForm').addEventListener('submit', async (ev) => {
 function onMessage(msg) {
   switch (msg.type) {
     case 'welcome': case 'snapshot':
+      // 開催が切り替わっていたら（前の開催の画面を開いたままだった）、読み込み直して、最初からにする
+      if (S.eventKey !== undefined && S.eventKey !== (msg.event?.id ?? null)) return location.reload();
+      S.eventKey = msg.event?.id ?? null;
       S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history ?? [];
       S.connected = true; S.event = msg.event ?? null; S.ended = !msg.event && !!msg.ended;
       if (msg.ladder) S.ladder = msg.ladder;

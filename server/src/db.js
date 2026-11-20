@@ -203,7 +203,7 @@ export function openDb(dbPath) {
     recentComments: db.prepare(`
       SELECT * FROM (
         SELECT c.id, c.body AS text, c.at, m.paddle_no AS paddle
-        FROM comments c JOIN members m ON m.id = c.member_id WHERE c.hidden = 0 ORDER BY c.id DESC LIMIT 30
+        FROM comments c JOIN members m ON m.id = c.member_id WHERE c.hidden = 0 AND m.event_id IS ? ORDER BY c.id DESC LIMIT 30
       ) ORDER BY id`),
     insertStaff: db.prepare(`INSERT INTO staff (role, name, token_hash) VALUES (?, ?, ?)`),
   };

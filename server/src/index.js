@@ -448,7 +448,7 @@ function onClient(ws, req) {
         type: 'welcome', role: conn.role, paddle: member?.paddle_no ?? null, mode: member?.mode ?? null, name: (member ?? staff).name,
         conn: conn.id, serverTime: nowMs(), stream: stream.view(), allowCrash: config.allowCrash, ladder: config.incrementTable,
         playerScriptUrl: config.ivsPlayerScriptUrl, venueContact: config.venueContact,
-        commentMaxLength: config.commentMaxLength, comments: store.q.recentComments.all(), ...auction.snapshot(), event: api.eventState(), ended: api.endedToday(),
+        commentMaxLength: config.commentMaxLength, comments: store.q.recentComments.all(api.eventId()), ...auction.snapshot(), event: api.eventState(), ended: api.endedToday(),
         ...(conn.role === 'auctioneer' ? { sold: auction.soldList() } : {}),
       }));
       return presence();
@@ -457,7 +457,7 @@ function onClient(ws, req) {
 
     switch (msg.type) {
       case 'sync': // 再接続のあとなどに、最新の状態を取り直す（FR-UI-002）
-        return send((conn.role === 'auctioneer' ? (m) => m : forMember)({ type: 'snapshot', serverTime: nowMs(), stream: stream.view(), comments: store.q.recentComments.all(), ...auction.snapshot(), event: api.eventState(), ended: api.endedToday() }));
+        return send((conn.role === 'auctioneer' ? (m) => m : forMember)({ type: 'snapshot', serverTime: nowMs(), stream: stream.view(), comments: store.q.recentComments.all(api.eventId()), ...auction.snapshot(), event: api.eventState(), ended: api.endedToday() }));
       case 'bid':
         // 主催者側のスタッフは入札できない（FR-CON-004）
         if (conn.role !== 'member') return send({ type: 'error', message: 'スタッフは入札できません' });

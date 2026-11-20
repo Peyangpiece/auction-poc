@@ -145,6 +145,9 @@ test('開催が変わると、参加手続きも参加番号も No. も、その
     await b.post('/api/join', { receive: 'ship', payment: 'transfer' });
     const auctioneer = await connect(t.srv, t.ctx.tokens.auctioneer);
     const stale = await t.ws(a); // 前の開催の参加番号で、つないだままにしておく
+    assert.equal((await stale.comment('前の開催のコメント')).ok, true);
+    stale.send({ type: 'sync' });
+    assert.ok((await stale.waitFor((x) => x.type === 'snapshot')).comments.some((c) => c.text === '前の開催のコメント'));
     await createLot(auctioneer, 1000);
     assert.equal((await createLot(auctioneer, 1000)).lotNo, 2);
 
@@ -158,6 +161,10 @@ test('開催が変わると、参加手続きも参加番号も No. も、その
     assert.equal((await createLot(auctioneer, 1000)).lotNo, 1, 'No. も、開催ごとに1から');
     const wb = await t.ws(b);
     assert.equal(wb.lots.size, 1, '前の開催の品は、画面に出ない');
+    wb.send({ type: 'sync' });
+    const fresh = await wb.waitFor((x) => x.type === 'snapshot');
+    assert.deepEqual(fresh.comments, [], 'コメントも、開催ごとに最初から');
+    assert.ok(Number.isInteger(fresh.event.id), '開催の切り替わりを、画面が知るための番号');
     const lot = [...wb.lots.values()][0];
     await auctioneer.cmd('start', { lotId: lot.id });
     await until(() => wb.lots.get(lot.id)?.status === 'open');

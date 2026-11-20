@@ -317,6 +317,9 @@ function onMessage(msg, at) {
         document.querySelectorAll('.seg button').forEach((b) => { b.disabled = msg.paddle === null; });
         setMode(S.mode);
       }
+      // 開催が切り替わっていたら（前の開催の画面を開いたままだった）、読み込み直して、最初からにする
+      if (S.eventKey !== undefined && S.eventKey !== (msg.event?.id ?? null)) return location.reload();
+      S.eventKey = msg.event?.id ?? null;
       S.comments = msg.comments ?? S.comments;
       S.lots = new Map(msg.lots.map((l) => [l.id, l]));
       S.focus = msg.focusLotId; S.history = msg.history; S.stream = msg.stream; S.rendered = msg.history.length;

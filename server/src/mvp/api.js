@@ -1539,7 +1539,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   const endedToday = () => !activeEvent() && !!db.prepare("SELECT 1 FROM events WHERE status = 'published' AND substr(starts_at, 1, 10) = ? AND phase = 'ended'").get(todayJst());
   const eventState = () => {
     const e = activeEvent();
-    return e ? { title: e.title, phase: e.phase ?? null, resumeAt: e.phase === 'break' ? e.resume_at : null, endsAt: e.ends_at.slice(11) } : null;
+    return e ? { id: e.id, title: e.title, phase: e.phase ?? null, resumeAt: e.phase === 'break' ? e.resume_at : null, endsAt: e.ends_at.slice(11) } : null;
   };
   function setPhase(staff, phase, resumeAt = null) {
     const e = activeEvent();

@@ -31,7 +31,18 @@
   </div>
 </header>
 
-<main>
+<!-- 競りの時間外（本日の開催がない・終わった）: 進行の操作は出さず、そのことと次の開催だけを出す（発注者の指示） -->
+<section class="offhours" id="offhours" hidden aria-live="polite">
+  <p class="offhours__title" id="offTitle"></p>
+  <div class="offhours__next" id="offNext" hidden>
+    <span class="offhours__label">次の開催</span>
+    <b class="offhours__date" id="offDate"></b>
+    <span class="offhours__info dyn" id="offInfo"></span>
+  </div>
+  <p class="offhours__note">進行コンソールは、開催の当日（公開した開催があり、終了するまで）だけ開けます。</p>
+  <a class="btn" href="/staff.html">管理へ戻る</a>
+</section>
+<main id="consoleMain">
   <div class="col">
     <section class="eventbar" id="eventBar" aria-label="開催" hidden>
       <div>

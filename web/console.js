@@ -309,6 +309,10 @@ function onMessage(msg, at) {
     case 'welcome': case 'snapshot':
       S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history; S.stream = msg.stream;
       S.comments = msg.comments ?? S.comments; renderComments();
+      // 開催が切り替わっていたら（前の開催の画面を開いたままだった）、読み込み直して、最初からにする
+      if (S.eventKey !== undefined && S.eventKey !== (msg.event?.id ?? null)) return location.reload();
+      S.eventKey = msg.event?.id ?? null;
+      S.connected = true; S.ended = !msg.event && !!msg.ended;
       S.event = msg.event ?? null; if (msg.sold) S.sold = msg.sold; renderEvent(); renderSold();
       if (msg.type === 'welcome') {
         log(`接続しました（${msg.name}）`);
@@ -340,7 +344,7 @@ function onMessage(msg, at) {
       log(`代理入札を取り消しました（受付連番 ${msg.seq}）`);
       render(); break;
     }
-    case 'event': S.event = msg.event; if (msg.ended) log('開催を終了しました'); renderEvent(); break;
+    case 'event': S.event = msg.event; S.ended = !msg.event && !!msg.ended; S.schedule = null; if (msg.ended) log('開催を終了しました'); renderEvent(); break;
     case 'sold': S.sold = msg.sold; renderSold(); break;
     case 'result':
       link.send({ type: 'result_ack', lotId: msg.lotId, at: at + link.offset, net: 'console' });
@@ -361,7 +365,25 @@ function onMessage(msg, at) {
 // ---- 開催（休憩・開催終了）と、落札一覧、代理入札
 const PAYMENT = { transfer: '銀行振込', cash: '当日現金' };
 const RECEIVE = { pickup: '現地受け取り', ship: '配送' };
+// 競りの時間外: 本日の開催がない、または終わったうえで、進行中・待機の品がないとき。進行の操作は出さない（発注者の指示）
+const WORKING = ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'];
+const offHours = () => !token && S.connected && (S.ended || !S.event) && ![...S.lots.values()].some((l) => WORKING.includes(l.status));
+async function renderOffHours() {
+  const off = offHours();
+  $('offhours').hidden = !off; $('consoleMain').hidden = off;
+  if (!off) return;
+  $('offTitle').textContent = S.ended ? '本日の競りは終了しました' : '本日の競りはありません';
+  if (!S.schedule) S.schedule = await fetch('/api/schedule', { credentials: 'same-origin' }).then((r) => r.json()).catch(() => null);
+  const today = S.schedule?.today ?? '';
+  const next = (S.schedule?.events ?? []).find((e) => e.startsAt.slice(0, 10) > today);
+  $('offNext').hidden = !next;
+  if (!next) return;
+  const [y, m, dd] = next.startsAt.slice(0, 10).split('-').map(Number);
+  $('offDate').textContent = `${m}月${dd}日（${'日月火水木金土'[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()]}）`;
+  $('offInfo').textContent = `${next.title}　${next.startsAt.slice(11, 16)}〜　${next.venueName}`;
+}
 function renderEvent() {
+  renderOffHours();
   const e = S.event;
   // 本日の公開中の開催がないと、追加した品は、どの開催にも入らず、会員から見えない。知らせて、追加を止める（検証用の合言葉で入ったときは止めない）
   $('noEvent').hidden = !!e || !!token;

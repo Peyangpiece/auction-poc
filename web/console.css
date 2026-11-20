@@ -178,3 +178,14 @@ section[aria-labelledby="histTitle"]:has(tbody:empty), section[aria-labelledby="
 .viewoff { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: #fff; font-size: 15px; background: #000; }
 .viewoff[hidden] { display: none; }
 #viewSound[hidden] { display: none; }
+
+/* ---- 競りの時間外（本日の開催がない・終わった）: 進行の操作は出さない */
+.offhours { display: grid; align-content: center; justify-items: center; gap: 24px; padding: 12dvh 20px; text-align: center; }
+.offhours[hidden], main[hidden], .offhours__next[hidden] { display: none; }
+.offhours__title { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: 0; color: var(--ink); text-wrap: balance; }
+.offhours__next { display: grid; gap: 6px; justify-items: center; padding: 20px 28px; border-radius: var(--r-lg); background: var(--board); min-width: min(320px, 100%); }
+.offhours__label { font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.offhours__date { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.offhours__info { font-size: 15px; color: var(--ink-2); text-wrap: balance; }
+.offhours__note { margin: 0; font-size: 14px; color: var(--ink-2); }
+.offhours .btn { text-decoration: none; }
