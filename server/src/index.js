@@ -14,6 +14,7 @@ import { createJournal } from './journal.js';
 import { Metrics } from './metrics.js';
 import { StreamControl } from './stream.js';
 import { Auction } from './auction.js';
+import { parseJson } from './mvp/shared.js';
 import { nowMs } from './clock.js';
 import { createApi } from './mvp/api.js';
 import { clientIp } from './mvp/security.js';
@@ -380,7 +381,7 @@ function onClient(ws, req) {
       return ws.close(4429, 'too many messages');
     }
     let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
+    try { msg = parseJson(String(raw)); } catch { return; }
     if (msg === null || typeof msg !== 'object') return;
 
     // 時刻合わせ（POC-SRV-006）: すぐにサーバーの時刻を返す。認証の前でも答える。

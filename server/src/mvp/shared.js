@@ -26,6 +26,11 @@ export class HttpError extends Error {
 }
 export const bad = (message, extra) => new HttpError(400, message, extra);
 
+// ---- 外から届いた JSON の読み方（報告書 122 章）
+// {"toString": 1} のような値は、文字にするとき（String(...)）に例外になる。読むときに、その2つの名前（toString・valueOf）を捨てる。
+// これまでも、例外は1通ごとに受け止めていたが、「処理できませんでした」と返し、エラーの数に数えていた
+export const parseJson = (text) => JSON.parse(text, (key, value) => (key === 'toString' || key === 'valueOf' ? undefined : value));
+
 // ---- 請求まわり（billing.js と、そこから分けたファイルが使う）
 export const PAY = { transfer: '銀行振込', cash: '当日現金' };
 export const RECV = { pickup: '現地受け取り', ship: '配送' };
