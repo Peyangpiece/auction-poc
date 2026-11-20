@@ -755,6 +755,14 @@ test('精算の取り消し（報告書 118 章）: 開催が終わったあと�
     assert.equal(after.state, 'billed');
     assert.equal(after.invoice.number, res.json.reissued);
     assert.ok(after.invoice.dueDate, '期限が付く');
+    // 請求の一覧は、開催ごとに分かれる（発注者の決定。報告書 124 章）: 指定が無ければ、明細のある、いちばん新しい開催。会員の順
+    const byEvent = (await t.admin.get('/api/billing/lines')).json;
+    assert.equal(byEvent.event, t.eventId);
+    assert.deepEqual(byEvent.events.map((e) => [e.id, e.lines > 0]), [[t.eventId, true]]);
+    assert.ok(byEvent.lines.every((l) => l.eventId === t.eventId) && byEvent.lines.length > 0);
+    assert.equal((await t.admin.get('/api/billing/lines?event=all')).json.event, null, 'すべての開催');
+    assert.equal((await t.admin.get('/api/billing/lines?event=99999')).json.event, t.eventId, '無い番号は、いちばん新しい開催に戻す');
+    assert.equal((await t.admin.get(`/api/billing/invoices?event=${t.eventId}`)).json.event, t.eventId);
     const list = (await t.admin.get('/api/billing/invoices')).json.invoices;
     assert.equal(list.find((i) => i.number === cash.number).void, true, '空になった領収書は、無効');
     const mine = (await b.get('/api/my/billing')).json.invoices;

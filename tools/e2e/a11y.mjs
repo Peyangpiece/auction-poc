@@ -56,6 +56,8 @@ for (const scheme of ['light', 'dark']) {
   await sp.close();
   const con = await sc.newPage(); await con.goto(B + '/console.html'); await con.waitForTimeout(1200);
   await con.fill('#newTitle', '（例）防水シート'); await con.fill('#newPrice', '9500'); await con.click('#addLot button[type=submit]'); await con.waitForTimeout(500);
+  await scan(con, 'console-before-start', scheme);
+  if (await con.isVisible('#b_evstart')) { await con.click('#b_evstart'); await con.click('#dlgOk'); await con.waitForFunction(() => !document.getElementById('b_next').disabled); }
   for (const id of ['#b_next', '#b_nv']) if (await con.isVisible(id) && await con.isEnabled(id)) { await con.click(id); await con.waitForTimeout(700); }
   await scan(con, 'console-open', scheme);
   await p.waitForTimeout(500); await scan(p, 'bidder-open-bidmode', scheme);

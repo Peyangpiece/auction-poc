@@ -58,6 +58,8 @@ function render() {
   show('b_next', (!lot || ended) && !!next);
   // 開始価格が未定の品（品名だけで登録した品）は、オークショニアの画面で開始価格を入れて始める
   if (next) { $('b_next').textContent = next.startPending ? `No.${next.lotNo} は、オークショニアの開始価格の入力待ち` : `No.${next.lotNo} を開始`; $('b_next').disabled = !!next.startPending; $('b_next').onclick = () => lotCmd('start', next.id); }
+  // 開催を始める前は、品を開始できない（「開催を始める」を先に押す）
+  if (next && S.event && !S.event.phase) { $('b_next').textContent = `「開催を始める」を押すと、No.${next.lotNo} を開始できます`; $('b_next').disabled = true; }
   show('b_close', st === 'open');
   // うりきり: ランプが消えている品だけ（最低落札額の入力がない品は、押すまで点かない。報告書 89 章）
   show('b_urikiri', !!lot && ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'].includes(st) && !lot.urikiri);
@@ -210,6 +212,10 @@ setInterval(() => {
   // 千分の一秒までの時刻は、遅延を測るとき（検証用の設定）だけ出す
   const setText = (id, t) => { if ($(id).textContent !== t) $(id).textContent = t; }; // 変わったときだけ書く（読み上げの繰り返しと、無駄な描き直しを避ける）
   setText('clock', S.dev ? jst(link.serverNow()) : jst(link.serverNow()).slice(0, 8));
+  // 開催を始めてからの経過時間（休憩のあいだも進む）
+  const from = S.event?.startedAt ?? null;
+  $('elapsed').hidden = !from;
+  if (from) { const sec = Math.max(0, Math.floor((link.serverNow() - from) / 1000)); setText('elapsedTime', `${Math.floor(sec / 3600)}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`); }
   // 配信の止め忘れ: 競りがないまま配信が続いた時間が長くなったら知らせる（自動では止めない）
   const st = S.stream;
   const idleMs = st && st.idleSince && (st.obsActive || st.live) && st.mode !== 'always-live' ? link.serverNow() - st.idleSince : 0;
@@ -343,7 +349,7 @@ function onMessage(msg, at) {
       log(`代理入札を取り消しました（受付連番 ${msg.seq}）`);
       render(); break;
     }
-    case 'event': S.event = msg.event; S.ended = !msg.event && !!msg.ended; S.schedule = null; if (msg.ended) log('開催を終了しました'); renderEvent(); break;
+    case 'event': S.event = msg.event; S.ended = !msg.event && !!msg.ended; S.schedule = null; if (msg.ended) log('開催を終了しました'); renderEvent(); render(); break; // render: 開催を始めると、品を開始するボタンが押せるようになる
     case 'sold': S.sold = msg.sold; renderSold(); break;
     case 'result':
       link.send({ type: 'result_ack', lotId: msg.lotId, at: at + link.offset, net: 'console' });
@@ -391,7 +397,9 @@ function renderEvent() {
   $('proxySection').hidden = !e; // 代理入札は、開催の参加者（会場参加）が相手なので、開催があるときだけ
   if (!e) return;
   $('evTitle').textContent = e.title;
-  $('evPhase').textContent = e.phase === 'break' ? `休憩中（再開予定 ${e.resumeAt}）` : e.phase === 'running' ? '進行中' : '開始前';
+  $('evPhase').textContent = e.phase === 'break' ? `休憩中（再開予定 ${e.resumeAt}）` : e.phase === 'running' ? '進行中' : `開始前（予定 ${e.startsAt}〜）`;
+  // 始める前は「開催を始める」だけ。休憩・終了は、始めてから
+  $('b_evstart').hidden = !!e.phase; $('b_break').hidden = !e.phase; $('b_end').hidden = !e.phase && !e.stale;
   $('evPhase').dataset.on = e.phase === 'running' ? '1' : '0';
 }
 // 終了の予定時刻を過ぎても終了していなければ、注意を出す（自動では終了しない。FR-EVT-003）
@@ -410,6 +418,10 @@ function renderSold() {
   }));
   $('soldCount').textContent = `${S.sold.length}件`;
 }
+$('b_evstart').addEventListener('click', async () => {
+  const ans = await ask({ title: '開催を始めますか？', body: 'ここから、品を開始できるようになります。経過時間は、ここから数えます。', okLabel: '開催を始める' });
+  if (ans) cmd('event_start');
+});
 $('b_break').addEventListener('click', async () => {
   const ans = await ask({ title: '休憩に入りますか？', body: '参加者の画面と会場モニターに、再開の予定を出します。', okLabel: '休憩に入る', needReason: true, input: { label: '次の開始予定', type: 'time' } });
   if (ans) cmd('event_break', { resumeAt: ans.reason });

@@ -189,3 +189,8 @@ section[aria-labelledby="histTitle"]:has(tbody:empty), section[aria-labelledby="
 .offhours__info { font-size: 0.9375rem; color: var(--ink-2); text-wrap: balance; }
 .offhours__note { margin: 0; font-size: 0.875rem; color: var(--ink-2); }
 .offhours .btn { text-decoration: none; }
+
+/* 開催を始める前・あとで、出すボタンを切り替える（.btn は display を持つので、hidden を効かせる）。経過時間（報告書 124 章） */
+.evacts [hidden], .meta [hidden] { display: none; }
+#elapsed { white-space: nowrap; }
+#elapsed b { font-family: var(--digits); font-variant-numeric: tabular-nums; }

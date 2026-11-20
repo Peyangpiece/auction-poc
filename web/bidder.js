@@ -321,7 +321,9 @@ function renderEvent(event, ended = false) {
   const changed = S.ended !== ended;
   S.ended = ended;
   $('eventNote').textContent = ended ? '本日の競りは終了しました。ご参加ありがとうございました。'
-    : event?.phase === 'break' ? `休憩中です。再開の予定は ${event.resumeAt} です。` : '';
+    : event?.phase === 'break' ? `休憩中です。再開の予定は ${event.resumeAt} です。`
+    // 始まる前に入った人には、開始の予定を伝える（発注者の決定: 始まる前も、入れる・コメントできる）
+    : event && !event.phase ? `まだ始まっていません。開始の予定は ${event.startsAt} です。このままお待ちください。` : '';
   // 終わったら: コメントの欄と、参加のしかたの切り替えを、しまう。きょう落札した品があれば、合計と、お支払いへの入口を出す
   document.body.classList.toggle('ended', ended);
   if (ended && !token && S.wins === undefined) {

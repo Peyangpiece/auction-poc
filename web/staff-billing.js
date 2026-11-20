@@ -30,8 +30,12 @@ function askForm(title, note, fields, run, okText = '実行する') {
   onSubmit(form, async (data) => { const res = await run(data); if (res.ok) { dlg.close(); show(current); } return res; });
   openDialog(title, form);
 }
+// 請求の一覧の絞り込み（発注者の決定。報告書 124 章）: 開催ごとに分けて出す（最初は、いちばん新しい開催）。その中を、会員・受け取り・支払・状態で絞る。
+// 明細は、会員ごとにまとめて、点数と合計を出す。選んだ条件は、タブを離れても覚えておく
+const billingFilter = { event: '', q: '', receive: '', payment: '', state: '' };
+const eventQuery = () => (billingFilter.event ? `?event=${encodeURIComponent(billingFilter.event)}` : '');
 async function billingPanel() {
-  const res = await api('GET', withLimit('/api/billing/lines', 'lines'));
+  const res = await api('GET', withLimit(`/api/billing/lines${eventQuery()}`, 'lines'));
   if (!res.ok) return [el('p', { class: 'msg', text: res.message })];
   const picked = new Set();
   const settleBtn = smallBtn('選んだ明細を、当日現金で精算', async () => {
@@ -84,6 +88,56 @@ async function billingPanel() {
           [field('返金額（円）', 'amount', { inputMode: 'numeric', required: true }), field('返金日', 'date', { type: 'date', value: res.today, required: true }),
             field('方法', 'method', { options: [['transfer', '振込'], ['cash', '現金']] }), field('理由', 'reason', { rows: 2, required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/refund`, { ...d, amount: Number(d.amount) }), '記録する'))));
   });
+  // ---- 絞り込みと、会員ごとのまとめ
+  const pick = (label, key, options) => {
+    const sel = el('select', { class: 'input', 'aria-label': label, onchange: (ev) => { billingFilter[key] = ev.target.value; if (key === 'event') show('billing'); else applyFilter(); } },
+      options.map(([value, text]) => el('option', { value, text })));
+    sel.value = billingFilter[key];
+    return el('label', { class: 'filter' }, el('span', { text: label }), sel);
+  };
+  const search = el('input', { class: 'input', type: 'search', placeholder: '会員番号・名前・参加番号・品名', 'aria-label': '会員番号・名前・参加番号・品名で探す', value: billingFilter.q, oninput: (ev) => { billingFilter.q = ev.target.value; applyFilter(); } });
+  const evOptions = (res.events ?? []).map((e) => [String(e.id), `${jpDay(e.date)}　${e.title}（${e.lines}件${e.open ? `・未入金 ${e.open}件` : ''}）`]);
+  // 選んでいる開催を、欄にも映す（最初は、サーバーが選んだ、いちばん新しい開催）
+  billingFilter.event = res.event === null && (res.events ?? []).length ? 'all' : String(res.event ?? '');
+  const filterBar = el('div', { class: 'filters', role: 'search', 'aria-label': '請求の絞り込み' },
+    pick('開催', 'event', [...evOptions, ['all', 'すべての開催']]),
+    el('label', { class: 'filter filter--wide' }, el('span', { text: '会員・品' }), search),
+    pick('受け取り', 'receive', [['', 'すべて'], ['pickup', '現地受け取り'], ['ship', '配送']]),
+    pick('支払', 'payment', [['', 'すべて'], ['transfer', '銀行振込'], ['cash', '当日現金']]),
+    pick('状態', 'state', [['', 'すべて'], ['open', '未入金（未精算・請求済み・未払い）'], ...Object.entries(LINE_STATE)]));
+  const summary = el('p', { class: 'note', role: 'status' });
+  const HEADS = ['', '参加番号', '落札者・品', '金額', '受け取り・支払', '状態', ''];
+  const body = el('tbody', {});
+  const empty = el('p', { class: 'empty' });
+  const linesTable = el('div', {}, el('div', { class: 'tablewrap' }, el('table', {},
+    el('thead', {}, el('tr', {}, HEADS.map((h, i) => (h ? el('th', { scope: 'col', text: h }) : el('th', { scope: 'col' }, el('span', { class: 'sr-only', text: i === 0 ? '選択' : '操作' })))))), body)), empty);
+  const items = res.lines.map((l, i) => ({ l, tr: rows[i] }));
+  const OPEN = ['unsettled', 'billed', 'unpaid'];
+  function applyFilter() {
+    const q = billingFilter.q.trim().toLowerCase();
+    const hit = items.filter(({ l }) => (!billingFilter.receive || l.receive === billingFilter.receive)
+      && (!billingFilter.payment || l.payment === billingFilter.payment)
+      && (!billingFilter.state || (billingFilter.state === 'open' ? OPEN.includes(l.state) : l.state === billingFilter.state))
+      && (!q || [String(l.accountId), l.name, String(l.paddle ?? ''), l.label].some((v) => String(v ?? '').toLowerCase().includes(q))));
+    // 会員ごとにまとめる（会員番号の順）。見出しの行に、会員番号・名前・点数・合計・未入金を出す
+    const groups = new Map();
+    for (const it of hit) { if (!groups.has(it.l.accountId)) groups.set(it.l.accountId, []); groups.get(it.l.accountId).push(it); }
+    const out = [];
+    for (const [accountId, list] of [...groups].sort((a, b) => a[0] - b[0])) {
+      const live = list.filter(({ l }) => l.state !== 'cancelled');
+      const total = live.reduce((s, { l }) => s + l.payable, 0), open = live.filter(({ l }) => OPEN.includes(l.state)).reduce((s, { l }) => s + l.payable, 0);
+      out.push(el('tr', { class: 'grouprow' }, el('th', { scope: 'rowgroup', colSpan: HEADS.length },
+        el('span', { class: 'grouprow__no', text: `会員番号 ${accountId}` }), el('b', { class: 'dyn', text: list[0].l.name }),
+        el('span', { class: 'note', text: `${live.length}点　合計 ${yen(total)}${open ? `　未入金 ${yen(open)}` : '　未入金なし'}` }))), ...list.map((it) => it.tr));
+    }
+    body.replaceChildren(...out);
+    linesTable.firstChild.hidden = !hit.length;
+    empty.hidden = !!hit.length;
+    empty.textContent = items.length ? 'この条件に合う明細は、ありません。' : '落札した品は、まだありません。';
+    const liveAll = hit.filter(({ l }) => l.state !== 'cancelled');
+    summary.textContent = hit.length ? `${groups.size}人・${liveAll.length}点　合計 ${yen(liveAll.reduce((s, { l }) => s + l.payable, 0))}` : '';
+  }
+  applyFilter();
   const nodes = [
     // 書き出しは、月に一度ほどの作業なので、ひとつの「書き出す」の中にまとめる（報告書 83 章）
     el('div', { class: 'toolbar' }, el('div', { class: 'toolbar__acts' }, settleBtn), isAdmin() && exportMenu([
@@ -91,11 +145,13 @@ async function billingPanel() {
       el('a', { class: 'btn', href: `/api/billing/ledger.csv?month=${res.today.slice(0, 7)}`, text: '帳簿用の記録（CSV）' }),
       el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（Excel）' })])),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
-    table(['', '参加番号', '落札者・品', '金額', '受け取り・支払', '状態', ''], rows, '落札した品は、まだありません。'),
+    filterBar,
+    summary,
+    linesTable,
     moreBtn('lines', res, '落札の明細'),
   ];
   if (isAdmin()) {
-    const inv = await api('GET', withLimit('/api/billing/invoices', 'invoices'));
+    const inv = await api('GET', withLimit(`/api/billing/invoices${eventQuery()}`, 'invoices'));
     nodes.push(el('h2', { class: 'subhead', text: '請求書' }),
       table(['請求番号', '宛先', '種類', '金額', '発行日', '送付・期限', ''], inv.invoices.map((i) => el('tr', {},
         el('td', { class: 'n', text: i.number }), el('td', { class: 'dyn', text: i.name }), el('td', { text: INV_KIND[i.kind] }), el('td', { class: 'n' }, i.cancelled ? [yen(i.total), el('br'), el('span', { class: 'note', text: `発行時 ${yen(i.issuedTotal)}・解除 ${i.cancelled}件` })] : yen(i.total)), el('td', { class: 'n', text: jpDay(i.issuedOn) }),

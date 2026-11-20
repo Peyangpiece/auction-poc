@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { DAY, addDays } from './shared.js';
 
 export function createInvoiceRoutes(deps) {
-  const { HttpError, account, audit, db, renderReceipt, displayName, invoiceAmounts, invoiceMail, jst, listLimit, needStaff, nowMs, renderInvoice, route, setting, today } = deps;
+  const { HttpError, account, audit, db, renderReceipt, pickEvent, displayName, invoiceAmounts, invoiceMail, jst, listLimit, needStaff, nowMs, renderInvoice, route, setting, today } = deps;
   // ------------------------------------------------------------ 請求書の一覧・送付済み（FR-INV-008）・ファイル
   const invoiceView = (i) => {
     const a = account(i.account_id);
@@ -22,6 +22,9 @@ export function createInvoiceRoutes(deps) {
     needStaff(ctx, 'admin');
     // 新しい順に limit 件。ただし、まだ入金のない明細を含む請求書は、古くても必ず出す
     const limit = listLimit(ctx, 1000);
+    // 開催ごとに分けて出す（明細の一覧と同じ選び方）
+    const picked = pickEvent(ctx);
+    if (picked.id !== null) return { invoices: db.prepare('SELECT * FROM invoices WHERE event_id = ? ORDER BY id DESC').all(picked.id).map(invoiceView), limit, more: false, event: picked.id };
     const rows = db.prepare(`SELECT * FROM invoices i WHERE id >= coalesce((SELECT id FROM invoices ORDER BY id DESC LIMIT 1 OFFSET ?), 0)
       OR EXISTS (SELECT 1 FROM bill_lines l WHERE l.invoice_id = i.id AND l.cleared_at IS NULL AND l.cancelled_at IS NULL) ORDER BY id DESC`).all(limit - 1);
     return { invoices: rows.map(invoiceView), limit, more: db.prepare('SELECT COUNT(*) AS n FROM invoices').get().n > rows.length };

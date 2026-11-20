@@ -458,21 +458,36 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   };
 
   // ------------------------------------------------------------ 一覧（主催者管理者・受付係。進行役は未引き取りだけ）
+  /** 請求の一覧で選ぶ開催。明細のある開催を、新しい順に。?event=番号 / all / なし（いちばん新しい開催） */
+  function pickEvent(ctx) {
+    const events = db.prepare(`SELECT e.id, e.title, substr(e.starts_at, 1, 10) AS date, COUNT(l.id) AS lines,
+      SUM(CASE WHEN l.cleared_at IS NULL AND l.cancelled_at IS NULL THEN 1 ELSE 0 END) AS open
+      FROM events e JOIN bill_lines l ON l.event_id = e.id GROUP BY e.id ORDER BY e.starts_at DESC, e.id DESC`).all();
+    const want = ctx.url.searchParams.get('event');
+    const id = want === 'all' ? null : events.find((e) => String(e.id) === want)?.id ?? events[0]?.id ?? null;
+    return { events, id };
+  }
   route('GET', '/api/billing/lines', (ctx) => {
     needStaff(ctx, 'admin', 'reception');
     syncLines();
     // 新しい順に limit 件。ただし、まだ入金のない明細は、古くても必ず出す（一覧の上限で、未払いが見えなくならないように。本番運用の評価 C）
     const limit = listLimit(ctx, 1000);
+    // 開催ごとに分けて出す（発注者の決定。報告書 124 章）。指定が無ければ、明細のある、いちばん新しい開催。event=all で、すべての開催
+    const picked = pickEvent(ctx);
+    if (picked.id !== null) {
+      const rows = db.prepare('SELECT * FROM bill_lines WHERE event_id = ? ORDER BY account_id, id').all(picked.id);
+      return { today: today(), lines: rows.map(staffLineView), limit, more: false, events: picked.events, event: picked.id };
+    }
     const rows = db.prepare(`SELECT * FROM bill_lines WHERE id >= coalesce((SELECT id FROM bill_lines ORDER BY id DESC LIMIT 1 OFFSET ?), 0)
       OR (cleared_at IS NULL AND cancelled_at IS NULL) ORDER BY id DESC`).all(limit - 1);
-    return { today: today(), lines: rows.map(staffLineView), limit, more: db.prepare('SELECT COUNT(*) AS n FROM bill_lines').get().n > rows.length };
+    return { today: today(), lines: rows.map(staffLineView), limit, more: db.prepare('SELECT COUNT(*) AS n FROM bill_lines').get().n > rows.length, events: picked.events, event: null };
   });
 
   // ------------------------------------------------------------ 当日現金の精算（clearing.js）
   createClearing({ HttpError, audit, bad, db, getLine, issueInvoice, renderInvoice, needStaff, nowMs, payable, route, syncLines, text, today, yen });
 
   // ------------------------------------------------------------ 請求書の一覧・送付済み（invoice-routes.js）
-  createInvoiceRoutes({ HttpError, account, audit, db, renderReceipt, displayName, invoiceAmounts, invoiceMail, jst, listLimit, needStaff, nowMs, renderInvoice, route, setting, today });
+  createInvoiceRoutes({ HttpError, account, audit, db, renderReceipt, pickEvent, displayName, invoiceAmounts, invoiceMail, jst, listLimit, needStaff, nowMs, renderInvoice, route, setting, today });
 
   // ------------------------------------------------------------ 未払い: 督促・解除・違約金・繰り上げ・返金（unpaid.js）
   createUnpaid({ HttpError, account, audit, bad, db, displayName, getLine, issueInvoice, jst, lineView, needStaff, notifier, nowMs, payable, premiumOf, premiumRate, route, setting, suspension, text, today, yen });

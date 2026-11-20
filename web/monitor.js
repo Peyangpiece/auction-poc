@@ -11,6 +11,7 @@ function render() {
   const next = [...S.lots.values()].find((l) => l.status === 'waiting');
   const idle = S.ended ? ['本日の競りは終了しました', 'ご参加ありがとうございました']
     : S.event?.phase === 'break' ? ['休憩中', `再開の予定 ${S.event.resumeAt}${next ? `　次は No.${next.lotNo} ${next.title}` : ''}`]
+    : S.event && !S.event.phase ? ['まもなく始まります', `開始の予定 ${S.event.startsAt}`]
     : !lot ? ['次の品をお待ちください', next ? `次は No.${next.lotNo} ${next.title}` : '']
     : null;
   $('idle').hidden = !idle;

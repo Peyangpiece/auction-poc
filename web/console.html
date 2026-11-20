@@ -26,6 +26,8 @@
     <!-- トップページへ戻る。競りの最中（配信準備中・受付中・中断）は、誤って押して画面を離れないように出さない（報告書 100 章） -->
     <a class="homelink" id="homeLink" href="/"><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg>ホーム</a>
     <span>参加者 <b class="num" id="presence">0</b> 人<span id="presenceSplit"></span></span>
+    <!-- いまの時刻（予定の時刻・休憩の再開時刻と見比べる）と、開催を始めてからの経過時間（進み具合を見る）。両方出す（報告書 124 章） -->
+    <span id="elapsed" hidden>開始から <b class="num" id="elapsedTime"></b></span>
     <span id="clock"></span>
   </div>
   </div>
@@ -52,6 +54,8 @@
       </div>
       <!-- 次の開始予定の時刻は、「休憩に入る」を押したときだけ聞く（ふだんは使わない欄を出さない）。開催終了は、離して置く（報告書 88 章） -->
       <div class="evacts">
+        <!-- 開催を始める: 押すまでは、品を開始できない（発注者の決定。報告書 124 章）。始める前は、休憩・終了は出さない -->
+        <button class="btn btn-primary" id="b_evstart" type="button" hidden>開催を始める</button>
         <button class="btn" id="b_break" type="button">休憩に入る…</button>
         <button class="btn btn-danger" id="b_end" type="button">開催終了…</button>
       </div>

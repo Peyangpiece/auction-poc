@@ -223,7 +223,7 @@ export class Auction {
     switch (item.action) {
       case 'start': {
         if (s !== 'waiting') return fail(`「${stateName}」の品は競りを開始できません`);
-        { const why = this.lotGate(); if (why) return fail(why); }
+        { const why = this.lotGate('start'); if (why) return fail(why); }
         if (this.eventId() !== null && lot.event_id !== this.eventId()) return fail('この品は、いまの開催の品ではありません');
         if (q.busyLot.get(lot.id, lot.event_id)) return fail('進行中の品がほかにあります（同時に1つまで）');
         // 開始価格をいっしょに送ってきたら、先に開始価格を決めてから始める（1つの操作で。オークショニアの「開始価格を入力 → 競りを開始」）
@@ -501,7 +501,7 @@ export class Auction {
   }
 
   createLot({ title, startPrice, unitOverride = null, reservePrice = null }) {
-    { const why = this.lotGate(); if (why) throw new Error(why); }
+    { const why = this.lotGate('create'); if (why) throw new Error(why); }
     // 開始価格は、空でもよい（品名だけ登録し、オークショニアが開始のときに決める。発注者の指示。報告書 76 章）。そのあいだは仮に 1 を入れておく
     const pending = startPrice === null || startPrice === undefined || startPrice === '' || startPrice === 0;
     const start = pending ? 1 : Number(startPrice);

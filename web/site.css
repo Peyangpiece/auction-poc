@@ -567,3 +567,13 @@ td.act { white-space: nowrap; }
 /* 表（管理の請求など）: 狭い画面では、文字を1字ずつ折り返さずに、表ごと横に動かす */
 .tablewrap th, .tablewrap td { word-break: keep-all; overflow-wrap: normal; }
 .tablewrap .btn, .tablewrap .digits { white-space: nowrap; }
+
+/* ---- 一覧の絞り込み（請求・会員。報告書 124 章） */
+.filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px; }
+.filter { display: grid; gap: 4px; font-size: 0.8125rem; color: var(--ink-2); min-width: 9rem; }
+.filter--wide { flex: 1 1 16rem; }
+.filter .input { min-height: 44px; }
+/* 会員ごとの見出しの行 */
+.grouprow th { text-align: left; background: var(--ground-alt); padding: 10px 12px; font-weight: 400; }
+.grouprow th > * { margin-right: 16px; }
+.grouprow__no { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; }

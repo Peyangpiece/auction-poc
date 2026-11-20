@@ -39,6 +39,7 @@ function moreBtn(key, res, what) {
   return el('p', { class: 'note' }, `${what}は、新しい順に ${res.limit.toLocaleString()} 件（と、対応の残っているもの）を出しています。`,
     smallBtn('さらに前の分も表示する', () => { listLimits[key] = Math.min(50000, res.limit * 2); show(current); }));
 }
+let memberQuery = ''; // 会員を探す欄の中身（タブを離れても覚えておく）
 async function membersPanel() {
   const res = await api('GET', withLimit('/api/members', 'members'));
   const waiting = res.members.filter((m) => !m.approved && !m.withdrawn).length;
@@ -64,8 +65,16 @@ async function membersPanel() {
       m.suspendedBy === 'manual'
       ? smallBtn('停止を解く', () => post(`/api/members/${m.id}/unsuspend`))
       : !m.withdrawn && m.suspendedBy !== 'unpaid' && smallBtn('停止', () => askReason(`会員 ${m.id} を停止`, '停止の理由', true, (reason) => api('POST', `/api/members/${m.id}/suspend`, { reason }), '停止する'), 'btn-danger'))));
+  const filterMembers = () => {
+    const q = memberQuery.trim().toLowerCase().replace(/-/g, '');
+    res.members.forEach((m, i) => { rows[i].hidden = !!q && ![String(m.id), m.name, m.company, m.contactName, m.loginId, String(m.phone ?? '').replace(/-/g, ''), m.email].some((v) => String(v ?? '').toLowerCase().includes(q)); });
+  };
+  filterMembers();
   return [el('p', { class: 'msg', id: 'line', role: 'alert' }),
     waiting ? el('div', { class: 'banner', role: 'status' }, el('span', { text: `承認待ちの会員登録が ${waiting} 件あります。承認すると、ログイン ID とパスワードが、本人へメールで送られます。` })) : null,
+    // 探す欄: 会員番号・名前・ログイン ID・電話番号・メールの、どれかに含まれる行だけを出す（報告書 124 章）
+    rows.length > 5 && el('div', { class: 'filters', role: 'search' }, el('label', { class: 'filter filter--wide' }, el('span', { text: '会員を探す' }),
+      el('input', { class: 'input', type: 'search', placeholder: '会員番号・名前・電話番号・メール', 'aria-label': '会員番号・名前・電話番号・メールで探す', value: memberQuery, oninput: (ev) => { memberQuery = ev.target.value; filterMembers(); } }))),
     table(['会員番号', '名前', 'ログイン ID', '電話番号', 'メール', '状態', ''], rows, '会員はまだいません。'),
     moreBtn('members', res, '会員の一覧')];
 }

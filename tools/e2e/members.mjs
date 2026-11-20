@@ -135,7 +135,7 @@ try {
   await con.setViewportSize({ width: 1280, height: 1100 });
   await con.goto(sys.base + '/console.html');
   await con.waitForSelector('#eventBar:not([hidden])');
-  check((await con.textContent('#evTitle')).includes('12月の競り') && (await con.textContent('#evPhase')) === '開始前', '進行役がログインで入れる。開催の名前と「開始前」が出る');
+  check((await con.textContent('#evTitle')).includes('12月の競り') && (await con.textContent('#evPhase')).startsWith('開始前（予定 '), '進行役がログインで入れる。開催の名前と「開始前」が出る');
   await con.fill('#newTitle', '防水シート（検証）'); await con.fill('#newPrice', '9500');
   await con.click('#addLot button[type=submit]');
   await con.waitForFunction(() => document.body.textContent.includes('防水シート（検証）'));
@@ -272,6 +272,12 @@ try {
   await phone.click('#join button[type=submit]');
   await phone.waitForFunction(() => document.getElementById('gate').style.display === 'none');
   check((await phone.textContent('#gateEvent')).includes('参加番号1'), '手続きが済むと、参加番号 1 が振られ、そのまま入札画面に入る');
+  // 開催を始める前は、品を開始できない（発注者の決定。報告書 124 章）
+  check(await con.isVisible('#b_evstart') && await con.isHidden('#b_break') && await con.isHidden('#b_end'), '始める前の進行コンソールには、「開催を始める」だけが出る（休憩・終了は出ない）');
+  check(await con.isDisabled('#b_next'), '開催を始める前は、品を開始するボタンが押せない');
+  await con.click('#b_evstart'); await con.click('#dlgOk');
+  await con.waitForFunction(() => !document.getElementById('b_next').disabled);
+  check(await con.isHidden('#b_evstart') && await con.isVisible('#b_end') && await con.isVisible('#elapsed'), '始めると、休憩・終了が出て、右上に、開始からの経過時間が出る');
   await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
   await phone.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');
@@ -428,7 +434,7 @@ try {
   await admin.waitForSelector('#dlg[open] >> text=引き渡しますか');
   check(await admin.evaluate(() => document.activeElement?.textContent === 'やめる'), '引き渡しは、だれに何を渡すかを書いて確かめる（最初のフォーカスは「やめる」）');
   await admin.click('#dlg >> button:has-text("引き渡す")');
-  await admin.waitForSelector('#panel >> text=引き渡し済み');
+  await admin.waitForSelector('#panel td >> text=引き渡し済み');
   check(true, '消し込みのあとに、引き渡しを記録できる');
   await shot(admin, 'mvp-25-billing', { fullPage: true });
   await guest.goto(sys.base + '/mypage.html');

@@ -98,6 +98,11 @@ function render() {
     $('closeLabel').textContent = '再開';
     $('closeSub').textContent = '';
     $('close').disabled = S.busy;
+  } else if (S.mode === 'start' && S.event && !S.event.phase) {
+    // 開催を始める前は、品を開始できない（進行コンソールの「開催を始める」が先。報告書 124 章）
+    $('closeLabel').textContent = '開催を、まだ始めていません';
+    $('closeSub').textContent = '進行コンソールの「開催を始める」のあとで';
+    $('close').disabled = true;
   } else if (S.mode === 'start' && lot.startPending && !typed) {
     // 品名だけの品: 押すと、開始価格の入力のシートを開く
     $('closeLabel').textContent = '開始価格を入れて始める';

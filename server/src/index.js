@@ -130,6 +130,8 @@ function onComment(conn, msg, send) {
   // 制御文字を除き、前後の空白を落とす。長さは文字（書記素ではなくコードポイント）で数える
   const text = String(msg.text ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
   if (!text) return fail('コメントを入力してください');
+  // 開催を終えたあとは、書き込めない（画面では欄を消しているが、ここでも断る。報告書 124 章）。始める前は、書き込める（発注者の決定）
+  if (api.endedToday()) return fail('本日の競りは終了しました。コメントは書き込めません');
   if ([...text].length > config.commentMaxLength) return fail(`コメントは${config.commentMaxLength}文字までです`);
   const now = nowMs();
   const wait = config.commentIntervalMs - (now - (lastCommentAt.get(conn.member.id) ?? 0));
@@ -146,7 +148,10 @@ const stream = new StreamControl({ config, metrics, broadcast });
 // 会員登録・ログイン・スタッフ・開催・参加手続き。商品は、進行コンソールからその場で登録する
 const api = createApi({ store, config, nowMs, persistStatus: () => saver?.status() ?? null, durable: () => journal?.durable(), healthDetail: () => ({ persist: saver?.status() ?? null, journal: journal?.status() ?? null, journalStarted: journal?.started ?? null }) });
 // 本日の開催を終えたあとは、品の登録・開始を断る（開催に属さない品が残り、次の開催を止めないように。本番運用の評価 A6）
-const lotGate = () => (api.endedToday() ? '本日の開催は終了しています。品の登録・開始はできません' : null);
+// 開催を始める前（進行役が「開催を始める」を押す前）は、品の登録はできるが、競りの開始はできない（発注者の決定。報告書 124 章）。
+// 開催の日なら、開始の予定時刻の前でも、競りを始められて、入札まで進んでいた
+const lotGate = (what) => (api.endedToday() ? '本日の開催は終了しています。品の登録・開始はできません'
+  : what === 'start' && api.eventState() && !api.eventState().phase ? '開催を、まだ始めていません。進行コンソールの「開催を始める」を押してから、品を開始してください' : null);
 const auction = new Auction({ store, config, metrics, broadcast, stream, crashPoint, eventId: api.eventId, bidGate: api.bidGate, lotGate });
 // 管理画面からの開催終了（本番運用の評価 A5）
 api.hooks.closeOut = (eventId, { current, actor }) => {
@@ -535,13 +540,20 @@ function onAuctioneer(conn, msg, send) {
           send(res);
           if (!res.ok) return;
           // 競りを始めたら、開催は「進行中」になる（休憩も終わる。FR-EVT-003）
-          if (msg.action === 'start' && api.eventState() && api.eventState().phase !== 'running') broadcast({ type: 'event', event: api.setPhase(staffRef(conn), 'running') });
+          if (msg.action === 'start' && api.eventState()?.phase === 'break') broadcast({ type: 'event', event: api.setPhase(staffRef(conn), 'running') });
           // 落札の一覧を、進行役に送り直す（受け取り方法・支払方法つき。FR-CON-002）
           // 落札したら、明細を作って、落札者にメールで知らせる（FR-INV-001）
           if (msg.action === 'close' || msg.action === 'pass') { api.billing.syncLines(); sendSold(); }
         });
       case 'sold_list': return ok({ sold: auction.soldList() });
+      case 'event_start': { // 開催を始める（発注者の決定。報告書 124 章）: ここから、品を開始できる。経過時間は、ここから数える
+        if (!api.eventState()) return ng('本日の開催はありません');
+        if (api.eventState().phase) return ng('開催は、もう始まっています');
+        broadcast({ type: 'event', event: api.setPhase(staffRef(conn), 'running') });
+        return ok();
+      }
       case 'event_break': { // 休憩（FR-CON-003）: 進行中の品がないときだけ。次の開始予定時刻が要る
+        if (!api.eventState()?.phase) return ng('開催を、まだ始めていません');
         if (auction.hasActiveLot()) return ng('進行中の品があるあいだは、休憩に入れません');
         const at = String(msg.resumeAt ?? '');
         if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(at)) return ng('次の開始予定時刻を、入力してください');
@@ -551,6 +563,9 @@ function onAuctioneer(conn, msg, send) {
       case 'event_end': { // 開催終了（FR-EVT-003）: 取り消せない
         if (auction.hasActiveLot()) return ng('進行中の品があるあいだは、開催を終了できません');
         if (!api.eventState()) return ng('本日の開催はありません');
+        // 始める前の開催は、ここからは終えられない（押しまちがいで、その日の開催が終わるのを防ぐ。やめるときは、管理の「開催」で、公開を取り下げる）
+        // （きのうの、終了し忘れた開催は、始めていなくても終えられる）
+        if (!api.eventState().phase && !api.eventState().stale) return ng('開催を、まだ始めていません。開催をやめるときは、管理の「開催」で、公開を取り下げてください');
         const notHeld = auction.closeOutWaiting(conn.staff.name); // 待機の品は、未実施にする
         stream.manual('stop');                                    // 配信を停止する
         const sold = auction.soldList();

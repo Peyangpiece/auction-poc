@@ -99,6 +99,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   // ここから下の、形の変更は、番号を付けて1回ずつ行う（migrate.js。一度配った手順は、書き換えない）
   migrate(db, 'api', [
     { v: 1, name: 'お知らせメールの失敗の回数', up: (d) => d.exec('CREATE TABLE event_mail_fails (event_id INTEGER NOT NULL, account_id INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (event_id, account_id))') },
+    { v: 2, name: '開催を始めた時刻', up: (d) => d.exec('ALTER TABLE events ADD COLUMN started_at REAL') },
   ], { nowMs });
   for (const [col, type] of [['fails', 'INTEGER NOT NULL DEFAULT 0'], ['fails_from', 'REAL NOT NULL DEFAULT 0']]) {
     if (!db.prepare("SELECT 1 FROM pragma_table_info('otp_codes') WHERE name = ?").get(col)) db.exec(`ALTER TABLE otp_codes ADD COLUMN ${col} ${type}`);
@@ -371,13 +372,15 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   /** 今日の開催が、もう終わっているか（再接続した会場モニターが、終了の表示を続けるため。報告書 80 章） */
   const eventState = () => {
     const e = activeEvent();
-    return e ? { id: e.id, title: e.title, phase: e.phase ?? null, resumeAt: e.phase === 'break' ? e.resume_at : null, endsAt: e.ends_at.slice(11) } : null;
+    // startsAt: 開始の予定（HH:MM）。startedAt: 進行役が「開催を始める」を押した時刻（まだなら null）。経過時間の起点
+    return e ? { id: e.id, title: e.title, phase: e.phase ?? null, resumeAt: e.phase === 'break' ? e.resume_at : null, startsAt: e.starts_at.slice(11), endsAt: e.ends_at.slice(11), startedAt: e.started_at ?? null,
+      stale: e.starts_at.slice(0, 10) < new Date(nowMs() + 9 * 3600000).toISOString().slice(0, 10) } : null; // stale: きのうの開催（終了し忘れ）
   };
   function setPhase(staff, phase, resumeAt = null) {
     const e = activeEvent();
     if (!e) throw new HttpError(409, '本日の開催はありません');
     if ((e.phase ?? null) === phase && (e.resume_at ?? null) === resumeAt) return eventState();
-    db.prepare('UPDATE events SET phase = ?, resume_at = ? WHERE id = ?').run(phase, resumeAt, e.id);
+    db.prepare('UPDATE events SET phase = ?, resume_at = ?, started_at = COALESCE(started_at, ?) WHERE id = ?').run(phase, resumeAt, phase === 'running' ? nowMs() : null, e.id);
     audit({ staff, system: true }, `event.${phase}`, { target: `event:${e.id}`, before: { phase: e.phase ?? null }, after: { phase, resumeAt } });
     return eventState();
   }
