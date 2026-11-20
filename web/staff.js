@@ -198,8 +198,16 @@ async function issue(url, title) {
   await show('members');
   issuedDialog(title, r);
 }
+// 一覧の件数: 既定は新しい順の決まった件数。「さらに前の分も表示する」で倍に広げる（本番運用の評価 C）
+const listLimits = {};
+const withLimit = (url, key) => (listLimits[key] ? `${url}${url.includes('?') ? '&' : '?'}limit=${listLimits[key]}` : url);
+function moreBtn(key, res, what) {
+  if (!res.more) return null;
+  return el('p', { class: 'note' }, `${what}は、新しい順に ${res.limit.toLocaleString()} 件（と、対応の残っているもの）を出しています。`,
+    smallBtn('さらに前の分も表示する', () => { listLimits[key] = Math.min(50000, res.limit * 2); show(current); }));
+}
 async function membersPanel() {
-  const res = await api('GET', '/api/members');
+  const res = await api('GET', withLimit('/api/members', 'members'));
   const waiting = res.members.filter((m) => !m.approved && !m.withdrawn).length;
   const rows = res.members.map((m) => el('tr', {},
     el('td', { class: 'n', text: String(m.id) }),
@@ -224,7 +232,8 @@ async function membersPanel() {
       : !m.withdrawn && m.suspendedBy !== 'unpaid' && smallBtn('停止', () => askReason(`会員 ${m.id} を停止`, '停止の理由', true, (reason) => api('POST', `/api/members/${m.id}/suspend`, { reason }), '停止する'), 'btn-danger'))));
   return [el('p', { class: 'msg', id: 'line', role: 'alert' }),
     waiting ? el('div', { class: 'banner', role: 'status' }, el('span', { text: `承認待ちの会員登録が ${waiting} 件あります。承認すると、ログイン ID とパスワードが、本人へメールで送られます。` })) : null,
-    table(['会員番号', '名前', 'ログイン ID', '電話番号', 'メール', '状態', ''], rows, '会員はまだいません。')];
+    table(['会員番号', '名前', 'ログイン ID', '電話番号', 'メール', '状態', ''], rows, '会員はまだいません。'),
+    moreBtn('members', res, '会員の一覧')];
 }
 
 // ------------------------------------------------------------ 受付: 来場確認（FR-MODE-002・004）と、会場の QR コード
@@ -389,7 +398,7 @@ function askForm(title, note, fields, run, okText = '実行する') {
   openDialog(title, form);
 }
 async function billingPanel() {
-  const res = await api('GET', '/api/billing/lines');
+  const res = await api('GET', withLimit('/api/billing/lines', 'lines'));
   if (!res.ok) return [el('p', { class: 'msg', text: res.message })];
   const picked = new Set();
   const settleBtn = smallBtn('選んだ明細を、当日現金で精算', async () => {
@@ -450,16 +459,18 @@ async function billingPanel() {
       el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（Excel）' })])),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     table(['', '参加番号', '落札者・品', '金額', '受け取り・支払', '状態', ''], rows, '落札した品は、まだありません。'),
+    moreBtn('lines', res, '落札の明細'),
   ];
   if (isAdmin()) {
-    const inv = await api('GET', '/api/billing/invoices');
+    const inv = await api('GET', withLimit('/api/billing/invoices', 'invoices'));
     nodes.push(el('h2', { class: 'subhead', text: '請求書' }),
       table(['請求番号', '宛先', '種類', '金額', '発行日', '送付・期限', ''], inv.invoices.map((i) => el('tr', {},
-        el('td', { class: 'n', text: i.number }), el('td', { class: 'dyn', text: i.name }), el('td', { text: INV_KIND[i.kind] }), el('td', { class: 'n', text: yen(i.total) }), el('td', { class: 'n', text: jpDay(i.issuedOn) }),
+        el('td', { class: 'n', text: i.number }), el('td', { class: 'dyn', text: i.name }), el('td', { text: INV_KIND[i.kind] }), el('td', { class: 'n' }, i.cancelled ? [yen(i.total), el('br'), el('span', { class: 'note', text: `発行時 ${yen(i.issuedTotal)}・解除 ${i.cancelled}件` })] : yen(i.total)), el('td', { class: 'n', text: jpDay(i.issuedOn) }),
         el('td', {}, i.kind === 'cash' ? 'その場で渡した' : el('span', { class: !i.sentOn && i.stale ? 'warn' : '', text: `${i.sentOn ? `送付 ${jpDay(i.sentOn)}` : i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付'}　期限 ${jpDay(i.dueDate)}` })),
         act(el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: 'PDF' }), el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/xlsx`, text: 'Excel' }),
           !['cash', 'penalty'].includes(i.kind) && !i.sentOn && smallBtn(i.shipping ? `送料 ${yen(i.shipping.amount)}` : '送料を入力', () => shippingForm(i.accountId, i.eventId, i.name, i.shipping)),
-          i.kind !== 'cash' && (i.sentOn ? smallBtn('送付を取り消す', () => post(`/api/billing/invoices/${i.id}/unsent`)) : smallBtn('送付済みにする', () => post(`/api/billing/invoices/${i.id}/sent`), 'btn-primary'))))), '請求書は、まだありません。'));
+          i.kind !== 'cash' && (i.sentOn ? smallBtn('送付を取り消す', () => post(`/api/billing/invoices/${i.id}/unsent`)) : smallBtn('送付済みにする', () => post(`/api/billing/invoices/${i.id}/sent`), 'btn-primary'))))), '請求書は、まだありません。'),
+      moreBtn('invoices', inv, '請求書の一覧'));
   }
   return nodes;
 }

@@ -766,7 +766,12 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   // 会員の一覧・停止（主催者管理者だけ。FR-AUTH-009）
   route('GET', '/api/members', (ctx) => {
     needStaff(ctx, 'admin');
-    return { members: db.prepare('SELECT * FROM member_accounts ORDER BY id DESC LIMIT 500').all().map((m) => ({ id: m.id, ...memberView(m), approved: !!m.approved_at, rejected: !!m.rejected_at, suspendReason: m.suspend_reason, withdrawn: !!m.withdrawn_at, phone: m.withdrawn_at ? m.withdrawn_phone : m.phone })) };
+    // 新しい順に limit 件（既定 500、?limit= で最大 50,000 件）。承認待ちと停止中の会員は、古くても必ず出す（本番運用の評価 C）
+    const limit = Math.min(50000, Math.max(500, Math.floor(Number(ctx.url.searchParams.get('limit')) || 500)));
+    const rows = db.prepare(`SELECT * FROM member_accounts WHERE id >= coalesce((SELECT id FROM member_accounts ORDER BY id DESC LIMIT 1 OFFSET ?), 0)
+      OR (withdrawn_at IS NULL AND rejected_at IS NULL AND (approved_at IS NULL OR suspended = 1)) ORDER BY id DESC`).all(limit - 1);
+    const more = db.prepare('SELECT COUNT(*) AS n FROM member_accounts').get().n > rows.length;
+    return { limit, more, members: rows.map((m) => ({ id: m.id, ...memberView(m), approved: !!m.approved_at, rejected: !!m.rejected_at, suspendReason: m.suspend_reason, withdrawn: !!m.withdrawn_at, phone: m.withdrawn_at ? m.withdrawn_phone : m.phone })) };
   });
   // ログイン ID とパスワードを発行して、メールで知らせる。ID は「rw＋会員番号」。パスワードは、そのつど作り直す
   async function issueCredentials(ctx, m, subject, lead) {

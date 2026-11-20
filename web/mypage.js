@@ -68,7 +68,7 @@ $('#resendEmail').addEventListener('click', async (ev) => {
 // ---- 落札した品とお支払い（請求書、支払期限、受け取り期限、繰り上げのご案内）
 const STATE_TEXT = { unsettled: 'お支払い前', billed: 'ご請求済み', unpaid: 'お支払いの期限を過ぎています', cleared: 'お支払い済み', delivered: 'お渡し済み', cancelled: '解除されました' };
 const RECEIVE_TEXT = { pickup: '現地受け取り', ship: '配送' };
-const INVOICE_STATE = { paid: 'お支払い済み', overdue: 'お支払いの期限を過ぎています', billed: 'お支払い前' };
+const INVOICE_STATE = { paid: 'お支払い済み', overdue: 'お支払いの期限を過ぎています', billed: 'お支払い前', cancelled: '落札の解除により、お支払いは不要です' };
 // 請求書の一覧: 請求番号・発行日・金額・お支払期限・状態と、PDF を開くボタン
 // 品は、その請求書の中に並べる（同じ品を「落札した品」に二度出さない。報告書 85 章）。
 // 品ごとの状態は、請求書の状態と違うとき（お渡し済み・解除など）と、受け取りの期限だけを書き添える
@@ -86,8 +86,10 @@ function showInvoices(list, lines = []) {
   $('#invoices').replaceChildren(el('ul', { class: 'rows invlist' }, list.map((i) => el('li', {},
     el('div', { class: 'invlist__main' },
       el('b', { text: `${jpDay(i.issuedOn)}の請求書` }),
-      el('span', { class: 'note', text: [`No.${i.number}`, i.dueDate && i.state !== 'paid' ? `お支払期限 ${jpDay(i.dueDate)}` : ''].filter(Boolean).join('　') })),
+      el('span', { class: 'note', text: [`No.${i.number}`, i.dueDate && i.state !== 'paid' && i.state !== 'cancelled' ? `お支払期限 ${jpDay(i.dueDate)}` : ''].filter(Boolean).join('　') })),
     el('span', { class: 'digits invlist__total', text: yen(i.total) }),
+    // 一部を解除した請求書: PDF の金額と違うので、わけを書く（本番運用の評価 C）
+    i.state !== 'cancelled' && i.issuedTotal != null && i.issuedTotal !== i.total && el('span', { class: 'note', text: `請求書の金額 ${yen(i.issuedTotal)} から、解除した品を除いた金額です` }),
     el('span', { class: i.state === 'overdue' ? 'warn' : 'invlist__state', text: INVOICE_STATE[i.state] }),
     invoiceItems(lines.filter((l) => l.invoice?.id === i.id)),
     el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: '請求書を開く（PDF）' })))));

@@ -84,6 +84,8 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   }
   db.exec(BILLING_SCHEMA);
   if (!db.prepare("SELECT 1 FROM pragma_table_info('bill_lines') WHERE name = 'premium'").get()) db.exec('ALTER TABLE bill_lines ADD COLUMN premium INTEGER NOT NULL DEFAULT 0');
+  // 繰り上げの打診のときの買歩銭（打診のあとに割合を変えても、案内した金額のまま請求する。本番運用の評価 C）
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('offers') WHERE name = 'premium'").get()) db.exec('ALTER TABLE offers ADD COLUMN premium INTEGER');
   const invoiceDir = path.join(config.dataDir, 'invoices');
   fs.mkdirSync(invoiceDir, { recursive: true });
   const jst = (ms) => new Date(ms + 9 * 3600000).toISOString().slice(0, 10); // 日本時間の日付（DATA-006）
@@ -157,6 +159,19 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   const premiumRate = () => { const r = Number(setting('buyer_premium_rate')); return Number.isFinite(r) && r >= 0 && r <= 100 ? r : 10; };
   /** 1つの落札についての買歩銭。1円未満は切り捨てる【前提】 */
   const premiumOf = (amount) => Math.floor(amount * premiumRate() / 100);
+  /** 繰り上げの打診で案内した買歩銭（前の版で作った打診には持っていないので、いまの割合で数える） */
+  const offerPremiumOf = (o) => o.premium ?? premiumOf(o.amount);
+  /**
+   * 請求書の、いまの金額。解除した明細は除く（解除しても、発行したときの合計 invoices.total は、記録として変えない。本番運用の評価 C）
+   * due: 払ってもらう金額 / paid: 消し込んだ金額 / cancelled: 解除した明細の数 / lines: 明細の数
+   */
+  function invoiceAmounts(i) {
+    const lines = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ?').all(i.id);
+    const live = lines.filter((l) => !l.cancelled_at);
+    return { due: live.reduce((s, l) => s + payable(l), 0), paid: live.filter((l) => l.cleared_at).reduce((s, l) => s + payable(l), 0), cancelled: lines.length - live.length, lines: lines.length };
+  }
+  /** 一覧の件数（?limit=。既定の件数から、最大 50,000 件まで） */
+  const listLimit = (ctx, def) => Math.min(50000, Math.max(def, Math.floor(Number(ctx.url.searchParams.get('limit')) || def)));
   /** 落札者が払う金額（落札額＋買歩銭） */
   const payable = (l) => l.amount + (l.premium ?? 0);
 
@@ -385,7 +400,11 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   route('GET', '/api/billing/lines', (ctx) => {
     needStaff(ctx, 'admin', 'reception');
     syncLines();
-    return { today: today(), lines: db.prepare('SELECT * FROM bill_lines ORDER BY id DESC LIMIT 1000').all().map(staffLineView) };
+    // 新しい順に limit 件。ただし、まだ入金のない明細は、古くても必ず出す（一覧の上限で、未払いが見えなくならないように。本番運用の評価 C）
+    const limit = listLimit(ctx, 1000);
+    const rows = db.prepare(`SELECT * FROM bill_lines WHERE id >= coalesce((SELECT id FROM bill_lines ORDER BY id DESC LIMIT 1 OFFSET ?), 0)
+      OR (cleared_at IS NULL AND cancelled_at IS NULL) ORDER BY id DESC`).all(limit - 1);
+    return { today: today(), lines: rows.map(staffLineView), limit, more: db.prepare('SELECT COUNT(*) AS n FROM bill_lines').get().n > rows.length };
   });
 
   // ------------------------------------------------------------ 当日現金の精算（FR-PAY-010。受付係・主催者管理者）
@@ -499,8 +518,10 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   // ------------------------------------------------------------ 請求書の一覧・送付済み（FR-INV-008）・ファイル
   const invoiceView = (i) => {
     const a = account(i.account_id);
+    const m = invoiceAmounts(i);
     return {
-      id: i.id, number: i.number, kind: i.kind, name: displayName(a), email: a.email, total: i.total, issuedOn: jst(i.issued_at),
+      // total: 解除した明細を除いた、いま払ってもらう金額。issuedTotal: 発行したときの請求額（請求書の PDF に書いた金額）
+      id: i.id, number: i.number, kind: i.kind, name: displayName(a), email: a.email, total: m.due, issuedTotal: i.total, cancelled: m.cancelled, paid: m.paid, issuedOn: jst(i.issued_at),
       sentOn: i.sent_at ? jst(i.sent_at) : null, dueDate: i.due_date, draft: i.draft_state, accountId: i.account_id, eventId: i.event_id,
       shipping: db.prepare("SELECT amount, label FROM bill_lines WHERE invoice_id = ? AND kind = 'shipping'").get(i.id) ?? null,
       // 下書きを作ってから1日たっても送付済みにならない請求書は、強調する
@@ -509,7 +530,11 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   };
   route('GET', '/api/billing/invoices', (ctx) => {
     needStaff(ctx, 'admin');
-    return { invoices: db.prepare('SELECT * FROM invoices ORDER BY id DESC LIMIT 1000').all().map(invoiceView) };
+    // 新しい順に limit 件。ただし、まだ入金のない明細を含む請求書は、古くても必ず出す
+    const limit = listLimit(ctx, 1000);
+    const rows = db.prepare(`SELECT * FROM invoices i WHERE id >= coalesce((SELECT id FROM invoices ORDER BY id DESC LIMIT 1 OFFSET ?), 0)
+      OR EXISTS (SELECT 1 FROM bill_lines l WHERE l.invoice_id = i.id AND l.cleared_at IS NULL AND l.cancelled_at IS NULL) ORDER BY id DESC`).all(limit - 1);
+    return { invoices: rows.map(invoiceView), limit, more: db.prepare('SELECT COUNT(*) AS n FROM invoices').get().n > rows.length };
   });
   route('POST', '/api/billing/invoices/:id/sent', async (ctx, body, id) => {
     needStaff(ctx, 'admin');
@@ -643,15 +668,16 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     if (next.blocked) throw new HttpError(409, '次点の人は参加を停止されているため、打診できません');
     // 回答期限: 打診した日の翌日から数えて3日目まで。価格は、次点の人がその品で最後に入れた有効な入札額
     const deadline = addDays(today(), 3);
-    db.prepare('INSERT INTO offers (line_id, participant_id, account_id, amount, offered_at, deadline) VALUES (?,?,?,?,?,?)').run(id, next.participant_id, next.account_id, next.amount, nowMs(), deadline);
+    const offerPremium = premiumOf(next.amount);
+    db.prepare('INSERT INTO offers (line_id, participant_id, account_id, amount, premium, offered_at, deadline) VALUES (?,?,?,?,?,?,?)').run(id, next.participant_id, next.account_id, next.amount, offerPremium, nowMs(), deadline);
     const a = account(next.account_id);
     notifier.email(a.email, 'offer', subjectOf(`繰り上げ落札のご案内（${jpDay(deadline)}までにご回答ください）`), compose(setting, { name: displayName(a), lines: [
       `${l.label} の落札が解除されたため、次点のお客様に、繰り上げて落札いただけるかをお尋ねします。`,
       '',
       ...kv([
         ['価格', `${yen(next.amount)}（税込。あなたが最後に入れた入札額です）`],
-        ['買歩銭', `${yen(premiumOf(next.amount))}（落札額の${premiumRate()}%）`],
-        ['お支払いの金額', yen(next.amount + premiumOf(next.amount))],
+        ['買歩銭', `${yen(offerPremium)}（落札額の${premiumRate()}%）`],
+        ['お支払いの金額', yen(next.amount + offerPremium)],
         ['ご回答の期限', `${jpDay(deadline)}まで`],
       ]),
       '',
@@ -745,9 +771,10 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const list = db.prepare('SELECT * FROM invoices ORDER BY id').all().filter((i) => jst(i.issued_at).startsWith(month));
     const KIND = { cash: '現金の精算', transfer: '振込', promote: '繰り上げ', penalty: '違約金など' };
     const rows = list.map((i) => {
-      const lines = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ?').all(i.id);
-      const paid = lines.filter((l) => l.cleared_at).reduce((s, l) => s + payable(l), 0);
-      return [i.number, KIND[i.kind], displayName(account(i.account_id)), jst(i.issued_at), i.sent_at ? jst(i.sent_at) : '', i.due_date ?? '', i.total, paid, paid === i.total ? '支払済み' : paid > 0 ? '一部支払済み' : '未払い'];
+      // 解除した明細は、請求額にも入金にも数えない。すべて解除した請求書は「解除」
+      const m = invoiceAmounts(i);
+      const state = m.cancelled === m.lines ? '解除' : m.paid === m.due ? '支払済み' : m.paid > 0 ? '一部支払済み' : '未払い';
+      return [i.number, KIND[i.kind], displayName(account(i.account_id)), jst(i.issued_at), i.sent_at ? jst(i.sent_at) : '', i.due_date ?? '', m.due, m.paid, m.cancelled && m.cancelled < m.lines ? `${state}（一部解除）` : state];
     });
     return { file: { body: await makeInvoiceList(month, rows), type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: `invoices-${month}.xlsx` } };
   });
@@ -813,17 +840,19 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const me = needMember(ctx);
     syncLines();
     expireOffers();
-    const offers = db.prepare("SELECT o.id, o.amount, o.deadline, o.state, l.label FROM offers o JOIN bill_lines l ON l.id = o.line_id WHERE o.account_id = ? ORDER BY o.id DESC").all(me.id);
+    const offers = db.prepare("SELECT o.id, o.amount, o.premium, o.deadline, o.state, l.label FROM offers o JOIN bill_lines l ON l.id = o.line_id WHERE o.account_id = ? ORDER BY o.id DESC").all(me.id);
     return {
       suspension: suspension(me.id),
       lines: db.prepare('SELECT * FROM bill_lines WHERE account_id = ? ORDER BY id DESC').all(me.id).map(lineView),
       // 繰り上げのご案内: 払う金額（買歩銭込み）も返す。承諾の前に、画面で確かめてもらうため
-      offers: offers.map((o) => ({ ...o, premium: premiumOf(o.amount), payable: o.amount + premiumOf(o.amount) })),
+      offers: offers.map((o) => ({ ...o, premium: offerPremiumOf(o), payable: o.amount + offerPremiumOf(o) })),
       // 請求書の一覧（マイページの「請求書」）。状態: paid（すべて消し込み済み）/ overdue（期限を過ぎている）/ billed（お支払い前）
       invoices: db.prepare('SELECT * FROM invoices WHERE account_id = ? ORDER BY id DESC').all(me.id).map((i) => {
         const open = db.prepare('SELECT COUNT(*) AS n FROM bill_lines WHERE invoice_id = ? AND cleared_at IS NULL AND cancelled_at IS NULL').get(i.id).n;
-        return { id: i.id, number: i.number, kind: i.kind, issuedOn: jst(i.issued_at), total: i.total, dueDate: i.due_date,
-          state: open === 0 ? 'paid' : i.sent_at && i.due_date && i.due_date < today() ? 'overdue' : 'billed' };
+        const m = invoiceAmounts(i);
+        // すべての明細を解除した請求書は「解除」（「お支払い済み」と出さない）。金額は、解除した明細を除いたもの
+        return { id: i.id, number: i.number, kind: i.kind, issuedOn: jst(i.issued_at), total: m.due, issuedTotal: i.total, dueDate: i.due_date,
+          state: m.lines > 0 && m.cancelled === m.lines ? 'cancelled' : open === 0 ? 'paid' : i.sent_at && i.due_date && i.due_date < today() ? 'overdue' : 'billed' };
       }),
     };
   });
@@ -860,7 +889,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const src = getLine(o.line_id);
     const p = db.prepare('SELECT receive FROM members WHERE id = ?').get(o.participant_id);
     const r = db.prepare("INSERT INTO bill_lines (kind, event_id, lot_id, participant_id, account_id, label, amount, premium, receive, parent_line_id, created_at) VALUES ('promote',?,?,?,?,?,?,?,?,?,?)")
-      .run(src.event_id, src.lot_id, o.participant_id, o.account_id, `${src.label}（繰り上げ）`, o.amount, premiumOf(o.amount), p?.receive ?? null, src.id, nowMs());
+      .run(src.event_id, src.lot_id, o.participant_id, o.account_id, `${src.label}（繰り上げ）`, o.amount, offerPremiumOf(o), p?.receive ?? null, src.id, nowMs());
     db.prepare("UPDATE offers SET state = 'accepted', answered_at = ?, new_line_id = ? WHERE id = ?").run(nowMs(), r.lastInsertRowid, id);
     const inv = issueInvoice('promote', [Number(r.lastInsertRowid)], { dueDays: 5, shiftHoliday: true, draft: true });
     await inv.done;
@@ -886,7 +915,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       notifier.email(a.email, 'overdue', subjectOf(`お支払いの確認が取れていません（請求書 ${i.number}）`), compose(setting, { name: displayName(a), lines: [
         `請求書 ${i.number} のお支払い期限（${jpDay(i.due_date)}）を過ぎましたが、まだお支払いの確認が取れていません。`,
         '',
-        ...kv([['ご請求額', yen(i.total)], ['請求書番号', i.number]]),
+        ...kv([['ご請求額', yen(invoiceAmounts(i).due)], ['請求書番号', i.number]]), // 解除した明細を除いた金額
         '',
         'お支払いの確認が取れるまで、競りへの参加を停止しています。確認が取れると、自動で解除されます。',
         '', '【お振込先】', bank || '（振込先は、お送りした請求書をご覧ください）', `ご依頼人名の前に、請求書番号「${i.number}」を入れてください。`,

@@ -688,3 +688,39 @@ test('入金の記録: 入金の日を入れられる（期限・受け取りの
     assert.equal((await t.line('水筒')).clearedMethod, 'cash');
   } finally { await t.close(); }
 });
+
+test('繰り上げの買歩銭は、打診のときの割合のまま。解除した明細は、請求書の金額から除く。一覧の上限で、対応の残る明細が隠れない（本番運用の評価 C。報告書 109 章）', async () => {
+  const t = await setup();
+  try {
+    const a = await t.member(1), c = await t.member(3);
+    t.sold('飯ごう', [[c, 1000], [a, 2000]]);
+    t.sold('水筒', [[a, 500]]);
+    const invs = await t.endEvent();
+    for (const i of invs) await t.admin.post(`/api/billing/invoices/${i.id}/sent`);
+    await t.advance(6);
+    const l = await t.line('飯ごう');
+    await t.admin.post(`/api/billing/lines/${l.id}/cancel`, { reason: '未払い' });
+    // 解除: 請求書の金額は、解除した明細を除いたもの。発行したときの金額も残す
+    const inv = (await t.admin.get('/api/billing/invoices')).json.invoices.find((i) => i.accountId === 1);
+    assert.deepEqual([inv.total, inv.issuedTotal, inv.cancelled], [550, 2750, 1], '水筒 500円＋買歩銭 50円だけが残る');
+    const mine = (await a.get('/api/my/billing')).json.invoices[0];
+    assert.deepEqual([mine.total, mine.state], [550, 'overdue']);
+    await t.admin.post(`/api/billing/lines/${(await t.line('水筒')).id}/cancel`, { reason: '未払い' });
+    assert.equal((await a.get('/api/my/billing')).json.invoices[0].state, 'cancelled', 'すべて解除した請求書は「お支払い済み」と出さない');
+    // 繰り上げ: 打診のあとに割合を変えても、案内した金額のまま請求する
+    await t.admin.post(`/api/billing/lines/${l.id}/offer`);
+    const offer = (await c.get('/api/my/billing')).json.offers[0];
+    assert.deepEqual([offer.premium, offer.payable], [100, 1100]);
+    await t.admin.post('/api/settings', { orgName: '株式会社レイワ', returnPolicy: '仮', shippingNotice: '仮', buyerPremiumRate: '20' });
+    assert.equal((await c.get('/api/my/billing')).json.offers[0].payable, 1100, '割合を変えても、案内した金額は変わらない');
+    await c.post(`/api/my/offers/${offer.id}`, { answer: 'accept' });
+    const promoted = (await c.get('/api/my/billing')).json.lines.find((x) => x.kind === 'promote');
+    assert.deepEqual([promoted.amount, promoted.premium], [1000, 100]);
+    // 一覧の上限: 既定の件数を超えても、まだ入金のない明細は出る。?limit= で広げられる
+    const lines = await t.admin.get('/api/billing/lines?limit=1');
+    assert.equal(lines.json.limit, 1000, '既定より少なくはしない');
+    const members = await t.admin.get('/api/members?limit=999999');
+    assert.equal(members.json.limit, 50000, '最大は 50,000 件');
+    assert.equal(members.json.more, false);
+  } finally { await t.close(); }
+});
