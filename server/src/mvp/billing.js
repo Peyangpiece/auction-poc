@@ -415,19 +415,27 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
 
   // ------------------------------------------------------------ 振込の消し込みと、その取り消し（FR-PAY-001・011。主催者管理者だけ）
   route('POST', '/api/billing/lines/:id/clear', (ctx, body, id) => {
-    const me = needStaff(ctx, 'admin');
+    // 現金の受け取り（開催終了のあとに会場・事務所で受け取った現金）は、受付係もできる。振込は主催者管理者だけ（本番運用の評価 C）
+    const method = body.method === 'cash' ? 'cash' : 'transfer';
+    const me = method === 'cash' ? needStaff(ctx, 'admin', 'reception') : needStaff(ctx, 'admin');
     const l = getLine(id);
+    // 入金の日（既定は今日）。期限・停止・受け取りの期限・手数料の月は、この日で数える（操作した日ではなく。本番運用の評価 C）
+    const paidOn = body.paidOn ? text(body.paidOn, 10) : today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) throw bad('入金の日を、正しく入力してください');
+    if (paidOn > today()) throw bad('入金の日に、未来の日は入れられません');
+    if (db.prepare('SELECT 1 FROM fee_confirms WHERE month = ?').get(paidOn.slice(0, 7))) throw new HttpError(409, `${paidOn.slice(0, 7)} の手数料は確認済みです。入金の日は、確認していない月の日にしてください`);
     if (l.cancelled_at) throw new HttpError(409, '解除した明細は、消し込めません。入金があった場合は、返金として記録してください'); // AC-FR-PAY-006-1
     if (l.cleared_at) throw new HttpError(409, 'この明細は、消し込み済みです');
     if (!l.invoice_id) throw new HttpError(409, 'まだ請求書を発行していない明細です。当日現金は「精算」で、振込は開催終了の後に消し込みます');
     // 明細の金額と入金の金額が一致するときだけ、消し込める（一部だけ・多すぎる入金の扱いは未決。OQ-26）
     if (Number(body.amount) !== payable(l)) throw bad(`入金の金額が、明細の金額（${yen(payable(l))}）と一致しません。一致しない入金は、システムの外で対応し、理由をメモに残してください`);
-    const now = nowMs();
+    // 入金の日の正午（日本時間）を、消し込みの時刻として持つ。今日なら、いまの時刻
+    const at = paidOn === today() ? nowMs() : Date.parse(`${paidOn}T03:00:00Z`);
     db.transaction(() => {
-      db.prepare("UPDATE bill_lines SET cleared_at = ?, cleared_method = 'transfer', cleared_by = ?, clear_memo = ? WHERE id = ?").run(now, me.id, text(body.memo) || null, id);
-      db.prepare("INSERT INTO clearings (line_id, amount, method, cleared_at) VALUES (?,?,'transfer',?)").run(id, l.amount, now);
+      db.prepare('UPDATE bill_lines SET cleared_at = ?, cleared_method = ?, cleared_by = ?, clear_memo = ? WHERE id = ?').run(at, method, me.id, text(body.memo) || null, id);
+      db.prepare('INSERT INTO clearings (line_id, amount, method, cleared_at) VALUES (?,?,?,?)').run(id, l.amount, method, at);
     })();
-    audit(ctx, 'billing.clear', { target: `line:${id}`, before: { cleared: false }, after: { cleared: true, amount: payable(l), method: 'transfer' } });
+    audit(ctx, 'billing.clear', { target: `line:${id}`, before: { cleared: false }, after: { cleared: true, amount: payable(l), method, paidOn } });
     return { ok: true };
   });
   route('POST', '/api/billing/lines/:id/unclear', (ctx, body, id) => {

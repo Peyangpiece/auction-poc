@@ -417,8 +417,13 @@ async function billingPanel() {
         l.pickupBy && l.state === 'cleared' && el('div', { class: l.pickupLate ? 'warn' : 'note', text: `受け取り期限 ${jpDay(l.pickupBy)}` }),
         l.offer && el('div', { class: 'note', text: `繰り上げ: ${{ open: '回答待ち', accepted: '承諾', declined: '辞退', expired: '期限切れ' }[l.offer.state]}` })),
       act(
-        a && ['billed', 'unpaid'].includes(l.state) && smallBtn('消し込み', () => askForm('振込の消し込み', `${l.name}　${l.label}。入金の金額が、明細の金額（${yen(l.payable)}${l.premium ? '。買歩銭を含む' : ''}）と一致するときだけ消し込めます。`,
-          [field('入金の金額（円）', 'amount', { inputMode: 'numeric', required: true }), field('メモ', 'memo', {}, '任意')], (d) => api('POST', `/api/billing/lines/${l.id}/clear`, { amount: Number(d.amount), memo: d.memo }), '消し込む'), 'btn-primary'),
+        // 消し込み: 入金の日と方法（振込・現金）を入れる。受付係は、現金の受け取りだけ（本番運用の評価 C）
+        ['billed', 'unpaid'].includes(l.state) && smallBtn(a ? '入金を記録' : '現金を受け取った', () => askForm(a ? '入金の記録（消し込み）' : '現金の受け取り', `${l.name}　${l.label}。受け取った金額が、明細の金額（${yen(l.payable)}${l.premium ? '。買歩銭を含む' : ''}）と一致するときだけ記録できます。`,
+          [field('受け取った金額（円）', 'amount', { inputMode: 'numeric', required: true }),
+            field('入金の日', 'paidOn', { type: 'date', value: todayStr(), max: todayStr(), required: true }, '振込なら、通帳・明細に載っている日'),
+            a ? field('方法', 'method', { options: [['transfer', '銀行振込'], ['cash', '現金']] }) : null,
+            field('メモ', 'memo', {}, '任意')].filter(Boolean),
+          (d) => api('POST', `/api/billing/lines/${l.id}/clear`, { amount: Number(d.amount), paidOn: d.paidOn, method: a ? d.method : 'cash', memo: d.memo }), '記録する'), 'btn-primary'),
         a && l.state === 'unpaid' && smallBtn('督促', () => askForm('督促の記録', l.dunning.map((d) => `${dateFmt.format(d.at)} ${d.method}: ${d.body}`).join('\n'),
           [field('方法', 'method', { required: true, placeholder: '電話・メールなど' }), field('内容', 'body', { rows: 3, required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/dun`, d), '記録する')),
         a && l.state === 'unpaid' && smallBtn('解除…', () => askReason('落札を解除', '解除の理由', true, (reason) => api('POST', `/api/billing/lines/${l.id}/cancel`, { reason }), '解除する'), 'btn-danger'),

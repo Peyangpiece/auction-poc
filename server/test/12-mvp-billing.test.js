@@ -663,3 +663,28 @@ test('本番運用の評価の指摘（B2〜B6・違約金の重複）: 送っ�
     await new Promise((r) => setTimeout(r, 500));
   } finally { await t.close(); }
 });
+
+test('入金の記録: 入金の日を入れられる（期限・受け取りの期限は入金の日で数える）。現金の受け取りは受付係もできる（本番運用の評価 C。報告書 108 章）', async () => {
+  const t = await setup();
+  try {
+    const a = await t.member(1), b = await t.member(2);
+    t.sold('飯ごう', [[a, 2000]]);
+    t.sold('水筒', [[b, 500]]);
+    const invs = await t.endEvent();
+    for (const i of invs) await t.admin.post(`/api/billing/invoices/${i.id}/sent`);
+    await t.advance(3);
+    const day = (n) => new Date(Date.parse(t.today() + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+    const l = await t.line('飯ごう');
+    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: l.payable, paidOn: day(1) })).status, 400, '未来の入金日は断る');
+    assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: l.payable, paidOn: day(-2) })).status, 200);
+    const cleared = await t.line('飯ごう');
+    assert.equal(cleared.clearedOn, day(-2), '消し込みの日は、入金の日');
+    assert.equal(cleared.pickupBy, day(5), '受け取りの期限は、入金の日の翌日から7日目');
+    // 受付係: 現金の受け取りはできる。振込の記録はできない
+    const reception = await t.staffLogin('reception', 'uketsuke');
+    const w = await t.line('水筒');
+    assert.equal((await reception.post(`/api/billing/lines/${w.id}/clear`, { amount: w.payable })).status, 403, '振込の記録は、主催者管理者だけ');
+    assert.equal((await reception.post(`/api/billing/lines/${w.id}/clear`, { amount: w.payable, method: 'cash' })).status, 200, '現金の受け取りは、受付係もできる');
+    assert.equal((await t.line('水筒')).clearedMethod, 'cash');
+  } finally { await t.close(); }
+});
