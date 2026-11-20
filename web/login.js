@@ -34,7 +34,6 @@ onSubmit(phoneForm, async (data) => {
     $('#sentTo').textContent = res.via === 'email'
       ? `確認済みのアドレスであれば、${phone} に認証番号を送りました。5分以内に入力してください。届かない場合は、携帯電話の番号でお試しください`
       : `登録済みの番号であれば、${phone} に認証番号を送りました。5分以内に入力してください`;
-    if (res.devCode) $('#sentTo').textContent += `　【お試し用】認証番号 ${res.devCode}`;
     phoneForm.hidden = true;
     codeForm.hidden = false;
     codeForm.elements.code.focus();

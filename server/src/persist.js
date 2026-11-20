@@ -13,7 +13,10 @@ export const DB_KEY = 'db/auction.db.gz';
 const HISTORY_PREFIX = 'history/';
 const HISTORY_DAYS = 35;
 // 保存しないもの: データベースの本体（写しを別に送る）、計測の記録、作業用のファイル
-const skip = (rel) => rel.startsWith('metrics/') || rel.startsWith('backups/') || rel.includes('.persist-') || /\.db(-wal|-shm|-journal)?$/.test(rel);
+// 保存先に送らないもの。送ったメールの控え（初期パスワード・認証番号・請求の本文を含む）と、最初の管理者の控えは、
+// 個人情報や秘密を含むので、外の保存先に置かない（本番運用の評価 B7。報告書 102 章）
+const PRIVATE = (rel) => rel.startsWith('outbox/') || /^staff-initial-.*\.txt$/.test(rel) || rel === 'tokens.json';
+const skip = (rel) => PRIVATE(rel) || rel.startsWith('metrics/') || rel.startsWith('backups/') || rel.includes('.persist-') || /\.db(-wal|-shm|-journal)?$/.test(rel);
 
 async function call(base, method, pathname, body) {
   const res = await fetch(base + pathname, { method, body, signal: AbortSignal.timeout(60000) });
@@ -64,7 +67,11 @@ export async function restore(config, { retries = 20, waitMs = 1500, log = conso
   }
   if (candidates.length && !count) throw new Error('保存先のデータベースと控えの、どれも開けません');
   // 2) そのほかのファイル（請求書など）。8個ずつ、並べて取りに行く（数が増えても、起動が遅くなりにくいように）
-  const rest = manifest.files.filter((f) => f.path !== DB_KEY && !f.path.startsWith(HISTORY_PREFIX)); // 日ごとの控えは、戻さない
+  // 前の版で送ってしまった、個人情報や秘密を含むファイルは、戻さずに保存先から消す
+  for (const f of manifest.files.filter((x) => PRIVATE(x.path))) {
+    await call(base, 'DELETE', filePath(f.path)).then(() => log(`保存先から、秘密を含むファイルを消しました: ${f.path}`)).catch(() => {});
+  }
+  const rest = manifest.files.filter((f) => f.path !== DB_KEY && !f.path.startsWith(HISTORY_PREFIX) && !PRIVATE(f.path)); // 日ごとの控えは、戻さない
   let next = 0;
   await Promise.all(Array.from({ length: 8 }, async () => {
     while (next < rest.length) {

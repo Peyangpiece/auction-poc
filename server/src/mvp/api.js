@@ -98,6 +98,18 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   // 開催のお知らせメールを送った記録（同じ開催の同じ会員に、2度送らない）
   db.exec('CREATE TABLE IF NOT EXISTS event_mails (event_id INTEGER NOT NULL, account_id INTEGER NOT NULL, at REAL NOT NULL, PRIMARY KEY (event_id, account_id))');
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+  // お試し用（認証番号を画面に出す設定）から本番の設定に切り替えたら、お試しのあいだのログインをすべて消し、送ったメールの控えも消す
+  // （お試しのあいだに、他人に作られたログインを、本番に持ち込まない。本番運用の評価 A1。報告書 102 章）
+  {
+    const mode = config.devShowCodes ? 'demo' : 'production';
+    const before = db.prepare("SELECT value FROM settings WHERE key = 'run_mode'").get()?.value;
+    if (before === 'demo' && mode === 'production') {
+      const n = db.prepare('DELETE FROM sessions').run().changes;
+      fs.rmSync(path.join(config.dataDir, 'outbox'), { recursive: true, force: true });
+      console.log(`[mode] お試し用から本番の設定に切り替わりました。ログイン ${n} 件と、送ったメールの控えを消しました`);
+    }
+    db.prepare("INSERT INTO settings (key, value) VALUES ('run_mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(mode);
+  }
 
   const notifier = new Notifier(
     config.mailUrl ? httpMailSender(config.mailUrl, outboxSender(path.join(config.dataDir, 'outbox'))) : outboxSender(path.join(config.dataDir, 'outbox')),
@@ -492,7 +504,9 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const target = loginTarget(body);
     // 登録のない宛先でも、同じ返事をする（どの番号・アドレスが登録済みかを、外から調べられないようにする）
     const code = target.member ? await sendOtp(target.key) : null;
-    return { ok: true, via: target.key.startsWith('email:') ? 'email' : 'sms', ...(config.devShowCodes && code ? { devCode: code } : {}) };
+    // ログインの認証番号は、お試し用の設定でも返事に入れない（入れると、他人の宛先を知っているだけで、その会員になりすませる。本番運用の評価 A1。報告書 102 章）
+    void code;
+    return { ok: true, via: target.key.startsWith('email:') ? 'email' : 'sms' };
   });
   // ログイン ID とパスワードでのログイン（発注者の指示）。どちらが違ったかは、伝えない
   route('POST', '/api/login/password', (ctx, body) => {

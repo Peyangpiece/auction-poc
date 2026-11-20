@@ -144,3 +144,24 @@ test('保存先のデータベースが壊れていたら、日ごとの控え�
   storeB.db.close();
   server.close();
 });
+
+test('送ったメールの控え・最初の管理者の控えは、保存先に送らない。前の版で送ってあったものは、復元のときに保存先から消す（報告書 102 章）', async () => {
+  const bucket = fakeBucket();
+  const { server, url } = await storeServer(bucket);
+  // 前の版で送ってしまっていた控え
+  await bucket.put('data/outbox/outbox.ndjson', Buffer.from('{"body":"パスワード"}'));
+  await bucket.put('data/staff-initial-admin.txt', Buffer.from('鍵'));
+  const a = machine(url);
+  await restore(a, { log: () => {} });
+  assert.ok(!fs.existsSync(path.join(a.dataDir, 'outbox', 'outbox.ndjson')), '戻さない');
+  assert.ok(!bucket.objects.has('data/outbox/outbox.ndjson') && !bucket.objects.has('data/staff-initial-admin.txt'), '保存先から消す');
+  const store = openDb(a.dbPath);
+  fs.mkdirSync(path.join(a.dataDir, 'outbox'), { recursive: true });
+  fs.writeFileSync(path.join(a.dataDir, 'outbox', 'outbox.ndjson'), '{"body":"認証番号 123456"}\n');
+  fs.writeFileSync(path.join(a.dataDir, 'staff-initial-admin.txt'), '鍵');
+  const saver = createSaver({ db: store.db, config: a });
+  await saver.flush();
+  assert.ok(![...bucket.objects.keys()].some((k) => k.includes('outbox') || k.includes('staff-initial')), '送らない');
+  store.db.close();
+  server.close();
+});
