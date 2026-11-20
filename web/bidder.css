@@ -335,3 +335,18 @@ body.outbid .board { box-shadow: var(--glass-edge), inset 0 0 0 2px var(--board-
 /* 来場確認の QR コード。暗い画面でも読み取れるよう、白地のまま出す（報告書 91 章） */
 #gate .checkinqr { display: block; justify-self: center; width: min(240px, 70vw); height: auto; aspect-ratio: 1; background: #fff; border-radius: 12px; padding: 8px; box-shadow: 0 0 0 1px var(--line, rgba(0, 0, 0, .12)); }
 #gate .checkinqr[hidden] { display: none; }
+
+/* ==== 低い画面（スマホの横向き・文字を大きくしたとき。本番運用の評価 B17） ====
+   表示板は固定できない（画面より高くなる）ので、入札のボタンと金額の欄だけを、画面の下に固定する。
+   価格は、ボタンの上の細い帯にも出す（スクロールしても、いくらで入札するかが分かる） */
+@media (max-height: 520px) {
+  body { padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important; }
+  .bidrow { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; margin: 0;
+    padding: 8px max(16px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    background: var(--board); box-shadow: 0 -1px 0 var(--board-line), 0 -8px 24px -16px rgb(0 0 0 / .3); }
+  .bidrow #bid { min-height: 52px; }
+}
+
+/* 入場: いまの参加のしかたの印。終わった日の案内のボタン */
+.mode .modenow { display: block; font-size: 13px; font-weight: 400; color: var(--ink-2); margin-top: 2px; }
+#gateMsg .gatebtn { display: flex; justify-content: center; margin-top: 12px; text-decoration: none; }

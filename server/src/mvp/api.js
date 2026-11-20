@@ -1026,6 +1026,9 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const p = event ? participant(member.id, event.id) : null;
     return {
       event: event ? { title: event.title, venueName: event.venue_name } : null,
+      // 終わった日は、その旨と、今日落札したかを返す（落札した人を、お支払いの画面へ案内するため。本番運用の評価 B19）
+      ended: !event && endedToday(),
+      wonToday: !event && endedToday() && !!db.prepare("SELECT 1 FROM bill_lines l JOIN events e ON e.id = l.event_id WHERE l.account_id = ? AND substr(e.starts_at, 1, 10) = ? AND l.kind = 'lot' LIMIT 1").get(member.id, todayJst()),
       joined: !!p, paddle: p?.paddle_no ?? null, receive: p?.receive ?? null, payment: p?.payment ?? null,
       mode: p?.mode ?? null, checkedIn: p ? p.mode !== 'venue' || !!p.checked_in_at : false,
       // 会場の QR コードから来た人か（まだ手続きの前なら、会場参加として手続きできる）

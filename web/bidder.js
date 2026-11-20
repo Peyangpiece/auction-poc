@@ -603,8 +603,12 @@ if (!token) (async () => {
   if (p.status !== 200) { $('gateMsg').textContent = p.message ?? '開けませんでした。開き直してください'; return; }
   // 開催がない日: 誤りではないので赤にせず、次の開催を見られる所への道を出す（報告書 81 章）
   if (!p.event) {
+    // 開催がない日・終わった日: 誤りではないので赤にせず、次にすることへの道を、ボタンで出す（本番運用の評価 B19）
     $('gateMsg').dataset.kind = 'info';
-    $('gateMsg').replaceChildren('本日の開催はありません。', document.createElement('br'), Object.assign(document.createElement('a'), { href: '/', textContent: '次の開催を見る' }));
+    const btn = (href, text, primary) => Object.assign(document.createElement('a'), { href, textContent: text, className: `btn${primary ? ' btn-primary' : ''} gatebtn` });
+    $('gateMsg').replaceChildren(p.ended ? '本日の競りは終了しました。' : '本日の開催はありません。',
+      ...(p.ended && p.wonToday ? [btn('/mypage.html#bills', '落札した品とお支払い', true)] : []),
+      btn('/', p.ended ? 'ホームへ' : '次の開催を見る', !(p.ended && p.wonToday)));
     return;
   }
   if (p.joined) {
@@ -615,10 +619,18 @@ if (!token) (async () => {
     $('gateEvent').textContent = p.event.title;
     $('pickNow').textContent = `${p.mode === 'venue' ? '会場参加' : 'オンライン参加'}・${p.paddle}番`;
     $('modePick').hidden = false;
+    // いまの参加のしかたのボタンに、印を付ける（違うほうを押したときは、確かめる。本番運用の評価 B16）
+    for (const b of document.querySelectorAll('[data-pick]')) {
+      const same = b.dataset.pick === p.mode;
+      b.setAttribute('aria-current', same ? 'true' : 'false');
+      if (same && !b.querySelector('.modenow')) b.append(Object.assign(document.createElement('small'), { className: 'modenow', textContent: 'いまの設定' }));
+    }
     for (const b of document.querySelectorAll('[data-pick]')) b.addEventListener('click', async () => {
       const want = b.dataset.pick;
       let now = p;
       if (want !== p.mode) {
+        const plan = want === 'venue' ? SWITCH.toVenue : SWITCH.toOnline;
+        if (!(await confirmSwitch(plan))) return;
         const res = await getJson(`/api/my/participation/${want}`, {});
         if (res.status !== 200) { $('gateMsg').textContent = res.message ?? 'うまくいきませんでした。やり直してください'; return; }
         now = res;
@@ -693,8 +705,19 @@ $('toVenue').addEventListener('click', () => {
   $('venueDlgTitle').textContent = switchPlan().title; $('venueDlgText').textContent = switchPlan().text;
   $('venueDlgMsg').textContent = ''; $('venueDlg').showModal();
 });
+// 入場の画面で、いまと違う参加のしかたを選んだときの確かめ（入札の画面の中の切り替えと、同じ文で確かめる）
+let pendingSwitch = null;
+function confirmSwitch(plan) {
+  return new Promise((resolve) => {
+    pendingSwitch = resolve;
+    $('venueDlgTitle').textContent = plan.title; $('venueDlgText').textContent = plan.text;
+    $('venueDlgMsg').textContent = ''; $('venueDlg').showModal(); $('venueNo').focus();
+  });
+}
+$('venueDlg').addEventListener('close', () => { if (pendingSwitch) { const r = pendingSwitch; pendingSwitch = null; r(false); } });
 $('venueNo').addEventListener('click', () => $('venueDlg').close());
 $('venueYes').addEventListener('click', async () => {
+  if (pendingSwitch) { const r = pendingSwitch; pendingSwitch = null; $('venueDlg').close(); r(true); return; }
   const res = await getJson(switchPlan().url, {});
   if (res.status !== 200) { $('venueDlgMsg').textContent = res.message ?? 'うまくいきませんでした。やり直してください'; return; }
   location.reload(); // 入り口の画面に戻る（会場参加にした場合は、来場の確認を待つ）

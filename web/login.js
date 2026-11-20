@@ -9,8 +9,10 @@ let phone = '';
 const after = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/';
 const pwForm = $('#pwForm');
 // SMS を使わない設定（本番）のときは、連絡先の欄を、メールアドレスだけにする
+let smsOn = true;
 api('GET', '/api/terms').then((t) => {
   if (t.sms !== false) return;
+  smsOn = false;
   const input = phoneForm.elements.id;
   input.closest('label').firstChild.textContent = 'メールアドレス';
   input.type = 'email'; input.placeholder = 'taro@example.com'; input.autocomplete = 'email';
@@ -32,7 +34,8 @@ onSubmit(phoneForm, async (data) => {
   const res = await api('POST', '/api/login/start', { id: phone });
   if (res.ok) {
     $('#sentTo').textContent = res.via === 'email'
-      ? `確認済みのアドレスであれば、${phone} に認証番号を送りました。5分以内に入力してください。届かない場合は、携帯電話の番号でお試しください`
+      // SMS を使わない設定では、携帯電話の番号を案内しない（本番運用の評価 U9）
+      ? `確認済みのアドレスであれば、${phone} に認証番号を送りました。5分以内に入力してください。${smsOn ? '届かない場合は、携帯電話の番号でお試しください' : '届かない場合は、迷惑メールのフォルダーを確かめるか、主催者にお問い合わせください'}`
       : `登録済みの番号であれば、${phone} に認証番号を送りました。5分以内に入力してください`;
     phoneForm.hidden = true;
     codeForm.hidden = false;

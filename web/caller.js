@@ -6,6 +6,8 @@ const S = { lots: new Map(), focus: null, history: [], ladder: null, busy: false
 
 /** いま扱う品: 進行中の品。なければ、出品順でいちばん先の待機中の品（始まる前に、開始値を決められるように） */
 function current() {
+  // 締めた・流札にした直後は、しばらくその品の結果を出し続ける（すぐ次の品に替わると、続けて押したときに次の品が始まってしまう。本番運用の評価 B14）
+  if (S.holdLot && Date.now() < S.holdUntil && S.lots.get(S.holdLot)) return S.lots.get(S.holdLot);
   const f = S.lots.get(S.focus);
   if (f && !['sold', 'unsold', 'not_held', 'waiting'].includes(f.status)) return f;
   const next = [...S.lots.values()].find((l) => l.status === 'waiting');
@@ -84,9 +86,15 @@ function render() {
   // 中断（上の帯）: 受付中だけ。中断中は、いちばん下のボタンが「再開」になる
   $('suspend').hidden = st !== 'open';
   $('suspend').disabled = S.busy;
-  S.mode = st === 'waiting' ? 'start' : st === 'suspended' ? 'resume' : 'close';
+  const holding = !!S.holdLot && Date.now() < S.holdUntil && lot?.id === S.holdLot;
+  S.mode = holding ? 'hold' : st === 'waiting' ? 'start' : st === 'suspended' ? 'resume' : 'close';
   $('close').dataset.mode = S.mode;
-  if (S.mode === 'resume') {
+  if (S.mode === 'hold') {
+    // 結果を見せているあいだは、押せない（数秒で、次の品の「開始」に替わる）
+    $('closeLabel').textContent = st === 'sold' ? `${lot.highestPaddle}番 ${yen(lot.currentPrice)} 落札` : st === 'unsold' ? '流札' : '確定しました';
+    $('closeSub').textContent = 'まもなく次の品へ';
+    $('close').disabled = true;
+  } else if (S.mode === 'resume') {
     $('closeLabel').textContent = '再開';
     $('closeSub').textContent = '';
     $('close').disabled = S.busy;
@@ -110,7 +118,13 @@ function render() {
   const canPass = live && !urikiri && !S.busy;
   $('pass').disabled = !canPass;
   $('passSub').textContent = live && urikiri ? 'うりきり済み' : '';
-  syncSheet();
+  if (!holding) syncSheet();
+}
+/** 締め・流札のあと、結果を見せる時間 */
+function holdResult(lotId) {
+  S.holdLot = lotId; S.holdUntil = Date.now() + 3000;
+  clearTimeout(S.holdTimer);
+  S.holdTimer = setTimeout(() => { S.holdLot = null; render(); }, 3050);
 }
 
 async function cmd(action, extra = {}) {
@@ -140,6 +154,9 @@ function ask({ title, body, okLabel, danger = false }) {
     dlg.oncancel = (ev) => { ev.preventDefault(); done(false); };
     dlg.showModal();
     $('dlgCancel').focus(); // 誤って続けて押しても、実行されないように
+    // 開いた直後は「実行」を押せなくする（背後のボタンと位置が重なるので、2度押しの2度目で実行されないように。本番運用の評価 B15）
+    $('dlgOk').disabled = true;
+    setTimeout(() => { $('dlgOk').disabled = false; }, 500);
   });
 }
 
@@ -190,14 +207,16 @@ $('close').addEventListener('click', async () => {
   }
   const willSell = lot.currentPrice !== null && !!lot.urikiri;
   if (!(await ask({ title: '締めますか？', body: willSell ? `No.${lot.lotNo}　${lot.highestPaddle}番 ${yen(lot.currentPrice)} 落札` : `No.${lot.lotNo}　流札`, okLabel: '締める' }))) return;
+  holdResult(lot.id);
   const res = await cmd('close');
-  if (res?.ok) say('');
+  if (res?.ok) say(''); else { S.holdLot = null; render(); }
 });
 $('pass').addEventListener('click', async () => {
   const lot = current();
   if (!lot || !(await ask({ title: '流札にしますか？', body: `No.${lot.lotNo}`, okLabel: '流札にする', danger: true }))) return;
+  holdResult(lot.id);
   const res = await cmd('pass');
-  if (res?.ok) say('');
+  if (res?.ok) say(''); else { S.holdLot = null; render(); }
 });
 
 // 中断: 確かめは出さない（すぐ止めたいときに使い、いちばん下の「再開」ですぐ戻せるため）
