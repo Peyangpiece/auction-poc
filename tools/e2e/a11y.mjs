@@ -31,7 +31,7 @@ const scan = async (page, name, scheme) => {
 for (const scheme of ['light', 'dark']) {
   const mk = (vp) => br.newContext({ viewport: vp, colorScheme: scheme, bypassCSP: true });
   // ログイン前
-  let c = await mk({ width: 390, height: 844 });
+  const c = await mk({ width: 390, height: 844 });
   for (const [n, u] of [['home', '/'], ['register', '/register.html'], ['login', '/login.html'], ['legal', '/legal.html'], ['unsubscribe', '/unsubscribe.html?t=xxxxxxxxxxxxxxxxxxxxxxxx'], ['404', '/nai.html']]) { const p = await c.newPage(); await p.goto(B + u); await p.waitForTimeout(700); await scan(p, n, scheme); await p.close(); }
   // 会員
   const phone = scheme === 'light' ? '09012340001' : '09012340002';

@@ -58,7 +58,7 @@ function writePdf(file, c) {
     // 2ページ以上になったら、あとから各ページに請求番号とページ数を書き足すので、ページを貯めておく
     const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true, info: { Title: `${c.title} ${c.number}` } });
     const out = fs.createWriteStream(file);
-    out.on('finish', resolve);
+    out.on('finish', () => resolve());
     out.on('error', reject);
     doc.pipe(out);
     doc.registerFont('M', FONT).registerFont('B', FONT_BOLD);

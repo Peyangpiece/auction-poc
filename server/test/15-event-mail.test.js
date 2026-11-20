@@ -146,3 +146,29 @@ test('古物商の許可の表示（古物営業法）: 主催者管理者が設
     assert.equal((await (await fetch(`${t.base}/api/legal`)).json()).kobutsuLicense, '〇〇県公安委員会　第000000000000号');
   } finally { await t.close(); }
 });
+
+test('送れなかったお知らせは、次の見回りで送り直す。同じ人に3回まで（報告書 118 章）', async () => {
+  let fail = true, hits = 0;
+  const mailer = http.createServer((req, res) => { req.resume(); req.on('end', () => { hits++; res.writeHead(fail ? 400 : 200, { 'content-type': 'application/json' }); res.end('{}'); }); });
+  await new Promise((r) => mailer.listen(0, '127.0.0.1', r));
+  const t = await setup({ POC_MAIL_URL: `http://127.0.0.1:${mailer.address().port}` });
+  try {
+    await t.member(1);
+    const id = await t.event('2026-12-08');
+    t.store.db.prepare("UPDATE member_accounts SET event_mail = 1, event_mail_consent_at = 1, approved_at = 1, email = 'retry@example.com' WHERE id = (SELECT MIN(id) FROM member_accounts)").run();
+    hits = 0;
+    assert.equal((await t.api.sendEventMails()).sent, 0, '送れなかった');
+    assert.equal(hits, 1);
+    assert.equal(t.store.db.prepare('SELECT COUNT(*) AS n FROM event_mails WHERE event_id = ?').get(id).n, 0, '送った記録を残さない（次に送り直す）');
+    assert.equal((await t.api.sendEventMails()).sent, 0);
+    assert.equal((await t.api.sendEventMails()).sent, 0);
+    assert.equal((await t.api.sendEventMails()).sent, 0, '3回でやめる');
+    assert.equal(hits, 3);
+    // 別の開催では、直ったあとに、ふつうに届く
+    fail = false;
+    await t.event('2026-12-08');
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(t.store.db.prepare('SELECT COUNT(*) AS n FROM event_mails').get().n, 2);
+    assert.equal(hits, 4);
+  } finally { await t.close(); await new Promise((r) => mailer.close(r)); }
+});

@@ -115,7 +115,7 @@ export function journalSeq(db) {
  * @param db   戻したデータベース（見張りを付けていない、素のもの）
  * @param files 保存先にある控えのファイル [{ rel, first, last }]
  * @param get  ファイルを取る関数（rel → Buffer）
- * @returns { applied, seq, stoppedAt }
+ * @returns {Promise<{ applied: number, seq: number, stoppedAt: number|null }>} やり直した件数・通し番号・止まった番号
  */
 export async function replayJournal(db, files, get, { log = console.log } = {}) {
   ensureMeta(db, db.prepare.bind(db));
@@ -156,7 +156,7 @@ export async function replayJournal(db, files, get, { log = console.log } = {}) 
  * @param put (rel, Buffer) → Promise。保存先へ置く
  * @param del (rel) → Promise。保存先から消す
  */
-export function createJournal({ db, put, del, nowMs = () => Date.now(), log = console.error, maxWaitMs = 3000, onDegraded = () => {} }) {
+export function createJournal({ db, put, del, nowMs = () => Date.now(), log = console.error, maxWaitMs = 3000, onDegraded = (_on, _why) => {} }) {
   const hook = installWriteHook(db);
   const raw = hook.raw.prepare;
   ensureMeta(db, raw);
@@ -164,7 +164,7 @@ export function createJournal({ db, put, del, nowMs = () => Date.now(), log = co
   let seq = raw('SELECT seq FROM persist_journal WHERE id = 1').get().seq; // 確定した書き込みの、いちばん新しい番号
   let acked = seq;                                                         // 保存先に届いた、いちばん新しい番号
   const setSeq = raw('UPDATE persist_journal SET seq = ? WHERE id = 1');
-  let pending = [];      // まだ送っていない書き込み
+  const pending = [];      // まだ送っていない書き込み
   let putMs = null, putMax = 0, puts = 0; // 保存先に1回書くのにかかった時間（ならした値・最大・回数）
   let shipping = false, degraded = false, failingSince = 0, lastError = null, stopped = false;
   const shipped = [];    // 保存先にある控えのファイル（写しに入ったら消す）

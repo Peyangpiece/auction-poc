@@ -318,6 +318,11 @@ test('手数料の集計: 消し込み済みだけ・消し込みの月で区切
     await t.admin.post(`/api/billing/lines/${ids[0]}/refund`, { amount: 1111, date: t.today(), method: 'cash', reason: '返品' }); // 全額の返金
     const jan = (await t.admin.get(`/api/billing/fees?month=${t.today().slice(0, 7)}`)).json;
     assert.deepEqual([jan.base, jan.deduction, jan.fee], [0, 50 + 51, 0], '990×5%=49.5→50、1,010×5%=50.5→51。手数料は0円より下にはしない');
+    // 引ききれなかった 101円は、消えずに、次の月へ繰り越す（報告書 118 章）
+    assert.deepEqual([jan.carriedIn, jan.carriedOut], [0, 101]);
+    const next = new Date(Date.UTC(Number(t.today().slice(0, 4)), Number(t.today().slice(5, 7)), 1)).toISOString().slice(0, 7);
+    const feb = (await t.admin.get(`/api/billing/fees?month=${next}`)).json;
+    assert.deepEqual([feb.carriedIn, feb.fee, feb.carriedOut], [101, 0, 101], '次の月に引き継ぐ');
     assert.equal((await t.admin.get('/api/billing/fees?month=2026-12')).json.fee, 150, '締めた月の金額は、あとから変わらない');
     // 確認済みにする。内税と最低保証額
     assert.equal((await t.admin.post('/api/billing/fees/confirm', { month: t.today().slice(0, 7) })).status, 409, '今月は、まだ確認済みにできない');
@@ -728,5 +733,36 @@ test('繰り上げの買歩銭は、打診のときの割合のまま。解除�
     const members = await t.admin.get('/api/members?limit=999999');
     assert.equal(members.json.limit, 50000, '最大は 50,000 件');
     assert.equal(members.json.more, false);
+  } finally { await t.close(); }
+});
+
+test('精算の取り消し（報告書 118 章）: 開催が終わったあとに取り消した現金の明細は、振込の請求書になる。空になった領収書は「無効」と出る。請求メールの文面を、管理画面から取り出せる', async () => {
+  const t = await setup();
+  try {
+    const b = await t.member(2, { venue: true });
+    t.sold('水筒', [[b, 500]]);
+    const water = await t.line('水筒');
+    const cash = (await t.admin.post('/api/billing/settle', { lineIds: [water.id] })).json.invoice;
+    await t.endEvent();
+    const res = await t.admin.post(`/api/billing/lines/${water.id}/unclear`, { reason: '現金を受け取っていなかった' });
+    assert.equal(res.status, 200);
+    assert.ok(res.json.reissued, '振込の請求書を発行する');
+    const after = await t.line('水筒');
+    assert.equal(after.state, 'billed');
+    assert.equal(after.invoice.number, res.json.reissued);
+    assert.ok(after.invoice.dueDate, '期限が付く');
+    const list = (await t.admin.get('/api/billing/invoices')).json.invoices;
+    assert.equal(list.find((i) => i.number === cash.number).void, true, '空になった領収書は、無効');
+    const mine = (await b.get('/api/my/billing')).json.invoices;
+    assert.equal(mine.find((i) => i.number === cash.number).state, 'void', '会員の画面でも「お支払い済み」とは出さない');
+    assert.equal(mine.find((i) => i.number === res.json.reissued).state, 'billed');
+    const inv = list.find((i) => i.number === res.json.reissued);
+    const mail = await t.admin.get(`/api/billing/invoices/${inv.id}/mail`);
+    assert.equal(mail.status, 200);
+    assert.match(mail.json.subject, /ご請求/);
+    assert.match(mail.json.body, /水筒/);
+    assert.equal((await t.admin.get(`/api/billing/invoices/${list.find((i) => i.number === cash.number).id}/mail`)).status, 404, '現金の領収書には、送付の文面は無い');
+    assert.equal((await b.get(`/api/billing/invoices/${inv.id}/mail`)).status, 401);
+    await new Promise((r) => setTimeout(r, 500));
   } finally { await t.close(); }
 });

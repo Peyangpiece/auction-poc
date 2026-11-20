@@ -56,7 +56,7 @@ test('P2-3b 「締め」を記録する前に強制終了 → 再起動で中断
 
   srv = await startServer(ctx);
   ({ auctioneer: A, members: m } = await connectAll(srv, ctx, 3));
-  let log = await lotLog(A, lot.id);
+  const log = await lotLog(A, lot.id);
   assert.equal(log.lot.status, 'suspended');
   assert.equal(log.events.some((e) => e.type === 'close'), false, '「締め」は記録されていない');
   assert.deepEqual([log.lot.currentPrice, log.lot.highestPaddle], [9500, m[0].paddle]);

@@ -45,6 +45,7 @@ export class Metrics {
   #prune() {
     if (!this.known) {
       // 起動時に、以前の実行が残したファイルを古い順に控える
+      /** @type {{ p: string, size: number, mtime?: number, stream?: any }[]} */
       this.known = [];
       try {
         this.known = fs.readdirSync(this.dir).filter((f) => f.endsWith('.ndjson'))

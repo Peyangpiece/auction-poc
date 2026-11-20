@@ -16,7 +16,6 @@ api('GET', '/api/terms').then((t) => {
   const input = phoneForm.elements.id;
   input.closest('label').firstChild.textContent = 'メールアドレス';
   input.type = 'email'; input.placeholder = 'taro@example.com'; input.autocomplete = 'email';
-  const note = phoneForm.querySelector('.note');
 });
 
 onSubmit(pwForm, async (data) => {

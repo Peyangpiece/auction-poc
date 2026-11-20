@@ -228,8 +228,7 @@ const server = http.createServer((req, res) => {
     // 保存や控えの細かい状態（通し番号・最後に保存した時刻）は、出さない（書き込みがあったかどうかから、登録の有無が分かってしまうため）。
     // 細かい状態は、主催者管理者だけが /api/staff/health で見られる
     return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, busy: auction.snapshot().lots.some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status)) || ['running', 'break'].includes(api.eventState()?.phase), errors: errorCount, agent: stream.view().agentConnected,
-      errors: errorCount, agent: stream.view().agentConnected,
-      alerts: [...(saver && saver.status().failingSince && nowMs() - saver.status().failingSince > 60000 ? ['persist_failing'] : []), ...(journal?.status().degraded ? ['journal_degraded'] : []), ...(journal && !journal.started ? ['journal_not_started'] : []), ...(restoreNotes.length ? ['restore_incomplete'] : [])],
+      alerts: [...(saver && saver.status().failingSince && nowMs() - saver.status().failingSince > 60000 ? ['persist_failing'] : []), ...(journal?.status().degraded ? ['journal_degraded'] : []), ...(journal && !journal.started ? ['journal_not_started'] : []), ...(config.persistUrl && config.journalReplay === false ? ['journal_replay_off'] : []), ...(restoreNotes.length ? ['restore_incomplete'] : [])],
       ...(journal ? { journal: { degraded: journal.status().degraded, putMs: journal.status().putMs } } : {}) }));
   }
   if (url.pathname === '/hooks/ivs' && req.method === 'POST') return handleEventBridge(req, res);
@@ -690,7 +689,7 @@ try {
 } catch (err) { console.error('[restore]', err); }
 server.listen(config.port, config.host, () => {
   saver?.start();
-  console.log(`[server] listening on ${config.host}:${server.address().port} ivsMode=${config.ivsMode} db=${config.dbPath}`);
+  console.log(`[server] listening on ${config.host}:${/** @type {import('node:net').AddressInfo} */ (server.address()).port} ivsMode=${config.ivsMode} db=${config.dbPath}`);
   console.log(`[server] metrics -> ${metrics.file ?? '（記録しない）'}`);
 });
 
@@ -717,7 +716,7 @@ function alertUnexpected(label, err) {
     ]);
   } catch { /* 知らせられなくても、続ける */ }
 }
-process.on('uncaughtException', (err) => { if (err?.syscall === 'listen') { console.error(err); process.exit(1); } errorCount++; console.error('[uncaught]', err); alertUnexpected('uncaughtException', err); });
+process.on('uncaughtException', (err) => { if (/** @type {any} */ (err)?.syscall === 'listen') { console.error(err); process.exit(1); } errorCount++; console.error('[uncaught]', err); alertUnexpected('uncaughtException', err); });
 process.on('unhandledRejection', (err) => { errorCount++; console.error('[unhandled]', err); alertUnexpected('unhandledRejection', err); });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

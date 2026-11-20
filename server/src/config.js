@@ -102,6 +102,8 @@ export function loadConfig(env = process.env) {
     // 公開の前に入れておく項目（規約・振込先など）がそろうまで、開催を公開させない。本番の設定では 1
     requireSetup: env.POC_REQUIRE_SETUP === '1',
     journal: env.POC_JOURNAL !== '0',
+    // 起動のときに、書き込みの控えをやり直すか。手で古い写しへ戻すときだけ 0 にする（戻した時点より後の書き込みを、やり直させない。報告書 118 章）
+    journalReplay: env.POC_JOURNAL_REPLAY !== '0',
     journalMaxWaitMs: num(env.POC_JOURNAL_MAX_WAIT_MS, 3000),
     persistIntervalMs: num(env.POC_PERSIST_INTERVAL_MS, 2000),
 

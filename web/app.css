@@ -304,3 +304,7 @@ dialog::backdrop { background: rgb(0 0 0 / .22); }
 @media (prefers-contrast: more) {
   :root { --glass-edge: inset 0 0 0 1px var(--edge); }
 }
+
+/* ---- 運用の警告（スタッフの画面の上。保存の失敗・控えの遅れ）。報告書 118 章 */
+.opsalert { position: sticky; top: 0; z-index: 50; background: var(--danger); color: var(--danger-ink); padding: 12px 16px; font-weight: 600; line-height: 1.6; white-space: pre-line; }
+.opsalert[hidden] { display: none; }

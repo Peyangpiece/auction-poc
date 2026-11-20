@@ -92,7 +92,7 @@ export function normalizePhone(input) {
   return digits;
 }
 // メールアドレスの形。送信の入口（cloudflare/mail.js）が断る字（, ; < >）は、ここでも断る（入口で必ず失敗する宛先を、送り直し続けないように）
-export const isEmail = (text) => /^[^\s@,;<>"()\[\]\\]+@[^\s@,;<>"()\[\]\\]+\.[^\s@,;<>"()\[\]\\.]{2,}$/.test(String(text ?? '')) && String(text).length <= 254;
+export const isEmail = (text) => /^[^\s@,;<>"()[\]\\]+@[^\s@,;<>"()[\]\\]+\.[^\s@,;<>"()[\]\\.]{2,}$/.test(String(text ?? '')) && String(text).length <= 254;
 
 /**
  * 利用者の接続元。手前にプロキシがあるとき（POC_TRUST_PROXY=1）は、プロキシが付けた x-real-ip を使う

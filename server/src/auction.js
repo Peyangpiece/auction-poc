@@ -39,7 +39,10 @@ export class Auction {
    * @param {{write: Function}} deps.metrics
    * @param {(msg: object) => number} deps.broadcast 全端末へ送り、送り出した時刻を返す
    * @param {import('./stream.js').StreamControl} deps.stream
-   * @param {(point: string) => void} deps.crashPoint 障害の模擬用（本番では何もしない）
+   * @param {(point: string) => void} [deps.crashPoint] 障害の模擬用（本番では何もしない）
+   * @param {() => (number|null)} [deps.eventId] いまの開催の番号
+   * @param {Function} [deps.bidGate] 入札を受け付けてよいか（会員・開催の決まり）
+   * @param {Function} [deps.lotGate] 競りを始めてよいか
    */
   constructor({ store, config, metrics, broadcast, stream, crashPoint = () => {}, eventId = () => null, bidGate = () => null, lotGate = () => null }) {
     validateTable(config.incrementTable);
@@ -501,7 +504,7 @@ export class Auction {
     const pending = startPrice === null || startPrice === undefined || startPrice === '' || startPrice === 0;
     const start = pending ? 1 : Number(startPrice);
     if (!Number.isSafeInteger(start) || start <= 0) throw new Error('開始値は1円以上の整数にしてください');
-    let reserve = reservePrice === null || reservePrice === undefined || reservePrice === '' ? null : Number(reservePrice);
+    const reserve = reservePrice === null || reservePrice === undefined || reservePrice === '' ? null : Number(reservePrice);
     if (reserve !== null) {
       if (!Number.isSafeInteger(reserve) || reserve < start) throw new Error('最低落札額は、開始値以上の整数にしてください');
       // 開始値と同じ最低落札額は、そのまま持つ（最初の入札で届き、ランプが点く。報告書 89 章）

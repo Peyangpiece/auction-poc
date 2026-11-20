@@ -6,7 +6,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { boot, chromium, devices, check, ROOT } from './lib.mjs';
-import { totp } from '../../server/src/mvp/security.js';
 import Database from 'better-sqlite3';
 import QRCode from 'qrcode';
 

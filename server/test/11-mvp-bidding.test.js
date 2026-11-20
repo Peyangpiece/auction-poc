@@ -534,7 +534,7 @@ test('数でない金額の入札が届いても、サーバーは止まらな�
     const lot = await createLot(auctioneer, 1000);
     await auctioneer.cmd('start', { lotId: lot.id });
     await until(() => wa.lots.get(lot.id)?.status === 'open');
-    for (const bad of ['abc', null, {}, 1e400, 1000.5]) assert.equal((await wa.bid(lot.id, bad)).accepted, false);
+    for (const bad of ['abc', null, {}, Infinity, 1000.5]) assert.equal((await wa.bid(lot.id, bad)).accepted, false);
     wa.send({ type: 'bid' }); wa.send({ type: 'cmd' }); wa.send({ type: 'comment', text: { toString: 1 } });
     assert.equal((await wa.bid(lot.id, 1000)).accepted, true, 'そのあとの入札は、受ける');
     assert.equal((await fetch(t.srv.httpUrl + '/healthz')).status, 200);

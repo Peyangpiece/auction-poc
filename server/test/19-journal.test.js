@@ -171,6 +171,16 @@ test('突然落ちても、受理した入札と落札は残る（写しを送�
   for (const c of [auctioneer, a, b]) c.close();
   assert.ok([...remote.objects.keys()].some((k) => k.startsWith('data/journal/')), '控えが、保存先にある');
 
+  // 手で古い写しへ戻すときの設定（POC_JOURNAL_REPLAY=0）: 控えは、やり直さない（戻した時点より後の書き込みを、入れない。報告書 118 章）
+  const dir0 = tmp();
+  const env0 = { ...ctx.env, POC_DATA_DIR: dir0, POC_JOURNAL_REPLAY: '0' };
+  delete env0.POC_DB_PATH;
+  await execFileP('node', ['tools/persist-restore.js'], { cwd: ROOT, env: env0 });
+  const db0 = new Database(path.join(dir0, 'auction.db'), { readonly: true });
+  assert.equal(db0.prepare("SELECT COUNT(*) AS n FROM bids WHERE result = 'ACCEPTED'").get().n, 0, '控えをやり直さなければ、写しの時点のまま');
+  db0.close();
+  fs.rmSync(dir0, { recursive: true, force: true });
+
   // 別の置き場（空）に戻して、起動する
   const dir2 = tmp();
   const env2 = { ...ctx.env, POC_DATA_DIR: dir2 };

@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeInvoiceFiles, makeInvoiceList } from './invoice-files.js';
+import { Worker } from 'node:worker_threads';
 import { jpDay, compose, subjectOf, kv, signature } from './mails.js';
 
 // CSV の1マス。表計算ソフトが式として動かす文字（= + - @ など）で始まる文字列は、先頭に ' を付けて、ただの文字にする
@@ -216,7 +217,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     return `${day}-${String(n).padStart(4, '0')}`;
   }
   /** lineIds の明細を載せた請求書を1通発行する。kind: cash（精算。領収書を兼ねる）/ transfer / promote / penalty */
-  function issueInvoice(kind, lineIds, { dueDays = null, shiftHoliday = false, draft = false } = {}) {
+  function issueInvoice(kind, lineIds, { dueDays = null, draft = false } = {}) {
     const lines = lineIds.map(getLine);
     const first = lines[0];
     const total = lines.reduce((s, l) => s + payable(l), 0); // 落札額＋買歩銭
@@ -291,6 +292,36 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     return { subject, body };
   }
 
+  // 請求書のファイルは、別のスレッドで作る（競りの最中の精算で、入札の受け付けを止めない。報告書 118 章）。
+  // スレッドを使えないとき・途中で落ちたときは、これまでどおり、同じスレッドで作る
+  let worker = null, jobSeq = 0;
+  const jobs = new Map();
+  function filesWorker() {
+    if (worker || config.invoiceWorker === false) return worker;
+    try {
+      worker = new Worker(new URL('./invoice-worker.js', import.meta.url));
+      worker.unref(); // 待ちが無いときは、プロセスの終了を妨げない
+      worker.on('message', ({ id, ok, error }) => { const j = jobs.get(id); if (!j) return; jobs.delete(id); if (!jobs.size) worker?.unref(); ok ? j.resolve() : j.reject(new Error(error)); });
+      const lost = (err) => { worker = null; for (const [id, j] of jobs) { jobs.delete(id); j.retry(err); } };
+      worker.on('error', lost);
+      worker.on('exit', () => lost(new Error('請求書を作るスレッドが止まりました')));
+    } catch { worker = null; }
+    return worker;
+  }
+  function makeFiles(args) {
+    const pdf = path.join(args.dir, `${args.invoice.number}.pdf`), xlsx = path.join(args.dir, `${args.invoice.number}.xlsx`);
+    const w = filesWorker();
+    if (!w) return makeInvoiceFiles(args);
+    const done = new Promise((resolve, reject) => {
+      const id = ++jobSeq;
+      // スレッドが落ちたら、同じスレッドで作り直す（請求書を作れないままにしない）
+      jobs.set(id, { resolve, reject, retry: () => makeInvoiceFiles(args).done.then(resolve, reject) });
+      w.ref();
+      w.postMessage({ id, args });
+    });
+    return { pdf, xlsx, done };
+  }
+
   // 同じ請求書の作り直しは、1つずつ行う（送料の更新が重なると、同じファイルに同時に書いて PDF が壊れていた。本番運用の評価 B3）
   const rendering = new Map();
   function renderInvoice(invoiceId, opts = {}) {
@@ -307,7 +338,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const lines = all.filter((l) => l.kind !== 'shipping'), shipping = all.filter((l) => l.kind === 'shipping');
     const a = account(inv.account_id);
     const org = Object.fromEntries(['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'].map((k) => [k, setting(k)]));
-    const files = makeInvoiceFiles({
+    const files = makeFiles({
       dir: invoiceDir, invoice: inv, lines, shipping, org, to: { name: displayName(a), address: a.kind === 'b2b' && a.billing ? a.billing : a.address },
       seal: sealFile(),
       premium: { total: lines.reduce((s, l) => s + (l.premium ?? 0), 0), rate: premiumRate() },
@@ -352,7 +383,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     } else {
       if (amount === 0) throw new HttpError(409, '消せる送料の行がありません');
       const r = db.prepare("INSERT INTO bill_lines (kind, event_id, account_id, label, amount, created_at) VALUES ('shipping',?,?,?,?,?)").run(eventId, accountId, label, amount, nowMs());
-      inv = issueInvoice('transfer', [Number(r.lastInsertRowid)], { dueDays: 5, shiftHoliday: true, draft: true });
+      inv = issueInvoice('transfer', [Number(r.lastInsertRowid)], { dueDays: 5, draft: true });
     }
     await inv.done;
     audit(ctx, 'billing.shipping', { target: `invoice:${inv.number}`, after: { amount, label } });
@@ -363,7 +394,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   function onEventEnd(eventId, ctx) {
     syncLines();
     const groups = db.prepare("SELECT account_id, GROUP_CONCAT(id) AS ids FROM bill_lines WHERE event_id = ? AND kind = 'lot' AND invoice_id IS NULL AND cancelled_at IS NULL GROUP BY account_id").all(eventId);
-    const made = groups.map((g) => issueInvoice('transfer', g.ids.split(',').map(Number), { dueDays: 5, shiftHoliday: true, draft: true }));
+    const made = groups.map((g) => issueInvoice('transfer', g.ids.split(',').map(Number), { dueDays: 5, draft: true }));
     if (made.length) audit(ctx, 'invoice.issue_on_end', { target: `event:${eventId}`, after: { invoices: made.map((i) => i.number) } });
     return made;
   }
@@ -457,7 +488,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     audit(ctx, 'billing.clear', { target: `line:${id}`, before: { cleared: false }, after: { cleared: true, amount: payable(l), method, paidOn } });
     return { ok: true };
   });
-  route('POST', '/api/billing/lines/:id/unclear', (ctx, body, id) => {
+  route('POST', '/api/billing/lines/:id/unclear', async (ctx, body, id) => {
     needStaff(ctx, 'admin');
     const l = getLine(id);
     const reason = text(body.reason);
@@ -473,7 +504,15 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       db.prepare('UPDATE clearings SET reversed_at = ?, reverse_reason = ? WHERE line_id = ? AND reversed_at IS NULL').run(nowMs(), reason, id);
     })();
     audit(ctx, 'billing.unclear', { target: `line:${id}`, before: { cleared: true }, after: { cleared: false }, reason });
-    return { ok: true };
+    // 開催が終わったあとに、当日現金の精算を取り消した: その明細を、振込の請求書にする（そのままだと、請求する手段が無く、期限も停止も付かなかった）
+    let reissued = null;
+    if (cashInv && db.prepare("SELECT 1 FROM events WHERE id = ? AND phase = 'ended'").get(l.event_id)) {
+      const inv = issueInvoice('transfer', [Number(id)], { dueDays: 5, draft: true });
+      await inv.done;
+      reissued = inv.number;
+      audit(ctx, 'invoice.issue_after_unclear', { target: `invoice:${inv.number}`, after: { line: Number(id) } });
+    }
+    return { ok: true, reissued };
   });
   route('POST', '/api/billing/lines/:id/memo', (ctx, body, id) => {
     needStaff(ctx, 'admin');
@@ -522,6 +561,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     return {
       // total: 解除した明細を除いた、いま払ってもらう金額。issuedTotal: 発行したときの請求額（請求書の PDF に書いた金額）
       id: i.id, number: i.number, kind: i.kind, name: displayName(a), email: a.email, total: m.due, issuedTotal: i.total, cancelled: m.cancelled, paid: m.paid, issuedOn: jst(i.issued_at),
+      void: m.lines === 0, // 精算をすべて取り消した（無効の領収書）
       sentOn: i.sent_at ? jst(i.sent_at) : null, dueDate: i.due_date, draft: i.draft_state, accountId: i.account_id, eventId: i.event_id,
       shipping: db.prepare("SELECT amount, label FROM bill_lines WHERE invoice_id = ? AND kind = 'shipping'").get(i.id) ?? null,
       // 下書きを作ってから1日たっても送付済みにならない請求書は、強調する
@@ -581,6 +621,18 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     if (ctx.staff) audit(ctx, 'view.invoice', { target: `invoice:${i.number}`, after: { file: 'pdf' } });
     return sendFile(i, 'pdf');
   });
+  // 送付用のメールの文面（宛先・件名・本文）。下書きは、利用会社のメールソフトには届かないので、管理画面から写して送れるようにする（報告書 118 章）
+  route('GET', '/api/billing/invoices/:id/mail', (ctx, body, id) => {
+    needStaff(ctx, 'admin');
+    const inv = db.prepare("SELECT * FROM invoices WHERE id = ? AND kind <> 'cash'").get(id);
+    if (!inv) throw new HttpError(404, '請求書が見つかりません');
+    const all = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ? ORDER BY id').all(id);
+    const a = account(inv.account_id);
+    const org = Object.fromEntries(['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'].map((k) => [k, setting(k)]));
+    const mail = invoiceMail(inv, all.filter((l) => l.kind !== 'shipping'), all.filter((l) => l.kind === 'shipping'), a, org);
+    audit(ctx, 'view.invoice', { target: `invoice:${inv.number}`, after: { file: 'mail' } });
+    return { ok: true, to: a.email, subject: mail.subject, body: mail.body };
+  });
   route('GET', '/api/billing/invoices/:id/xlsx', (ctx, body, id) => {
     needStaff(ctx, 'admin'); // 落札者にも Excel を渡すかは未決（OQ-28）なので、主催者管理者だけ
     const i = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
@@ -638,7 +690,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const r = db.prepare('INSERT INTO bill_lines (kind, event_id, lot_id, participant_id, account_id, label, amount, parent_line_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
       .run(kind, l.event_id, l.lot_id, l.participant_id, l.account_id, `${kind === 'late' ? '遅延損害金' : '違約金'}（${l.label}）`, amount, l.id, nowMs());
     // 支払期限は、送付日の翌日から数えて7日目。休業日でも前に繰り上げない（FR-PEN-002）
-    const inv = issueInvoice('penalty', [Number(r.lastInsertRowid)], { dueDays: 7, shiftHoliday: false, draft: true });
+    const inv = issueInvoice('penalty', [Number(r.lastInsertRowid)], { dueDays: 7, draft: true });
     await inv.done;
     audit(ctx, 'billing.penalty', { target: `line:${id}`, after: { kind, amount, invoice: inv.number } });
     return { ok: true, invoice: inv.number };
@@ -792,6 +844,28 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
 
   // ------------------------------------------------------------ 手数料の集計（FR-FEE-001〜010）
   const ceilFee = (amount) => Math.ceil(amount * FEE_RATE / 100);
+  // その月の、手数料（差し引く前）と、差し引き
+  function feeRaw(month, all) {
+    const monthOf = (ms) => jst(ms).slice(0, 7);
+    const base = all.filter((c) => monthOf(c.cleared_at) === month && !(c.reversed_at && monthOf(c.reversed_at) === month)).reduce((s, c) => s + c.amount, 0);
+    const reversed = all.filter((c) => c.reversed_at && monthOf(c.reversed_at) === month && monthOf(c.cleared_at) < month);
+    const refunded = db.prepare(`SELECT r.*, l.amount AS line_amount, l.premium FROM refunds r JOIN bill_lines l ON l.id = r.line_id
+      WHERE substr(r.refunded_on, 1, 7) = ? AND l.kind IN ('lot','promote') AND EXISTS (SELECT 1 FROM clearings c WHERE c.line_id = l.id AND c.reversed_at IS NULL)`).all(month)
+      .map((r) => Math.min(r.line_amount, Math.round(r.amount * r.line_amount / (r.line_amount + (r.premium ?? 0)))));
+    return { gross: Math.floor(base * FEE_RATE / 100), deduction: reversed.reduce((s, c) => s + ceilFee(c.amount), 0) + refunded.reduce((s, h) => s + ceilFee(h), 0) };
+  }
+  // 前の月までの、差し引ききれなかった分（いちばん古い月から、順に計算する）
+  function feeCarry(month, all) {
+    const monthOf = (ms) => jst(ms).slice(0, 7);
+    const firsts = [all[0] ? monthOf(all[0].cleared_at) : null, db.prepare('SELECT MIN(substr(refunded_on, 1, 7)) AS m FROM refunds').get().m].filter(Boolean).sort();
+    if (!firsts.length || firsts[0] >= month) return 0;
+    let carry = 0;
+    for (let m = firsts[0]; m < month; m = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 1)).toISOString().slice(0, 7)) {
+      const r = feeRaw(m, all);
+      carry = Math.max(0, r.deduction + carry - r.gross);
+    }
+    return carry;
+  }
   function feeSummary(month) {
     if (!/^\d{4}-\d{2}$/.test(month)) throw bad('月を、2026-12 の形で指定してください');
     const monthOf = (ms) => jst(ms).slice(0, 7);
@@ -808,14 +882,18 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       .map((r) => ({ ...r, hammer: Math.min(r.line_amount, Math.round(r.amount * r.line_amount / (r.line_amount + (r.premium ?? 0)))) }));
     const deduction = reversed.reduce((s, c) => s + ceilFee(c.amount), 0) + refunded.reduce((s, r) => s + ceilFee(r.hammer), 0);
     // 手数料 = 落札額の合計 × 5%（1円未満は切り捨て。合計に対して1回だけ丸める）。買歩銭は、対象に含めていない【前提】
-    const fee = Math.max(0, Math.floor(base * FEE_RATE / 100) - deduction);
+    // 差し引きが、その月の手数料より多いときは、多い分を、次の月へ繰り越す（消えないように）
+    const carriedIn = feeCarry(month, all);
+    const gross = Math.floor(base * FEE_RATE / 100);
+    const fee = Math.max(0, gross - deduction - carriedIn);
+    const carriedOut = Math.max(0, deduction + carriedIn - gross);
     const minimum = Number(setting('fee_minimum')) || 0;         // 最低保証額（未決。OQ-19）
     const charge = Math.max(fee, minimum);
     const taxMode = setting('fee_tax_mode') === 'inclusive' ? 'inclusive' : 'exclusive'; // 外税 / 内税（FR-FEE-009）
     const tax = taxMode === 'exclusive' ? Math.floor(charge * 10 / 100) : 0;
     const confirm = db.prepare('SELECT * FROM fee_confirms WHERE month = ?').get(month);
     return {
-      month, base, rate: FEE_RATE, deduction, fee, minimum, charge, taxMode, tax, total: charge + tax,
+      month, base, rate: FEE_RATE, deduction, carriedIn, carriedOut, fee, minimum, charge, taxMode, tax, total: charge + tax,
       confirmedOn: confirm ? jst(confirm.confirmed_at) : null,
       // 根拠になる明細ごとの一覧（FR-FEE-006）
       details: [
@@ -865,7 +943,8 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
         const m = invoiceAmounts(i);
         // すべての明細を解除した請求書は「解除」（「お支払い済み」と出さない）。金額は、解除した明細を除いたもの
         return { id: i.id, number: i.number, kind: i.kind, issuedOn: jst(i.issued_at), total: m.due, issuedTotal: i.total, dueDate: i.due_date,
-          state: m.lines > 0 && m.cancelled === m.lines ? 'cancelled' : open === 0 ? 'paid' : i.sent_at && i.due_date && i.due_date < today() ? 'overdue' : 'billed' };
+          // 明細が1つも残っていない請求書（当日現金の精算を、すべて取り消したもの）は「取り消し」。「お支払い済み」とは出さない
+          state: m.lines === 0 ? 'void' : m.cancelled === m.lines ? 'cancelled' : open === 0 ? 'paid' : i.sent_at && i.due_date && i.due_date < today() ? 'overdue' : 'billed' };
       }),
     };
   });
@@ -904,7 +983,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const r = db.prepare("INSERT INTO bill_lines (kind, event_id, lot_id, participant_id, account_id, label, amount, premium, receive, parent_line_id, created_at) VALUES ('promote',?,?,?,?,?,?,?,?,?,?)")
       .run(src.event_id, src.lot_id, o.participant_id, o.account_id, `${src.label}（繰り上げ）`, o.amount, offerPremiumOf(o), p?.receive ?? null, src.id, nowMs());
     db.prepare("UPDATE offers SET state = 'accepted', answered_at = ?, new_line_id = ? WHERE id = ?").run(nowMs(), r.lastInsertRowid, id);
-    const inv = issueInvoice('promote', [Number(r.lastInsertRowid)], { dueDays: 5, shiftHoliday: true, draft: true });
+    const inv = issueInvoice('promote', [Number(r.lastInsertRowid)], { dueDays: 5, draft: true });
     await inv.done;
     audit(ctx, 'offer.accept', { target: `offer:${id}`, after: { invoice: inv.number, amount: o.amount } });
     return { ok: true, invoice: inv.number };

@@ -467,9 +467,22 @@ async function billingPanel() {
     nodes.push(el('h2', { class: 'subhead', text: '請求書' }),
       table(['請求番号', '宛先', '種類', '金額', '発行日', '送付・期限', ''], inv.invoices.map((i) => el('tr', {},
         el('td', { class: 'n', text: i.number }), el('td', { class: 'dyn', text: i.name }), el('td', { text: INV_KIND[i.kind] }), el('td', { class: 'n' }, i.cancelled ? [yen(i.total), el('br'), el('span', { class: 'note', text: `発行時 ${yen(i.issuedTotal)}・解除 ${i.cancelled}件` })] : yen(i.total)), el('td', { class: 'n', text: jpDay(i.issuedOn) }),
-        el('td', {}, i.kind === 'cash' ? 'その場で渡した' : el('span', { class: !i.sentOn && i.stale ? 'warn' : '', text: `${i.sentOn ? `送付 ${jpDay(i.sentOn)}` : i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付'}　期限 ${jpDay(i.dueDate)}` })),
+        el('td', {}, i.void ? el('span', { class: 'warn', text: '精算を取り消した（無効）' }) : i.kind === 'cash' ? 'その場で渡した' : el('span', { class: !i.sentOn && i.stale ? 'warn' : '', text: `${i.sentOn ? `送付 ${jpDay(i.sentOn)}` : i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付'}　期限 ${jpDay(i.dueDate)}` })),
         act(el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: 'PDF' }), el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/xlsx`, text: 'Excel' }),
           !['cash', 'penalty'].includes(i.kind) && !i.sentOn && smallBtn(i.shipping ? `送料 ${yen(i.shipping.amount)}` : '送料を入力', () => shippingForm(i.accountId, i.eventId, i.name, i.shipping)),
+          i.kind !== 'cash' && !i.sentOn && smallBtn('メールの文面', async () => {
+            const m = await api('GET', `/api/billing/invoices/${i.id}/mail`);
+            if (!m.ok) return alertLine(m.message);
+            const text = el('textarea', { class: 'input', rows: 14, readonly: true, 'aria-label': '本文' }); text.value = m.body;
+            const copied = el('span', { class: 'note', role: 'status' });
+            openDialog('請求メールの文面', el('p', { class: 'note', text: 'PDF を添えて、ご自分のメールから送ってください。送ったら「送付済みにする」を押します。' }),
+              el('dl', { class: 'facts' }, el('dt', { text: '宛先' }), el('dd', { class: 'dyn', text: m.to || '（メールアドレスの登録なし）' }), el('dt', { text: '件名' }), el('dd', { class: 'dyn', text: m.subject })),
+              text,
+              el('div', { class: 'actions' },
+                smallBtn('本文を写す', async () => { try { await navigator.clipboard.writeText(m.body); copied.textContent = '写しました'; } catch { text.select(); copied.textContent = '選びました。コピーしてください'; } }, 'btn-primary'),
+                m.to && el('a', { class: 'btn', href: `mailto:${encodeURIComponent(m.to)}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`, text: 'メールソフトで開く' }),
+                closeBtn(), copied));
+          }),
           i.kind !== 'cash' && (i.sentOn ? smallBtn('送付を取り消す', () => post(`/api/billing/invoices/${i.id}/unsent`)) : smallBtn('送付済みにする', () => post(`/api/billing/invoices/${i.id}/sent`), 'btn-primary'))))), '請求書は、まだありません。'),
       moreBtn('invoices', inv, '請求書の一覧'));
   }
@@ -492,7 +505,8 @@ async function feesPanel() {
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     el('dl', { class: 'facts' },
       el('dt', { text: '対象の落札額（消し込み済み・税込）' }), el('dd', { class: 'n', text: yen(f.base) }),
-      el('dt', { text: `手数料（${f.rate}%。差し引き ${yen(f.deduction)}）` }), el('dd', { class: 'n', text: yen(f.fee) }),
+      el('dt', { text: `手数料（${f.rate}%。差し引き ${yen(f.deduction)}${f.carriedIn ? `、前の月からの繰り越し ${yen(f.carriedIn)}` : ''}）` }), el('dd', { class: 'n', text: yen(f.fee) }),
+      ...(f.carriedOut ? [el('dt', { text: '引ききれなかった分（次の月へ繰り越し）' }), el('dd', { class: 'n', text: yen(f.carriedOut) })] : []),
       el('dt', { text: '最低保証額' }), el('dd', { class: 'n', text: yen(f.minimum) }),
       el('dt', { text: `消費税（${f.taxMode === 'exclusive' ? '外税' : '内税'}）` }), el('dd', { class: 'n', text: f.taxMode === 'exclusive' ? yen(f.tax) : '手数料に含む' }),
       el('dt', { text: '請求額' }), el('dd', { class: 'n paddle', text: yen(f.total) })),

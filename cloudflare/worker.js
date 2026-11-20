@@ -127,6 +127,8 @@ export class AuctionApp extends DurableObject {
         // メールの送信がつながっていれば、実際に送る。SMS は使わない（発注者の決定）ので、本番では、電話番号での認証を止める
         ...(mail ? { POC_MAIL_URL: `http://${MAIL_HOST}` } : {}),
         ...(demo ? {} : { POC_SMS: '0', POC_TOKEN_LOGIN: '0', POC_REQUIRE_SETUP: '1' }),
+        // 手で古い写しへ戻すときだけ入れる（wrangler secret put RESTORE_SKIP_JOURNAL）。戻した時点より後の書き込みを、やり直させない。戻したら、消す
+        ...(this.env.RESTORE_SKIP_JOURNAL === '1' ? { POC_JOURNAL_REPLAY: '0' } : {}),
         // 管理者（admin）の最初のパスワード。ソースには書かず、wrangler secret put ADMIN_PASSWORD で入れる
         ...(this.env.ADMIN_PASSWORD ? { POC_ADMIN_PASSWORD: this.env.ADMIN_PASSWORD } : {}),
         // 最初の主催者管理者のメールアドレス（秘密の値。ソースには書かない）。あれば、起動のときに登録する

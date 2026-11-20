@@ -88,7 +88,8 @@ export async function restore(config, { retries = 20, waitMs = 1500, log = conso
   if (candidates.length && !count) throw new Error('保存先のデータベースと控えの、どれも開けません');
   // 1.5) 書き込みの控え（ジャーナル）: 戻した写しより新しい書き込みを、順番にやり直す（写しは約2秒ごとなので、そのあいだの入札・落札を取り戻す）
   const journalFiles = manifest.files.map((f) => ({ rel: f.path, ...parseJournalKey(f.path) })).filter((f) => f.first);
-  if (count && journalFiles.length) {
+  if (count && journalFiles.length && config.journalReplay === false) log('【注意】書き込みの控えは、やり直しません（POC_JOURNAL_REPLAY=0。手で古い写しへ戻すときの設定）');
+  else if (count && journalFiles.length) {
     const d = new Database(config.dbPath);
     try {
       const r = await replayJournal(d, journalFiles, get, { log });

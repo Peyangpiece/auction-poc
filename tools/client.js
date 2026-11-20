@@ -7,6 +7,7 @@ export const localNow = () => performance.timeOrigin + performance.now();
 
 export class Client {
   constructor(url, token, { label = null, ack = true, net = null, autoReconnect = false, headers = undefined } = {}) {
+    this.hello = null; // 名乗りに足す項目（あれば）
     this.headers = headers; // ログインのクッキーで名乗るとき（合言葉なし）に使う
     this.autoReconnect = autoReconnect;
     this.reconnects = 0;

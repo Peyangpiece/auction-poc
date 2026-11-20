@@ -173,7 +173,6 @@ $('startInput').addEventListener('input', () => { S.editing = true; const n = pa
 $('startInput').addEventListener('focus', () => { S.editing = true; $('startInput').select(); });
 $('startForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
-  const lot = current();
   const amount = parseAmount($('startInput').value);
   if (!amount) return say('開始値を入れてください');
   const res = await cmd('set_start', { amount });

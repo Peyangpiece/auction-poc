@@ -1,3 +1,4 @@
+import { migrate } from '../migrate.js';
 import crypto from 'node:crypto';
 // MVP の 1（会員登録・認証・スタッフ）の API と、開催・主催者設定・監査ログ。
 // 商品は、競りの最中に進行コンソールからその場で登録する（発注者の決定）ので、事前の登録・審査・カタログは持たない。
@@ -6,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { MVP_SCHEMA, DEFAULT_SETTINGS } from './schema.js';
 import {
-  randomToken, sha256, safeEqual, hashPassword, verifyPassword, newTotpSecret, verifyTotp, totp, otpauthUrl,
+  randomToken, sha256, safeEqual, hashPassword, verifyPassword, newTotpSecret, otpauthUrl,
   newOtpCode, normalizePhone, isEmail,
 } from './security.js';
 import { clientIp } from './security.js';
@@ -117,6 +118,10 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = 'pii_purged_at'").get()) db.exec('ALTER TABLE member_accounts ADD COLUMN pii_purged_at REAL');
   // 開催のお知らせメールを送った記録（同じ開催の同じ会員に、2度送らない）
   db.exec('CREATE TABLE IF NOT EXISTS event_mails (event_id INTEGER NOT NULL, account_id INTEGER NOT NULL, at REAL NOT NULL, PRIMARY KEY (event_id, account_id))');
+  // ここから下の、形の変更は、番号を付けて1回ずつ行う（migrate.js。一度配った手順は、書き換えない）
+  migrate(db, 'api', [
+    { v: 1, name: 'お知らせメールの失敗の回数', up: (d) => d.exec('CREATE TABLE event_mail_fails (event_id INTEGER NOT NULL, account_id INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (event_id, account_id))') },
+  ], { nowMs });
   for (const [col, type] of [['fails', 'INTEGER NOT NULL DEFAULT 0'], ['fails_from', 'REAL NOT NULL DEFAULT 0']]) {
     if (!db.prepare("SELECT 1 FROM pragma_table_info('otp_codes') WHERE name = ?").get(col)) db.exec(`ALTER TABLE otp_codes ADD COLUMN ${col} ${type}`);
   }
@@ -868,7 +873,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   /** スタッフを作る。最初の主催者管理者は、tools/create-admin.js から呼ぶ */
   // ---- メールアドレスで登録するスタッフ（パスワードは、本人が最初のログインで決める）
   const SETUP_LIFETIME = 7 * DAY; // 登録してから、パスワードを決められる期限
-  function inviteStaff({ email, name, role, phone }) {
+  function inviteStaff({ email, name, role, phone = undefined }) {
     const mail = String(email ?? '').trim().toLowerCase();
     if (!isEmail(mail)) throw bad('メールアドレスを正しく入力してください');
     if (!ROLE_LABEL[role]) throw bad('役割を選んでください');
@@ -908,7 +913,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
     // お試し用の設定のときだけ、登録した主催者管理者の画面に、リンクを返す（メールの送信がつながる前に、動きを確かめるため）
     return config.devShowCodes && ctx.staff ? { devSetupUrl: url } : {};
   }
-  function createStaff({ loginId, name, role, phone, password: given }) {
+  function createStaff({ loginId, name, role, phone = undefined, password: given = undefined }) {
     const id = String(loginId ?? '').trim();
     if (!/^[a-z0-9._-]{3,32}$/.test(id)) throw bad('ログイン ID は、半角の英小文字・数字・記号（. _ -）で 3〜32 文字にしてください');
     if (!ROLE_LABEL[role]) throw bad('役割を選んでください');
@@ -1175,10 +1180,16 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
         AND NOT EXISTS (SELECT 1 FROM event_mails x WHERE x.event_id = ? AND x.account_id = a.id) ORDER BY a.id`).all(e.id);
       let count = 0;
       for (const a of targets) {
-        // 送る前に記録する（送信が失敗しても、同じ人に何度も送り直さない。失敗は、主催者管理者への知らせに残る）
+        // 送る前に記録する（途中で止まっても、同じ人に二重に送らない）
         const fresh = db.prepare('INSERT OR IGNORE INTO event_mails (event_id, account_id, at) VALUES (?, ?, ?)').run(e.id, a.id, nowMs());
         if (!fresh.changes || !isEmail(a.email)) continue;
-        await notifier.email(a.email, 'event', subject, eventMailText(e, a, when));
+        const ok = await notifier.email(a.email, 'event', subject, eventMailText(e, a, when));
+        // 送れなかったとき（再送3回のあと）は、記録を消して、次の見回りで、もう一度送る。同じ人に、3回の見回りまで（それでも送れなければ、あきらめる。失敗は、知らせに残る）
+        if (!ok) {
+          db.prepare('INSERT INTO event_mail_fails (event_id, account_id, n) VALUES (?, ?, 1) ON CONFLICT(event_id, account_id) DO UPDATE SET n = n + 1').run(e.id, a.id);
+          if (db.prepare('SELECT n FROM event_mail_fails WHERE event_id = ? AND account_id = ?').get(e.id, a.id).n < 3) db.prepare('DELETE FROM event_mails WHERE event_id = ? AND account_id = ?').run(e.id, a.id);
+          continue;
+        }
         sent++; count++;
         // 送信サービスの速さの上限（1秒に2通ほど）に当たらないように、少しあける
         if (config.mailIntervalMs) await new Promise((r) => setTimeout(r, config.mailIntervalMs));
@@ -1454,7 +1465,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
       ...(body.kobutsuLicense !== undefined ? { kobutsu_license: String(body.kobutsuLicense ?? '').trim().slice(0, 100) } : {}),
       return_policy: String(body.returnPolicy ?? '').trim().slice(0, 2000),
       shipping_notice: String(body.shippingNotice ?? '').trim().slice(0, 1000),
-      ...Object.fromEntries(Object.entries(BILLING_KEYS).filter(([k]) => body[k] !== undefined).map(([k, [key, max]]) => [key, String(body[k] ?? '').trim().slice(0, max)])),
+      ...Object.fromEntries(Object.entries(BILLING_KEYS).filter(([k]) => body[k] !== undefined).map(([k, [key, max]]) => [key, String(body[k] ?? '').trim().slice(0, Number(max))])),
     };
     for (const k of billing.fixedKeys()) next[k] = setting(k); // 原本の値で固定している項目は、変えない
     if (!next.org_name || !next.return_policy || !next.shipping_notice) throw bad('名称・返品特約・送料の表示は、空にできません');
