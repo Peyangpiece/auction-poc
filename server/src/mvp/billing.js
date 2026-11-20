@@ -959,5 +959,12 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     return { overdue: overdue.length, pickup };
   }
 
-  return { syncLines, onEventEnd, suspension, sweep, feeSummary, premiumRate, fixedKeys, sealFixed };
+  // 発行者の情報（名称・住所・登録番号・振込先）を変えたとき: まだ送っていない振込の請求書を、新しい内容で作り直す
+  // （振込先が未設定のまま発行した請求書に、「（未設定）」が残り続けないように）。送付済みのものは、送ったときのままにする
+  function rerenderUnsent() {
+    const ids = db.prepare("SELECT id FROM invoices WHERE kind <> 'cash' AND sent_at IS NULL").all().map((r) => r.id);
+    for (const id of ids) renderInvoice(id).done.catch((err) => console.error('[invoice] 作り直しに失敗しました', id, err?.message ?? err));
+    return ids.length;
+  }
+  return { syncLines, onEventEnd, suspension, sweep, feeSummary, premiumRate, fixedKeys, sealFixed, rerenderUnsent };
 }

@@ -275,7 +275,7 @@ try {
   check((await phone.textContent('#gateEvent')).includes('参加番号1'), '手続きが済むと、参加番号 1 が振られ、そのまま入札画面に入る');
   await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
-  await phone.waitForFunction(() => document.getElementById('bid').textContent === '入札');
+  await phone.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');
   await phone.click('#bid');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('9,500'));
   check((await phone.textContent('#priceTotal')).includes('買歩銭（10%）込み ¥10,450'), '入札画面の価格の下に、買歩銭を足した金額を出す');
@@ -354,7 +354,7 @@ try {
   await guest.waitForSelector('#enter:not([hidden])', { timeout: 15000 });
   check(await guest.isHidden('#checkinQr'), '受付係が来場を確認すると、本人の画面が自動で進めるようになる（QR コードは消える）');
   await guest.click('#enter');
-  await guest.waitForFunction(() => document.getElementById('bid').textContent === '入札');
+  await guest.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');
   check(await guest.isDisabled('#showVideo'), '会場参加の画面には、映像を出さない');
   await guest.click('#bid');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('10,000'));

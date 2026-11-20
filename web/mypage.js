@@ -73,10 +73,12 @@ const INVOICE_STATE = { paid: 'お支払い済み', overdue: 'お支払いの期
 // 品は、その請求書の中に並べる（同じ品を「落札した品」に二度出さない。報告書 85 章）。
 // 品ごとの状態は、請求書の状態と違うとき（お渡し済み・解除など）と、受け取りの期限だけを書き添える
 const ITEM_NOTE = { delivered: 'お渡し済み', cancelled: '解除されました' };
+// 受け取り方: 配送の人には、送料が別にかかること。現地の人には、会場で受け取ること
+const RECEIVE_NOTE = { pickup: '受け取り: 会場で', ship: '受け取り: 配送（送料は、別にご請求します）' };
 function invoiceItems(lines) {
   if (!lines.length) return null;
   return el('ul', { class: 'invitems' }, lines.map((l) => {
-    const note = [l.premium ? `落札額 ${yen(l.amount)}＋買歩銭 ${yen(l.premium)}` : '', ITEM_NOTE[l.state], l.pickupBy && l.state === 'cleared' ? `受け取り期限 ${jpDay(l.pickupBy)}` : ''].filter(Boolean).join('　');
+    const note = [l.premium ? `落札額 ${yen(l.amount)}＋買歩銭 ${yen(l.premium)}` : '', ITEM_NOTE[l.state], l.receive && l.state !== 'delivered' && l.state !== 'cancelled' && RECEIVE_NOTE[l.receive], l.pickupBy && l.state === 'cleared' ? `受け取り期限 ${jpDay(l.pickupBy)}` : ''].filter(Boolean).join('　');
     return el('li', {}, el('span', { class: 'dyn', text: l.label }), el('span', { class: 'digits', text: yen(l.payable) }),
       note ? el('span', { class: l.pickupLate ? 'warn' : 'note', text: note }) : null);
   }));
@@ -85,10 +87,13 @@ function showInvoices(list, lines = [], bank = null) {
   if (!list.length) return;
   // お支払い前の請求書があれば、振込先を一覧の上に出す（請求書の PDF を開かなくても振り込めるように。本番運用の評価 C）
   const unpaid = list.filter((i) => i.state === 'billed' || i.state === 'overdue');
+  // 振込先がまだ設定されていないときは、そのことを書く（期限と金額だけが出て、払い方が分からない、を無くす）
+  const noBank = !bank && unpaid.length ? el('div', { class: 'banner bankbox', role: 'note' },
+    el('b', { text: 'お振込先' }), el('p', { text: 'お振込先は、準備中です。主催者からのご案内をお待ちください。お急ぎの場合は、主催者へお問い合わせください。' })) : null;
   const bankBox = bank && unpaid.length ? el('div', { class: 'banner bankbox', role: 'note' },
     el('b', { text: 'お振込先' }), el('p', { class: 'dyn bank', text: bank }),
     el('p', { class: 'note', text: `ご依頼人名の前に、請求書番号（${unpaid.map((i) => i.number).join('・')}）を入れてください。` })) : null;
-  $('#invoices').replaceChildren(...[bankBox].filter(Boolean), el('ul', { class: 'rows invlist' }, list.map((i) => el('li', {},
+  $('#invoices').replaceChildren(...[bankBox, noBank].filter(Boolean), el('ul', { class: 'rows invlist' }, list.map((i) => el('li', {},
     el('div', { class: 'invlist__main' },
       el('b', { text: `${jpDay(i.issuedOn)}の請求書` }),
       el('span', { class: 'note', text: [`No.${i.number}`, i.dueDate && i.state !== 'paid' && i.state !== 'cancelled' ? `お支払期限 ${jpDay(i.dueDate)}` : ''].filter(Boolean).join('　') })),
@@ -136,6 +141,8 @@ async function loadBilling() {
     el('span', {},
       el('button', { class: 'btn btn-primary', type: 'button', text: '承諾する', onclick: () => answerOffer(o, 'accept') }), ' ',
       el('button', { class: 'btn', type: 'button', text: '辞退する', onclick: () => answerOffer(o, 'decline') })))));
+  // まだ請求書になっていない品があるとき: いつ・どう払うかを書く
+  $('#payGuide').hidden = !res.lines.some((l) => l.state === 'unsettled');
   $('#myLines').replaceChildren(...res.lines.map((l) => el('li', {},
     el('b', { text: l.label }), el('span', { class: 'digits', text: yen(l.payable) }),
     el('span', { class: 'tag', 'data-state': l.state, text: STATE_TEXT[l.state] }),

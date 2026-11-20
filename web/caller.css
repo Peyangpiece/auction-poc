@@ -4,13 +4,13 @@ html, body { height: 100%; }
 body { overflow: hidden; background: var(--ground); }
 .app { height: 100dvh; display: grid; grid-template-rows: auto 1fr; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--line); }
-.bar__role { font-size: 15px; font-weight: 600; color: var(--ink-2); }
-.bar__meta { display: flex; align-items: center; gap: 16px; font-size: 15px; color: var(--ink-2); }
+.bar__role { font-size: 0.9375rem; font-weight: 600; color: var(--ink-2); }
+.bar__meta { display: flex; align-items: center; gap: 16px; font-size: 0.9375rem; color: var(--ink-2); }
 /* 中断は、上の帯に小さく置く（親指から遠い所。締め・開始と押しまちがえないように）。中断中は、いちばん下の大きなボタンが「再開」になる */
-.barbtn { min-height: 44px; padding: 4px 16px; font-size: 15px; } /* 指で押せる大きさ（44px）。報告書 82 章 */
+.barbtn { min-height: 44px; padding: 4px 16px; font-size: 0.9375rem; } /* 指で押せる大きさ（44px）。報告書 82 章 */
 .barbtn[hidden] { display: none; }
 /* トップページへ戻る（競りの時間外だけ） */
-.homelink { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; font-size: 17px; font-weight: 500; color: var(--action); text-decoration: none; }
+.homelink { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; font-size: 1.0625rem; font-weight: 500; color: var(--action); text-decoration: none; }
 .homelink[hidden] { display: none; }
 .homelink svg { width: 12px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -23,30 +23,30 @@ body { overflow: hidden; background: var(--ground); }
 .lot__name { font-size: clamp(18px, 2.6dvh, 26px); font-weight: 700; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 #lotNo { color: var(--ink-2); margin-right: .5em; }
 #lotNo:empty { display: none; }
-.lot .state[data-st] { flex: none; padding: 4px 12px 4px 10px; border-radius: 999px; background: var(--ground); font-size: 15px; }
+.lot .state[data-st] { flex: none; padding: 4px 12px 4px 10px; border-radius: 999px; background: var(--ground); font-size: 0.9375rem; }
 .lot .state[data-st]::before { border: 0; width: 9px; height: 9px; background: #8e8e93; }
 .lot .state[data-st="open"]::before { background: #30d158; }
 .lot .state[data-st="suspended"]::before { background: #ff9f0a; }
 .lot .state[data-st="preparing"]::before, .lot .state[data-st="preparing_warn"]::before { background: #ffd60a; }
-.lot__label { font-size: 15px; color: var(--board-ink-2); margin-top: clamp(0px, 1dvh, 8px); }
+.lot__label { font-size: 0.9375rem; color: var(--board-ink-2); margin-top: clamp(0px, 1dvh, 8px); }
 .lot__price { font-size: clamp(30px, min(30cqh, 17cqw), 150px); line-height: 1; letter-spacing: -.02em; font-weight: 700; }
 .facts { list-style: none; padding: 0; margin: clamp(4px, 1.4dvh, 14px) 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .facts li { display: grid; gap: 2px; min-width: 0; }
-.facts span { font-size: 13px; color: var(--board-ink-2); }
+.facts span { font-size: 0.8125rem; color: var(--board-ink-2); }
 .facts b { font-size: clamp(17px, 2.6dvh, 24px); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #urikiriState[data-on="1"] { color: var(--ok); }
 
 /* 開始値 */
 .start { display: grid; gap: 8px; }
 .start__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.start h2 { font-size: 17px; }
-.start__note { font-size: 14px; color: var(--ink-2); text-align: right; }
+.start h2 { font-size: 1.0625rem; }
+.start__note { font-size: 0.875rem; color: var(--ink-2); text-align: right; }
 .start__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 8px; }
-.step { min-width: 56px; font-size: 24px; font-weight: 500; padding: 0; }
+.step { min-width: 56px; font-size: 1.5rem; font-weight: 500; padding: 0; }
 .amount { display: flex; align-items: center; gap: 6px; padding: 0 14px; min-height: 52px; border: 1px solid var(--edge); border-radius: var(--r); background: var(--field); cursor: text; }
 .amount:focus-within { border-color: var(--action); box-shadow: 0 0 0 3px var(--ring); }
-.amount .yen { font-size: 20px; font-weight: 600; color: var(--ink-2); }
-.amount input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; padding: 0; color: var(--ink); font: 600 24px/1 var(--font); font-variant-numeric: tabular-nums; }
+.amount .yen { font-size: 1.25rem; font-weight: 600; color: var(--ink-2); }
+.amount input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; padding: 0; color: var(--ink); font: 600 1.5rem/1 var(--font); font-variant-numeric: tabular-nums; }
 .start__row .btn { min-height: 52px; }
 /* 始まる前は「変更」を出さない（欄の金額で、そのまま開始する） */
 .start__row #setStart[hidden] { display: none; }
@@ -58,7 +58,7 @@ body { overflow: hidden; background: var(--ground); }
 .act { appearance: none; border: 0; border-radius: var(--r-lg); padding: 12px 16px; min-height: clamp(64px, 11dvh, 104px); display: grid; align-content: center; justify-items: center; gap: 4px; font: inherit; cursor: pointer; text-align: center;
   transition: background-color .15s var(--ease), transform .12s var(--ease), opacity .15s var(--ease); }
 .act b { font-size: clamp(22px, 3.6dvh, 32px); font-weight: 700; line-height: 1.2; }
-.act span { font-size: 14px; line-height: 1.35; }
+.act span { font-size: 0.875rem; line-height: 1.35; }
 .act span:empty { display: none; }
 .act:active:not(:disabled) { transform: scale(.98); }
 /* 押せないときは、色を抜いた灰色の面（紺や赤が薄く濁って見えないように）。理由は、ボタンの中の小さな文字で出す */
@@ -70,7 +70,7 @@ body { overflow: hidden; background: var(--ground); }
 .act--close { grid-area: close; background: var(--action); color: var(--action-ink); min-height: clamp(76px, 14dvh, 132px); }
 .act--close:hover:not(:disabled) { background: var(--action-hover); }
 .act--close b { font-size: clamp(28px, 4.6dvh, 40px); }
-.msg { min-height: 1.4em; font-size: 15px; font-weight: 600; color: var(--danger); text-align: center; }
+.msg { min-height: 1.4em; font-size: 0.9375rem; font-weight: 600; color: var(--danger); text-align: center; }
 .msg[data-kind="ok"] { color: var(--ink-2); font-weight: 500; }
 
 dialog .actions .btn { flex: 1; min-height: 52px; }
@@ -90,9 +90,9 @@ dialog p { white-space: pre-line; }
 /* 低い画面（スマホの横向きなど）: 文字を詰める */
 @media (max-height: 560px) {
   .facts span { display: none; }
-  .act span { font-size: 12px; }
-  .act b { font-size: 20px; }
-  .act--close b { font-size: 24px; }
+  .act span { font-size: 0.75rem; }
+  .act b { font-size: 1.25rem; }
+  .act--close b { font-size: 1.5rem; }
   .bar { padding-top: 6px; padding-bottom: 6px; }
 }
 /* スマホ: 開始値は1行（−・金額・＋・変更）。左右の余白を詰める */
@@ -100,18 +100,18 @@ dialog p { white-space: pre-line; }
   .stage { padding-left: 16px; padding-right: 16px; }
   .step { min-width: 48px; }
   .start__row #setStart { padding: 8px 14px; }
-  .amount input { font-size: 22px; }
+  .amount input { font-size: 1.375rem; }
 }
 /* 幅の狭いスマホ（320〜360px）: 開始値の欄に、6桁の金額が収まるように詰める */
 @media (max-width: 360px) {
   #clock { display: none; }
-  .step { min-width: 44px; font-size: 22px; }
+  .step { min-width: 44px; font-size: 1.375rem; }
   .amount { padding: 0 10px; gap: 4px; }
-  .amount .yen { font-size: 17px; }
-  .amount input { font-size: 20px; }
+  .amount .yen { font-size: 1.0625rem; }
+  .amount input { font-size: 1.25rem; }
   .start__row { gap: 6px; }
   .start__row #setStart { padding: 8px 12px; }
-  .lot .state[data-st] { font-size: 13px; padding: 3px 10px 3px 8px; }
+  .lot .state[data-st] { font-size: 0.8125rem; padding: 3px 10px 3px 8px; }
   .facts { gap: 8px; }
 }
 /* 価格の面が低いとき（小さいスマホ）: 品名は1行、見出しの小さな文字は省く */
@@ -128,15 +128,15 @@ dialog.sheet[open] { animation: sheet-in .28s var(--ease); }
 @media (prefers-reduced-motion: reduce) { dialog.sheet[open] { animation: none; } }
 @media (min-width: 640px) { dialog.sheet { margin: auto; border-radius: 24px; } }
 #sheetForm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; } /* 列の幅は、シートの幅に合わせる（長い品名で広がらないように） */
-.sheet__lot { font-size: 15px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sheet h2 { font-size: 22px; margin: 0; }
+.sheet__lot { font-size: 0.9375rem; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet h2 { font-size: 1.375rem; margin: 0; }
 .amount--lg { min-height: 72px; }
-.amount--lg .yen { font-size: 28px; }
-.amount--lg input { font-size: 40px; font-weight: 700; }
-.sheet__err { min-height: 0; font-size: 15px; font-weight: 600; color: var(--danger); }
+.amount--lg .yen { font-size: 1.75rem; }
+.amount--lg input { font-size: 2.5rem; font-weight: 700; }
+.sheet__err { min-height: 0; font-size: 0.9375rem; font-weight: 600; color: var(--danger); }
 .sheet__err:empty { display: none; }
 .sheet__go { grid-area: auto; width: 100%; min-height: 96px; } /* 画面の「締め」と同じ見た目。置き場所の指定（grid-area）は引き継がない */
-.textbtn { appearance: none; border: 0; background: none; padding: 12px; min-height: 44px; font: 600 17px/1.3 var(--font); color: var(--action); cursor: pointer; justify-self: center; }
+.textbtn { appearance: none; border: 0; background: none; padding: 12px; min-height: 44px; font: 600 1.0625rem/1.3 var(--font); color: var(--action); cursor: pointer; justify-self: center; }
 .textbtn:hover { text-decoration: underline; text-underline-offset: 4px; }
 
 /* ==== リキッドグラス（報告書 77 章） ==== */
@@ -165,6 +165,6 @@ dialog.sheet { background: var(--glass-tint-strong); }
 .offhours[hidden], .stage[hidden], .offhours__next[hidden] { display: none; } /* 次の開催がないときは、枠ごと出さない */
 .offhours__title { margin: 0; font-size: clamp(24px, 3.4dvh, 34px); font-weight: 700; letter-spacing: 0; color: var(--ink); text-wrap: balance; }
 .offhours__next { display: grid; gap: 6px; justify-items: center; padding: 20px 28px; border-radius: var(--r-lg); background: var(--board); min-width: min(320px, 100%); }
-.offhours__label { font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.offhours__label { font-size: 0.875rem; font-weight: 600; color: var(--ink-2); }
 .offhours__date { font-size: clamp(28px, 4.4dvh, 44px); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; }
-.offhours__info { font-size: 15px; color: var(--ink-2); text-wrap: balance; }
+.offhours__info { font-size: 0.9375rem; color: var(--ink-2); text-wrap: balance; }

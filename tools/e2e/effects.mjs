@@ -15,7 +15,7 @@ try {
   await con.fill('#newTitle', '古い柱時計'); await con.fill('#newPrice', '9500'); await con.click('#create');
   await con.waitForSelector('#b_next:not([hidden])'); await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
-  await b1.waitForFunction(() => document.getElementById('bid').textContent === '入札');
+  await b1.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');
   await b1.click('#bid');
   await b1.waitForFunction(() => document.getElementById('board').classList.contains('bidpop'));
   check(true, '自分の入札が受理されたら、板に演出が出る');
@@ -44,7 +44,7 @@ try {
   await con.fill('#newTitle', '漆の盆'); await con.fill('#newPrice', '3000'); await con.click('#create');
   await con.waitForSelector('#b_next:not([hidden])'); await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
-  await b1.waitForFunction(() => document.getElementById('bid').textContent === '入札'); await b1.waitForTimeout(700);
+  await b1.waitForFunction(() => document.getElementById('bid').dataset.ready === '1'); await b1.waitForTimeout(700);
   await b1.click('#bid'); await b1.waitForFunction(() => document.getElementById('right').classList.contains('on'));
   if (await con.isVisible('#b_urikiri')) { await con.click('#b_urikiri'); await con.click('#dlgOk'); await con.waitForTimeout(300); } // 最低落札額のない品は、うりきりを押してから締める（報告書 89 章）
   await con.click('#b_close'); await con.click('#dlgOk'); // 締めは確かめてから

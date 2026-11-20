@@ -75,7 +75,7 @@
 <div class="winfx" id="winFx" aria-hidden="true" hidden>
   <div class="wincard"><svg class="wincheck" viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="28"/><path d="M17 29l7.5 7.5L40 21"/></svg><span class="wintitle">落札しました</span><b class="dyn" id="winTitle"></b><span class="digits winprice" id="winPrice"></span></div>
 </div>
-<div class="overlay" id="overlay" role="alert"><div><span id="overlayText">再接続中…</span></div></div>
+<div class="overlay" id="overlay" role="alert"><div><span id="overlayText">再接続中…</span><small id="overlayNote">つながるまで、入札はできません。直前の入札が届いたかは、つながったあとの「入札の履歴」でお確かめください。</small></div></div>
 
 <header class="brandbar">
   <div>
@@ -115,6 +115,7 @@
         </div>
       </div>
       <p class="board-result" id="result" role="status"></p>
+      <p class="board-resultsub" id="resultSub"></p>
       <a class="btn paylink" id="toPay" href="/mypage.html" hidden>お支払いの確認へ</a>
       <div class="lamps">
         <div class="lamp" id="urikiri" role="img"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub"></small></div>

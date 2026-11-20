@@ -99,6 +99,8 @@ export function loadConfig(env = process.env) {
     // 書き込みの控え（受理した入札を、返事の前に、外の保存先へ書く）。0 で止める。保存先に届かないとき、返事を待たせる上限（ミリ秒）
     // 開いたままの画面の、ログインの確かめ直しの間隔（ミリ秒）
     sessionRecheckMs: num(env.POC_SESSION_RECHECK_MS, 10000),
+    // 公開の前に入れておく項目（規約・振込先など）がそろうまで、開催を公開させない。本番の設定では 1
+    requireSetup: env.POC_REQUIRE_SETUP === '1',
     journal: env.POC_JOURNAL !== '0',
     journalMaxWaitMs: num(env.POC_JOURNAL_MAX_WAIT_MS, 3000),
     persistIntervalMs: num(env.POC_PERSIST_INTERVAL_MS, 2000),

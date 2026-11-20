@@ -73,14 +73,14 @@ try {
   await shot(con, 'console-camera');
 
   console.log('入札');
-  await b1.waitForFunction(() => document.getElementById('bid').textContent === '入札');
+  await b1.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');
   check(true, '入ってすぐ、入札できる（切り替えは要らない）');
   await b1.click('#bid');
   await b1.waitForFunction(() => document.getElementById('right').classList.contains('on'));
   check(!(await b1.evaluate(() => document.getElementById('urikiri').classList.contains('on'))), '最低落札額に届く前は、「うりきり」は消えている');
   check(!(await b1.content()).includes('11,000'), '最低落札額の金額は、参加者の画面のどこにも出ない');
   await shot(b1, 'bidder-urikiri-before');
-  await b2.waitForFunction(() => document.getElementById('bid').textContent === '入札');
+  await b2.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');
   await shot(b2, 'bidder-joined');
   await b2.waitForTimeout(700); // 金額が変わった直後は押せない時間がある
   await b2.click('#bid');

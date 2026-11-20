@@ -1052,11 +1052,23 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
     audit(ctx, 'event.update', { target: `event:${id}`, before: eventView(before), after: { ...e, status } });
     return { ok: true };
   });
+  // 公開の前に入れておく項目のうち、まだ入っていないもの
+  function setupLacking() {
+    return [
+      !setting('legal_terms') && '利用規約', !setting('legal_privacy') && 'プライバシーポリシー', !setting('legal_tokushoho') && '特定商取引法に基づく表示',
+      /【仮/.test(setting('return_policy')) && '返品特約（仮の文言のまま）', !setting('bank_account') && '振込先', !setting('kobutsu_license') && '古物商の許可の表示',
+    ].filter(Boolean);
+  }
   route('POST', '/api/events/:id/publish', (ctx, body, id) => {
     needStaff(ctx, 'admin');
     const e = db.prepare('SELECT * FROM events WHERE id = ?').get(id);
     if (!e) throw new HttpError(404, '開催が見つかりません');
     if (!e.notified) throw new HttpError(409, '公安委員会への届出済みの印がない開催は、公開できません');
+    // 本番の設定では、会員に見せる・請求書に載せる項目がそろうまで、公開できない（規約が「準備中」のまま、振込先が無いまま、開催しないように）
+    if (config.requireSetup) {
+      const lacking = setupLacking();
+      if (lacking.length) throw new HttpError(409, `公開の前に、次の項目を入れてください: ${lacking.join('、')}（管理の「設定」）`, { lacking });
+    }
     db.prepare("UPDATE events SET status = 'published' WHERE id = ?").run(id);
     audit(ctx, 'event.publish', { target: `event:${id}`, before: { status: e.status }, after: { status: 'published' } });
     rememberSiteUrl(ctx);
@@ -1449,7 +1461,10 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
     const before = Object.fromEntries(Object.keys(next).map((k) => [k, setting(k)]));
     for (const [k, v] of Object.entries(next)) db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, v);
     audit(ctx, 'settings.update', { target: 'settings', before, after: next });
-    return { ok: true };
+    // 請求書に載る項目が変わったら、まだ送っていない請求書を作り直す
+    const onInvoice = ['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'];
+    const rerendered = onInvoice.some((k) => k in next && next[k] !== before[k]) ? billing.rerenderUnsent() : 0;
+    return { ok: true, rerendered };
   });
   // 規約類（利用規約・特定商取引法に基づく表示・プライバシーポリシー。FR-ORG-001）。文面は、主催者管理者が入れる
   const LEGAL = { terms: ['legal_terms', '利用規約'], tokushoho: ['legal_tokushoho', '特定商取引法に基づく表示'], privacy: ['legal_privacy', 'プライバシーポリシー'] };

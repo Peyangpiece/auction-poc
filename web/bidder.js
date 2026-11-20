@@ -87,8 +87,9 @@ function render() {
     $('status').textContent = '待機中'; $('status').dataset.on = ''; $('status').dataset.st = 'idle';
     $('priceLabel').textContent = '現在価格'; $('price').textContent = ''; $('result').textContent = '';
     setLamp('urikiri', '', 'うりきり', ''); setLamp('right', '', '最高入札', '');
-    $('priceTotal').textContent = ''; $('toPay').hidden = true; $('board').classList.remove('lead', 'won');
-    bidOff(true); $('bid').textContent = '入札は、品が出てから'; S.shownPrice = null; return;
+    $('priceTotal').textContent = ''; $('resultSub').textContent = ''; $('toPay').hidden = !(S.ended && S.wins) || !!token; $('board').classList.remove('lead', 'won');
+    if (S.ended && S.wins) $('toPay').textContent = `落札した品（${S.wins.count}点・${yen(S.wins.payable)}）とお支払いへ`;
+    bidOff(true); $('bid').removeAttribute('aria-label'); $('bid').dataset.ready = ''; $('bid').textContent = S.ended ? '本日の競りは終了しました' : '入札は、品が出てから'; S.shownPrice = null; return;
   }
   const st = lot.status;
   const mine = lot.highestPaddle !== null && lot.highestPaddle === S.paddle;
@@ -113,17 +114,25 @@ function render() {
   // 「うりきり」: 最低落札額（公開）に届いていて、この価格で締めれば売れる。「最高入札」（業界では「権利」）: 最高入札者。両方が点いた人が落札する
   const urikiri = !!lot.urikiri;
   // 最低落札額の金額は表示しない（端末にも届かない）。分かるのは、届いたかどうか（ランプ）だけ
-  setLamp('urikiri', urikiri ? 'on' : '', 'うりきり', urikiri ? '達しています' : 'まだです');
+  // ランプの下に、意味を書く（「うりきり」は、この業界の言葉。知らない人にも、いま売れる価格かどうかが分かるように）。
+  // 入札が無いまま終わった品には、「売れます」と出さない
+  setLamp('urikiri', urikiri && !(st === 'unsold') ? 'on' : '', 'うりきり', st === 'unsold' ? '' : urikiri ? 'この価格で売れます' : 'まだ売れない価格です');
   const holds = mine && st !== 'unsold';
   setLamp('right', holds ? (st === 'sold' ? 'won' : 'on') : '', holds && st === 'sold' ? '落札' : '最高入札',
     lot.highestPaddle === null ? '入札なし' : mine ? 'あなた' : `${lot.highestPaddle}番`);
 
   $('result').textContent = st === 'sold' ? (mine ? 'あなたが落札しました' : `${lot.highestPaddle}番 落札`) : st === 'unsold' ? '流札' : '';
+  // 結果の下に、ひとこと足す: 落札した人には、払う金額と、このあとのこと。流札には、理由
+  const payable = price + Math.floor(price * (S.premiumRate || 0) / 100);
+  $('resultSub').textContent = st === 'sold' && mine ? `お支払いは ${yen(payable)}${S.premiumRate > 0 ? '（買歩銭込み）' : ''}＋送料（配送のとき）。お支払いの方法は、競りが終わったあと、マイページでご案内します。当日現金の方は、会場の受付へ。`
+    : st === 'unsold' ? (lot.highestPaddle === null ? '入札がなかったため、売れませんでした。' : `売り手の決めた価格に届かなかったため、売れませんでした。${mine ? 'お支払いは、ありません。' : ''}`) : '';
   // 良い知らせも、目で分かるようにする: 最高入札者のあいだは金の枠、落札したら金の帯と、お支払いへの入口
   $('board').classList.toggle('lead', mine && st === 'open');
   $('board').classList.toggle('won', mine && st === 'sold');
   // お支払いへの入口は、その日の競りが終わってから出す（競りの最中に、画面を離れさせない。本番運用の評価 C）
-  $('toPay').hidden = !(mine && st === 'sold' && S.ended) || !!token;
+  // 最後に出ている品が自分の落札でなくても、きょう落札した品があれば出す（先に落札した人が、行き止まりにならないように）
+  $('toPay').hidden = !(S.ended && ((mine && st === 'sold') || S.wins)) || !!token;
+  if (S.ended && S.wins) $('toPay').textContent = `落札した品（${S.wins.count}点・${yen(S.wins.payable)}）とお支払いへ`;
 
   // 入札ボタン。観戦中は「応札に切り替える」ボタンとして働く（切り替えの場所を探させない）
   const watching = S.mode !== 'bid';
@@ -136,10 +145,14 @@ function render() {
   bid.dataset.action = canJoin ? 'join' : 'bid';
   bidOff(!(canBid || canJoin) || locked);
   bid.classList.toggle('locked', locked);
+  bid.removeAttribute('aria-label');
   bid.textContent = st !== 'open' ? (ended ? '次の品をお待ちください' : st === 'suspended' ? '中断しています' : '受付の開始をお待ちください')
     : staff ? 'スタッフは入札できません'
     : watching ? '応札に切り替える'
     : mine ? 'あなたが最高入札者です' : '入札';
+  bid.dataset.ready = canBid && !locked ? '1' : '';
+  // 本日の競りが終わったあとは、「次の品をお待ちください」と出さない
+  if (S.ended && st !== 'open') bid.textContent = '本日の競りは終了しました';
   // 入札金額の入力欄は、入札できるときだけ出す（現在の価格の表示とは別の欄。右に入札ボタン）。
   // はじめは最低入札額を入れておく。自分で書いた金額が、まだ最低入札額以上なら、そのまま残す
   $('amountBox').hidden = !canBid;
@@ -147,6 +160,7 @@ function render() {
     const typed = parseAmount($('bidAmount').value);
     if (S.amountLot !== lot.id || !S.amountTouched || typed === null || typed < (lot.minAllowed ?? lot.minBid)) { setAmount(lot.minBid); S.amountTouched = false; }
     S.amountLot = lot.id;
+    showBidAmount();
   }
   document.title = `${yen(price)} No.${lot.lotNo}｜令和の競り`;
   S.wasHighest = mine && st === 'open';
@@ -304,6 +318,12 @@ function renderEvent(event, ended = false) {
   S.ended = ended;
   $('eventNote').textContent = ended ? '本日の競りは終了しました。ご参加ありがとうございました。'
     : event?.phase === 'break' ? `休憩中です。再開の予定は ${event.resumeAt} です。` : '';
+  // 終わったら: コメントの欄と、参加のしかたの切り替えを、しまう。きょう落札した品があれば、合計と、お支払いへの入口を出す
+  document.body.classList.toggle('ended', ended);
+  if (ended && !token && S.wins === undefined) {
+    S.wins = null;
+    getJson('/api/my/wins').then((w) => { if (w.status === 200 && w.lines?.length) { S.wins = { count: w.lines.length, payable: w.total.payable }; render(); } }).catch(() => {});
+  }
   if (changed) render(); // 終わったら、落札した品の「お支払いの確認へ」を出す
 }
 function onMessage(msg, at) {
@@ -460,8 +480,18 @@ function celebrateWin(msg) {
 // ---- 入札金額の入力欄
 const parseAmount = (text) => { const d = String(text ?? '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/[^0-9]/g, ''); return d ? Number(d) : null; };
 const setAmount = (n) => { $('bidAmount').value = n === null ? '' : n.toLocaleString('ja-JP'); };
+// 入札ボタンに、送る金額を書く（取り消せない操作なので、押す前に、ボタンの上でも金額を確かめられるように）
+function showBidAmount() {
+  const bid = $('bid');
+  if ($('amountBox').hidden || bid.dataset.action !== 'bid' || bid.textContent.startsWith('送信中')) return;
+  const n = parseAmount($('bidAmount').value);
+  const word = Object.assign(document.createElement('span'), { className: 'bidword', textContent: '入札' });
+  const amt = Object.assign(document.createElement('span'), { className: 'bidamt digits', textContent: n === null ? '' : yen(n) });
+  bid.replaceChildren(word, amt);
+  // 読み上げの名前は、見えている文字（「入札」と金額）のまま。別の名前は付けない
+}
 // 入力のたびに、数字だけにして、3桁ごとに区切る（全角の数字も直す）
-$('bidAmount').addEventListener('input', () => { S.amountTouched = true; const n = parseAmount($('bidAmount').value); setKeepCaret($('bidAmount'), n === null ? '' : n.toLocaleString('ja-JP')); if ($('msg').dataset.kind === 'ng') say(''); });
+$('bidAmount').addEventListener('input', () => { S.amountTouched = true; const n = parseAmount($('bidAmount').value); setKeepCaret($('bidAmount'), n === null ? '' : n.toLocaleString('ja-JP')); if ($('msg').dataset.kind === 'ng') say(''); $('bidAmount').removeAttribute('aria-invalid'); showBidAmount(); });
 $('bidAmount').addEventListener('focus', () => {
   $('bidAmount').select();
 });
@@ -499,7 +529,7 @@ $('bidForm').addEventListener('submit', async (ev) => {
   }
   const amount = parseAmount($('bidAmount').value);
   const checked = checkAmount(amount, lot);
-  if (checked.error) { say(checked.error, 'ng'); $('bidAmount').focus(); return; }
+  if (checked.error) { say(checked.error, 'ng'); $('bidAmount').setAttribute('aria-invalid', 'true'); $('bidAmount').focus(); return; }
   // 最低入札額より上で、いまの価格の2倍以上になる金額は、確かめてから送る
   if (amount > lot.minBid && amount >= (lot.currentPrice ?? lot.startPrice) * 2 && !(await confirmBid(amount, lot))) return;
   bidOff(true);
