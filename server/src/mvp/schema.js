@@ -69,7 +69,11 @@ CREATE TABLE IF NOT EXISTS audit_log (
   actor_kind TEXT NOT NULL, actor_id INTEGER, actor_role TEXT,   -- システムが自動で行ったものは 'system'
   target TEXT NOT NULL DEFAULT '', before TEXT, after TEXT, reason TEXT, ip TEXT
 );
-CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log BEGIN SELECT RAISE(ABORT, 'audit_log は追記だけ'); END;
+-- 書き換えは、保存期間を過ぎた接続元（ip）を消すことだけを許す（ほかの列は変えられない。本番運用の評価 C）
+CREATE TRIGGER IF NOT EXISTS audit_no_update_v2 BEFORE UPDATE ON audit_log
+  WHEN NOT (NEW.ip IS NULL AND NEW.id IS OLD.id AND NEW.type IS OLD.type AND NEW.at IS OLD.at AND NEW.actor_kind IS OLD.actor_kind AND NEW.actor_id IS OLD.actor_id
+    AND NEW.actor_role IS OLD.actor_role AND NEW.target IS OLD.target AND NEW.before IS OLD.before AND NEW.after IS OLD.after AND NEW.reason IS OLD.reason)
+  BEGIN SELECT RAISE(ABORT, 'audit_log は追記だけ'); END;
 CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log BEGIN SELECT RAISE(ABORT, 'audit_log は追記だけ'); END;
 `;
 

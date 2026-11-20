@@ -552,3 +552,35 @@ test('メールアドレスの主催者管理者ができたあとは、設定�
     assert.equal((await t.browser().post('/api/staff/setup', { email: 'saisho@example.com', password: 'tadashii-password-1' })).status, 401);
   } finally { await t.close(); }
 });
+
+test('個人情報の保存期間: 退会でログインの情報をすぐ消し、取引のない退会は1年で氏名・連絡先を消す。監査ログは接続元だけを1年で消せる（本番運用の評価 C。報告書 110 章）', async () => {
+  const t = await setup();
+  try {
+    const b = t.browser();
+    assert.equal((await register(t, b, '090-1111-0201')).status, 200);
+    const db = t.store.db;
+    const id = db.prepare("SELECT id FROM member_accounts WHERE phone = '09011110201'").get().id;
+    db.prepare("UPDATE member_accounts SET password_hash = 'x', login_id = 'rw1', event_mail_consent_at = 1, unsub_token = 'tok' WHERE id = ?").run(id);
+    // ログイン（認証番号）は監査ログに残る
+    const c = t.browser();
+    await c.post('/api/login/start', { id: '090-1111-0201' });
+    assert.equal((await c.post('/api/login/verify', { id: '090-1111-0201', code: t.lastCode('09011110201') })).status, 200);
+    assert.ok(db.prepare("SELECT 1 FROM audit_log WHERE type = 'member.login' AND target = ?").get(`member:${id}`));
+    assert.equal((await b.post('/api/my/withdraw')).status, 200);
+    let m = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(id);
+    assert.deepEqual([m.password_hash, m.login_id, m.event_mail_consent_at, m.unsub_token], [null, null, null, null], '退会で、ログインの情報と同意をすぐ消す');
+    assert.equal(m.name, '検証 太郎', '氏名は、保存期間のあいだ残す');
+    assert.equal(t.api.purgeExpiredPii().members, 0);
+    t.advance(366 * 24 * 60 * MIN);
+    assert.equal(t.api.purgeExpiredPii().members, 1);
+    m = db.prepare('SELECT * FROM member_accounts WHERE id = ?').get(id);
+    assert.deepEqual([m.name, m.email, m.address, m.withdrawn_phone], ['（削除済み）', '', '', null]);
+    assert.ok(m.pii_purged_at);
+    assert.equal(t.api.purgeExpiredPii().members, 0, '2度は消さない');
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM audit_log WHERE ip IS NOT NULL AND at < ?').get(Date.now()).n, 0, '1年を過ぎた接続元は消える');
+    // 監査ログ: 接続元を消すほかの書き換え・削除はできない
+    assert.throws(() => db.prepare("UPDATE audit_log SET type = 'x' WHERE id = 1").run(), /追記だけ/);
+    assert.throws(() => db.prepare('UPDATE audit_log SET ip = NULL, reason = 1 WHERE id = 1').run(), /追記だけ/);
+    assert.throws(() => db.prepare('DELETE FROM audit_log WHERE id = 1').run(), /追記だけ/);
+  } finally { await t.close(); }
+});

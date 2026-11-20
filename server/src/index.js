@@ -163,7 +163,10 @@ function prune() {
   store.db.prepare('DELETE FROM email_tokens WHERE expires_at < ?').run(now - day);
 }
 try { prune(); } catch (err) { console.error('[prune]', err); }
-setInterval(() => { try { api.billing.sweep(); prune(); } catch (err) { console.error('[billing]', err); } eventMails(); }, 3600000).unref();
+// 保存期間を過ぎた個人情報を消す（退会・却下の会員、監査ログの接続元。本番運用の評価 C）
+const purgePii = () => { try { api.purgeExpiredPii(); } catch (err) { console.error('[privacy]', err); } };
+purgePii();
+setInterval(() => { try { api.billing.sweep(); prune(); } catch (err) { console.error('[billing]', err); } purgePii(); eventMails(); }, 3600000).unref();
 
 // ---------------------------------------------------------------- HTTP
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
@@ -557,13 +560,14 @@ function onAuctioneer(conn, msg, send) {
           send({ ...res, action: msg.action });
         });
       }
-      case 'stream_start': stream.manual('start'); return ok();
-      case 'stream_stop': stream.manual('stop'); return ok();
+      // 配信の開始・停止・カメラの切り替え・コメントを消す操作は、だれがしたかを監査ログに残す（本番運用の評価 C）
+      case 'stream_start': stream.manual('start'); api.audit({ staff: staffRef(conn), system: true }, 'stream.start', { target: 'stream' }); return ok();
+      case 'stream_stop': stream.manual('stop'); api.audit({ staff: staffRef(conn), system: true }, 'stream.stop', { target: 'stream' }); return ok();
       case 'stream_status': stream.manual('status'); return ok();
       case 'camera': { // 映すカメラの切り替え（OBS のシーン。報告書 92 章）。配信は止めない
         const name = String(msg.camera ?? '');
-        return stream.setCamera(name).then((res) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, action: 'camera', ok: !!res?.ok,
-          message: res?.ok ? undefined : CAMERA_FAIL[res?.error] ?? 'カメラを切り替えられませんでした。OBS の画面で確かめてください' }));
+        return stream.setCamera(name).then((res) => (api.audit({ staff: staffRef(conn), system: true }, 'stream.camera', { target: 'stream', after: { camera: name, ok: !!res?.ok } }), send({ type: 'cmd_result', reqId: msg.reqId ?? null, action: 'camera', ok: !!res?.ok,
+          message: res?.ok ? undefined : CAMERA_FAIL[res?.error] ?? 'カメラを切り替えられませんでした。OBS の画面で確かめてください' })));
       }
       case 'set_auto_stop': stream.setAutoStopMs(Number(msg.ms)); return ok();
       case 'create_lot': {
@@ -577,6 +581,7 @@ function onAuctioneer(conn, msg, send) {
         store.q.hideComment.run(Number(msg.id));
         broadcast({ type: 'comment_hidden', id: Number(msg.id) });
         metrics.write('comment_hidden', { id: Number(msg.id), actor: conn.staff.name });
+        api.audit({ staff: staffRef(conn), system: true }, 'comment.hide', { target: `comment:${Number(msg.id)}` });
         return ok();
       case 'mark': // 測定の区切り（どの検証の記録かを後で見分ける）
         metrics.write('mark', { label: String(msg.label), phase: msg.phase ?? null, data: msg.data ?? null });

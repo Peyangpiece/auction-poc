@@ -67,6 +67,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
       db.exec(`INSERT INTO staff_accounts (${cols}) SELECT ${cols} FROM staff_accounts_old; DROP TABLE staff_accounts_old;`);
     })();
   }
+  db.exec('DROP TRIGGER IF EXISTS audit_no_update'); // 前の版の「書き換えを一切許さない」決まり（いまは audit_no_update_v2）
   db.exec(MVP_SCHEMA);
   // スタッフのログインを、メールアドレスとパスワードにする（発注者の指示）。パスワードは、最初のログインで本人が決める。
   // setup_expires: パスワードを決められる期限。password_hash が空のあいだは、パスワードでは入れない（setup_hash は、いまは使わない）
@@ -95,6 +96,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   for (const [col, type] of [['event_mail_consent_at', 'REAL'], ['event_mail_consent_via', 'TEXT'], ['unsub_token', 'TEXT']]) {
     if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = ?").get(col)) db.exec(`ALTER TABLE member_accounts ADD COLUMN ${col} ${type}`);
   }
+  // 個人情報を消した時刻（保存期間を過ぎた退会・却下の会員。本番運用の評価 C）
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('member_accounts') WHERE name = 'pii_purged_at'").get()) db.exec('ALTER TABLE member_accounts ADD COLUMN pii_purged_at REAL');
   // 開催のお知らせメールを送った記録（同じ開催の同じ会員に、2度送らない）
   db.exec('CREATE TABLE IF NOT EXISTS event_mails (event_id INTEGER NOT NULL, account_id INTEGER NOT NULL, at REAL NOT NULL, PRIMARY KEY (event_id, account_id))');
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
@@ -120,6 +123,41 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
   const setting = (key) => db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? '';
   // メールの宛名（法人は、会社名と担当者名）
   const nameOf = (m) => (m.kind === 'b2b' ? [m.company, m.contact_name].filter(Boolean).join('　') || m.name : m.name);
+
+  // ------------------------------------------------------------ 個人情報の保存期間（本番運用の評価 C）
+  /**
+   * 退会・却下のときに、もう使わないログインの情報を、すぐに消す: パスワードのハッシュ・ログイン ID・お知らせメールの同意と、
+   * 配信を止めるリンク・ログイン中の端末・メールの確認のリンク。名前・連絡先は、下の保存期間のあいだ残す（請求・帳簿のため）
+   */
+  function dropLogin(id) {
+    db.prepare('UPDATE member_accounts SET password_hash = NULL, login_id = NULL, login_failed = 0, login_locked_until = 0, event_mail = 0, event_mail_consent_at = NULL, event_mail_consent_via = NULL, unsub_token = NULL WHERE id = ?').run(id);
+    db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ?").run(id);
+    db.prepare('DELETE FROM email_tokens WHERE member_id = ?').run(id);
+  }
+  // 【前提】保存期間（発注者の確認が要る。プライバシーポリシーに書く）:
+  //   却下（取引なし）: 却下から 90 日 / 退会・取引なし: 退会から 1 年 /
+  //   退会・取引あり（落札の明細がある）: 退会から 7 年（請求書・帳簿の保存。法人税法の帳簿書類の保存期間に合わせる）
+  //   接続元の IP アドレス（監査ログ）: 1 年
+  const DAY_MS = 86400000;
+  const KEEP = { rejected: 90 * DAY_MS, noTrade: 365 * DAY_MS, trade: 7 * 365 * DAY_MS, ip: 365 * DAY_MS };
+  /** 保存期間を過ぎた個人情報を消す（1時間ごとの見回りから呼ぶ）。会員番号・請求の金額・監査ログの記録は残す */
+  function purgeExpiredPii() {
+    const now = nowMs();
+    const due = db.prepare(`SELECT a.id FROM member_accounts a WHERE a.withdrawn_at IS NOT NULL AND a.pii_purged_at IS NULL AND (
+        (a.rejected_at IS NOT NULL AND a.withdrawn_at < ?)
+        OR (a.rejected_at IS NULL AND NOT EXISTS (SELECT 1 FROM bill_lines l WHERE l.account_id = a.id) AND a.withdrawn_at < ?)
+        OR (a.withdrawn_at < ?))`).all(now - KEEP.rejected, now - KEEP.noTrade, now - KEEP.trade);
+    const tx = db.transaction((id) => {
+      dropLogin(id);
+      db.prepare(`UPDATE member_accounts SET name = '（削除済み）', email = '', email_verified = 0, address = '', ship_to = NULL, company = NULL, contact_name = NULL, billing = NULL,
+        name_kana = NULL, postal_code = NULL, prefecture = NULL, address1 = NULL, address2 = NULL, withdrawn_phone = NULL, suspend_reason = NULL, pii_purged_at = ? WHERE id = ?`).run(now, id);
+      db.prepare("UPDATE members SET name = '（削除済み）' WHERE account_id = ?").run(id);
+    });
+    for (const { id } of due) tx(id);
+    const ip = db.prepare('UPDATE audit_log SET ip = NULL WHERE ip IS NOT NULL AND at < ?').run(now - KEEP.ip).changes;
+    if (due.length) audit({ system: true }, 'privacy.purge', { after: { members: due.map((r) => r.id), ip } });
+    return { members: due.length, ip };
+  }
 
   // ------------------------------------------------------------ 監査ログ（DATA-001）
   function audit(ctx, type, { target = '', before = null, after = null, reason = null } = {}) {
@@ -485,7 +523,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     db.transaction(() => {
       // 電話番号を空けて、同じ番号でもう一度登録できるようにする。元の番号は、記録として残す
       db.prepare('UPDATE member_accounts SET withdrawn_at = ?, withdrawn_phone = phone, phone = ?, updated_at = ? WHERE id = ?').run(nowMs(), `退会:${m.id}`, nowMs(), m.id);
-      db.prepare("DELETE FROM sessions WHERE kind = 'member' AND subject_id = ?").run(m.id);
+      dropLogin(m.id);
     })();
     audit(ctx, 'member.withdraw', { target: `member:${m.id}` });
     ctx.res.setHeader('set-cookie', 'sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
@@ -530,6 +568,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     }
     db.prepare('UPDATE member_accounts SET login_failed = 0, login_locked_until = 0 WHERE id = ?').run(m.id);
     startSession(ctx, 'member', m.id, MEMBER_IDLE);
+    audit({ ...ctx, member: m }, 'member.login', { target: `member:${m.id}`, after: { via: 'password' } });
     return { ok: true, member: memberView(m) };
   });
   // ログイン ID とパスワードを決める・変える。いまのパスワードが要る（まだ無い人と、認証番号でログインした直後の人は、要らない）
@@ -553,6 +592,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const member = target.member;
     if (!member) throw new HttpError(400, '認証番号が正しくないか、期限が切れています。番号を送り直してください', { resend: true });
     startSession(ctx, 'member', member.id, MEMBER_IDLE, 'otp');
+    audit({ ...ctx, member }, 'member.login', { target: `member:${member.id}`, after: { via: 'code' } });
     return { ok: true, member: memberView(member) };
   });
   route('POST', '/api/logout', (ctx) => { endSession(ctx); return { ok: true }; });
@@ -771,6 +811,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const rows = db.prepare(`SELECT * FROM member_accounts WHERE id >= coalesce((SELECT id FROM member_accounts ORDER BY id DESC LIMIT 1 OFFSET ?), 0)
       OR (withdrawn_at IS NULL AND rejected_at IS NULL AND (approved_at IS NULL OR suspended = 1)) ORDER BY id DESC`).all(limit - 1);
     const more = db.prepare('SELECT COUNT(*) AS n FROM member_accounts').get().n > rows.length;
+    audit(ctx, 'view.members', { after: { count: rows.length } }); // 会員の個人情報の一覧を見た記録
     return { limit, more, members: rows.map((m) => ({ id: m.id, ...memberView(m), approved: !!m.approved_at, rejected: !!m.rejected_at, suspendReason: m.suspend_reason, withdrawn: !!m.withdrawn_at, phone: m.withdrawn_at ? m.withdrawn_phone : m.phone })) };
   });
   // ログイン ID とパスワードを発行して、メールで知らせる。ID は「rw＋会員番号」。パスワードは、そのつど作り直す
@@ -815,6 +856,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     const reason = String(body.reason ?? '').trim();
     if (!reason) throw bad('断る理由を入力してください（記録に残ります。本人には送りません）');
     db.prepare('UPDATE member_accounts SET rejected_at = ?, withdrawn_at = ?, withdrawn_phone = phone, phone = ?, updated_at = ? WHERE id = ?').run(nowMs(), nowMs(), `却下:${m.id}`, nowMs(), id);
+    dropLogin(id);
     await notifier.email(m.email, 'rejected', subjectOf('会員登録のお申し込みについて'), compose(setting, { name: nameOf(m), lines: [
       'このたびは、会員登録をお申し込みいただき、ありがとうございます。',
       '誠に恐れ入りますが、今回のお申し込みは、お受けできませんでした。',
@@ -1420,7 +1462,7 @@ export function createApi({ store, config, nowMs, persistStatus = () => null }) 
     return p;
   }
   return {
-    hooks, alertAdmins, handle, createStaff, inviteStaff, audit, participantFromCookie, bidGate, sendEventMails, eventId: () => activeEvent()?.id ?? null,
+    hooks, alertAdmins, purgeExpiredPii, handle, createStaff, inviteStaff, audit, participantFromCookie, bidGate, sendEventMails, eventId: () => activeEvent()?.id ?? null,
     staffFromCookie, viewerFromCookie, signedIn, memberIdFromCookie, eventState, endedToday, setPhase, proxyTarget, billing,
   };
 }

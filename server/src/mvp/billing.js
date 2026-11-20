@@ -570,12 +570,15 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const i = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
     // 主催者管理者・受付係（精算の領収書を渡す）と、その請求書の本人だけが開ける
     if (!i || !(ctx.staff && ['admin', 'reception'].includes(ctx.staff.role)) && ctx.member?.id !== i.account_id) throw new HttpError(404, '請求書が見つかりません');
+    // スタッフが、会員の請求書（氏名・住所が載る）を開いた記録（本番運用の評価 C）
+    if (ctx.staff) audit(ctx, 'view.invoice', { target: `invoice:${i.number}`, after: { file: 'pdf' } });
     return sendFile(i, 'pdf');
   });
   route('GET', '/api/billing/invoices/:id/xlsx', (ctx, body, id) => {
     needStaff(ctx, 'admin'); // 落札者にも Excel を渡すかは未決（OQ-28）なので、主催者管理者だけ
     const i = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
     if (!i) throw new HttpError(404, '請求書が見つかりません');
+    audit(ctx, 'view.invoice', { target: `invoice:${i.number}`, after: { file: 'xlsx' } });
     return sendFile(i, 'xlsx');
   });
 
@@ -776,6 +779,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       const state = m.cancelled === m.lines ? '解除' : m.paid === m.due ? '支払済み' : m.paid > 0 ? '一部支払済み' : '未払い';
       return [i.number, KIND[i.kind], displayName(account(i.account_id)), jst(i.issued_at), i.sent_at ? jst(i.sent_at) : '', i.due_date ?? '', m.due, m.paid, m.cancelled && m.cancelled < m.lines ? `${state}（一部解除）` : state];
     });
+    audit(ctx, 'billing.invoices_export', { target: `invoices:${month}`, after: { rows: rows.length } });
     return { file: { body: await makeInvoiceList(month, rows), type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: `invoices-${month}.xlsx` } };
   });
 

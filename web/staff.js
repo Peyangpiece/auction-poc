@@ -652,6 +652,8 @@ async function settingsPanel() {
 // ------------------------------------------------------------ 記録（監査ログ・知らせ）
 // 記録の「操作」を、読める言葉にする（無いものは、そのまま出す）
 const AUDIT_TEXT = {
+  'member.login': '会員がログイン', 'view.members': '会員の一覧を表示', 'view.invoice': '請求書のファイルを表示', 'billing.invoices_export': '請求書の一覧を書き出し',
+  'stream.start': '配信を開始', 'stream.stop': '配信を停止', 'stream.camera': 'カメラを切り替え', 'comment.hide': 'コメントを消した', 'privacy.purge': '保存期間を過ぎた個人情報を削除',
   'staff.login': 'スタッフがログイン', 'staff.create': 'スタッフを登録', 'staff.reset': 'スタッフのパスワードを再発行', 'staff.stop': 'スタッフを停止', 'staff.setup': 'スタッフがパスワードを決めた', 'staff.locked': 'スタッフのログインを一時停止（失敗が続いたため）', 'event.running': '開催を進行中にした', 'event.break': '休憩に入った', 'event.ended': '開催を終了', 'staff.reactivate': 'スタッフの停止を解除', 'staff.password_change': 'スタッフがパスワードを変更',
   'member.register': '会員登録', 'member.approve': '会員登録を承認', 'member.reject': '会員登録を承認しない', 'member.credentials_issue': 'ログイン情報を発行', 'member.credentials': '会員がパスワードを変更', 'member.update': '会員が登録内容を変更', 'member.withdraw': '会員が退会', 'member.suspend': '会員を停止', 'member.unsuspend': '会員の停止を解除', 'member.phone_change': '会員の電話番号を変更',
   'event.create': '開催を登録', 'event.update': '開催を変更', 'event.publish': '開催を公開', 'event.join': '参加手続き', 'participation.change': '参加の内容を変更',
