@@ -33,6 +33,7 @@ function askForm(title, note, fields, run, okText = '実行する') {
 // 請求の一覧の絞り込み（発注者の決定。報告書 124 章）: 開催ごとに分けて出す（最初は、いちばん新しい開催）。その中を、会員・受け取り・支払・状態で絞る。
 // 明細は、会員ごとにまとめて、点数と合計を出す。選んだ条件は、タブを離れても覚えておく
 const billingFilter = { event: '', q: '', receive: '', payment: '', state: '' };
+const billingOpen = new Set(); // 明細を開いている会員（会員番号）。操作のあとに描き直しても、開いたままにする
 const eventQuery = () => (billingFilter.event ? `?event=${encodeURIComponent(billingFilter.event)}` : '');
 async function billingPanel() {
   const res = await api('GET', withLimit(`/api/billing/lines${eventQuery()}`, 'lines'));
@@ -88,6 +89,29 @@ async function billingPanel() {
           [field('返金額（円）', 'amount', { inputMode: 'numeric', required: true }), field('返金日', 'date', { type: 'date', value: res.today, required: true }),
             field('方法', 'method', { options: [['transfer', '振込'], ['cash', '現金']] }), field('理由', 'reason', { rows: 2, required: true })], (d) => api('POST', `/api/billing/lines/${l.id}/refund`, { ...d, amount: Number(d.amount) }), '記録する'))));
   });
+  // ---- 請求書（発注者の指示。報告書 128 章）: 別の表にせず、会員の行の中に出す。請求書の番号・種類・金額・送付と期限、PDF などの操作
+  const inv = isAdmin() ? await api('GET', withLimit(`/api/billing/invoices${eventQuery()}`, 'invoices')) : { invoices: [] };
+  const invoicesOf = (accountId) => (inv.invoices ?? []).filter((i) => i.accountId === accountId);
+  const invStatus = (i) => i.void ? el('span', { class: 'warn', text: '精算を取り消した（無効）' }) : i.kind === 'cash' ? 'その場で渡した' : el('span', { class: !i.sentOn && i.stale ? 'warn' : '', text: `${i.sentOn ? `送付 ${jpDay(i.sentOn)}` : i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付'}　期限 ${jpDay(i.dueDate)}` });
+  const invActions = (i, many) => [
+        el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: 'PDF' }), el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/xlsx`, text: 'Excel' }),
+          i.kind !== 'cash' && i.total > 0 && i.paid === i.total && el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/receipt`, text: '領収書' }),
+          !['cash', 'penalty'].includes(i.kind) && !i.sentOn && smallBtn(i.shipping ? `送料 ${yen(i.shipping.amount)}` : '送料を入力', () => shippingForm(i.accountId, i.eventId, i.name, i.shipping)),
+          i.kind !== 'cash' && !i.sentOn && smallBtn('メールの文面', async () => {
+            const m = await api('GET', `/api/billing/invoices/${i.id}/mail`);
+            if (!m.ok) return alertLine(m.message);
+            const text = el('textarea', { class: 'input', rows: 14, readonly: true, 'aria-label': '本文' }); text.value = m.body;
+            const copied = el('span', { class: 'note', role: 'status' });
+            openDialog('請求メールの文面', el('p', { class: 'note', text: 'PDF を添えて、ご自分のメールから送ってください。送ったら「送付済みにする」を押します。' }),
+              el('dl', { class: 'facts' }, el('dt', { text: '宛先' }), el('dd', { class: 'dyn', text: m.to || '（メールアドレスの登録なし）' }), el('dt', { text: '件名' }), el('dd', { class: 'dyn', text: m.subject })),
+              text,
+              el('div', { class: 'actions' },
+                smallBtn('本文を写す', async () => { try { await navigator.clipboard.writeText(m.body); copied.textContent = '写しました'; } catch { text.select(); copied.textContent = '選びました。コピーしてください'; } }, 'btn-primary'),
+                m.to && el('a', { class: 'btn', href: `mailto:${encodeURIComponent(m.to)}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`, text: 'メールソフトで開く' }),
+                closeBtn(), copied));
+          }),
+          i.kind !== 'cash' && (i.sentOn ? smallBtn('送付を取り消す', () => post(`/api/billing/invoices/${i.id}/unsent`)) : smallBtn('送付済みにする', () => post(`/api/billing/invoices/${i.id}/sent`), 'btn-primary')),
+  ].flat().filter(Boolean).map((b) => { if (many) b.textContent = `${b.textContent}（${i.number}）`; return b; });
   // ---- 絞り込みと、会員ごとのまとめ
   const pick = (label, key, options) => {
     const sel = el('select', { class: 'input', 'aria-label': label, onchange: (ev) => { billingFilter[key] = ev.target.value; if (key === 'event') show('billing'); else applyFilter(); } },
@@ -106,7 +130,8 @@ async function billingPanel() {
     pick('支払', 'payment', [['', 'すべて'], ['transfer', '銀行振込'], ['cash', '当日現金']]),
     pick('状態', 'state', [['', 'すべて'], ['open', '未入金（未精算・請求済み・未払い）'], ...Object.entries(LINE_STATE)]));
   const summary = el('p', { class: 'note', role: 'status' });
-  const HEADS = ['', '参加番号', '落札者・品', '金額', '受け取り・支払', '状態', ''];
+  // 会員1人につき1行（発注者の指示。報告書 128 章）。行を開くと、その会員の、品ごとの明細と操作が出る
+  const HEADS = ['', '会員番号', '落札者', '点数・金額', '受け取り・支払', '状態', ''];
   const body = el('tbody', {});
   const empty = el('p', { class: 'empty' });
   const linesTable = el('div', {}, el('div', { class: 'tablewrap' }, el('table', {},
@@ -123,12 +148,51 @@ async function billingPanel() {
     const groups = new Map();
     for (const it of hit) { if (!groups.has(it.l.accountId)) groups.set(it.l.accountId, []); groups.get(it.l.accountId).push(it); }
     const out = [];
+    const uniq = (arr) => [...new Set(arr.filter(Boolean))];
     for (const [accountId, list] of [...groups].sort((a, b) => a[0] - b[0])) {
       const live = list.filter(({ l }) => l.state !== 'cancelled');
-      const total = live.reduce((s, { l }) => s + l.payable, 0), open = live.filter(({ l }) => OPEN.includes(l.state)).reduce((s, { l }) => s + l.payable, 0);
-      out.push(el('tr', { class: 'grouprow' }, el('th', { scope: 'rowgroup', colSpan: HEADS.length },
-        el('span', { class: 'grouprow__no', text: `会員番号 ${accountId}` }), el('b', { class: 'dyn', text: list[0].l.name }),
-        el('span', { class: 'note', text: `${live.length}点　合計 ${yen(total)}${open ? `　未入金 ${yen(open)}` : '　未入金なし'}` }))), ...list.map((it) => it.tr));
+      const total = live.reduce((s, { l }) => s + l.payable, 0);
+      const openLines = live.filter(({ l }) => OPEN.includes(l.state)).map(({ l }) => l);
+      const open = openLines.reduce((s, l) => s + l.payable, 0);
+      const payable = live.filter(({ l }) => ['billed', 'unpaid'].includes(l.state)).map(({ l }) => l); // 請求書を出していて、入金を待っているもの
+      const name = list[0].l.name;
+      const invs = invoicesOf(accountId);
+      const isOpen = billingOpen.has(accountId);
+      const toggle = () => { if (billingOpen.has(accountId)) billingOpen.delete(accountId); else billingOpen.add(accountId); applyFilter(); };
+      // 状態は、多い順にまとめて書く（例: 請求済み 3・未精算 1）
+      const counts = new Map();
+      for (const { l } of list) counts.set(l.state, (counts.get(l.state) ?? 0) + 1);
+      const stateText = [...counts].map(([st, n]) => `${LINE_STATE[st]} ${n}`).join('・');
+      const paddles = uniq(list.map(({ l }) => l.paddle));
+      out.push(el('tr', { class: 'memberrow', 'data-account': String(accountId) },
+        el('td', {}, el('button', { class: 'btn expander', type: 'button', 'aria-expanded': String(isOpen), 'aria-label': `${name}さんの明細を${isOpen ? 'しまう' : '開く'}`, onclick: toggle },
+          el('span', { 'aria-hidden': 'true', text: isOpen ? '▾' : '▸' }))),
+        el('td', { class: 'n paddle', text: String(accountId) }),
+        el('td', { class: 'dyn' }, el('b', { text: name }), paddles.length ? el('div', { class: 'note', text: `参加番号 ${paddles.join('・')}` }) : null),
+        el('td', { class: 'n' }, `${live.length}点　${yen(total)}`, el('div', { class: open ? 'warn' : 'note', text: open ? `未入金 ${yen(open)}` : '未入金なし' })),
+        el('td', { text: [uniq(list.map(({ l }) => RECV[l.receive])).join('／'), uniq(list.map(({ l }) => PAY[l.payment])).join('／')].filter(Boolean).join('・') }),
+        el('td', {}, el('span', { class: list.some(({ l }) => l.state === 'unpaid') ? 'warn' : 'state', 'data-on': openLines.length ? '0' : '1', text: stateText }),
+          // 請求書: 番号・種類・金額と、送付・期限（1人に、2通以上あることもある: 当日現金の精算と、振込の請求書、違約金）
+          ...invs.map((i) => el('div', { class: 'note invline' }, `${i.number}　${INV_KIND[i.kind]}　${yen(i.total)}　`, invStatus(i)))),
+        act(
+          // まとめて入金を記録: この会員の、入金を待っている明細を、同じ日・同じ方法で、すべて消し込む
+          isAdmin() && payable.length > 0 && smallBtn(`入金を記録（${yen(payable.reduce((s, l) => s + l.payable, 0))}）`, () => askForm('入金の記録（まとめて消し込み）',
+            `${name}さん　${payable.length}件　合計 ${yen(payable.reduce((s, l) => s + l.payable, 0))}。受け取った金額が、この合計と同じときだけ、記録してください。一部だけの入金は、明細を開いて、1件ずつ記録します。`,
+            [field('入金の日', 'paidOn', { type: 'date', value: todayStr(), max: todayStr(), required: true }, '振込なら、通帳・明細に載っている日'),
+              field('方法', 'method', { options: [['transfer', '銀行振込'], ['cash', '現金']] }), field('メモ', 'memo', {}, '任意')],
+            async (d) => {
+              let done = 0;
+              for (const l of payable) {
+                const r = await api('POST', `/api/billing/lines/${l.id}/clear`, { amount: l.payable, paidOn: d.paidOn, method: d.method, memo: d.memo });
+                if (!r.ok) return { ...r, message: `${done}件を記録したあと、「${l.label}」で止まりました: ${r.message}` };
+                done++;
+              }
+              return { ok: true };
+            }, '記録する'), 'btn-primary'),
+          smallBtn(isOpen ? '明細をしまう' : `明細を見る（${list.length}件）`, toggle),
+          ...invs.flatMap((i) => invActions(i, invs.length > 1)))));
+      // 開いた明細の行: 2列目は、会員番号の列なので、空にする（参加番号は、会員の行に出している）
+      if (isOpen) out.push(...list.map((it) => { it.tr.classList.add('linerow'); it.tr.children[1].textContent = ''; return it.tr; }));
     }
     body.replaceChildren(...out);
     linesTable.firstChild.hidden = !hit.length;
@@ -157,31 +221,6 @@ async function billingPanel() {
     linesTable,
     moreBtn('lines', res, '落札の明細'),
   ];
-  if (isAdmin()) {
-    const inv = await api('GET', withLimit(`/api/billing/invoices${eventQuery()}`, 'invoices'));
-    nodes.push(el('h2', { class: 'subhead', text: '請求書' }),
-      table(['請求番号', '宛先', '種類', '金額', '発行日', '送付・期限', ''], inv.invoices.map((i) => el('tr', {},
-        el('td', { class: 'n', text: i.number }), el('td', { class: 'dyn', text: i.name }), el('td', { text: INV_KIND[i.kind] }), el('td', { class: 'n' }, i.cancelled ? [yen(i.total), el('br'), el('span', { class: 'note', text: `発行時 ${yen(i.issuedTotal)}・解除 ${i.cancelled}件` })] : yen(i.total)), el('td', { class: 'n', text: jpDay(i.issuedOn) }),
-        el('td', {}, i.void ? el('span', { class: 'warn', text: '精算を取り消した（無効）' }) : i.kind === 'cash' ? 'その場で渡した' : el('span', { class: !i.sentOn && i.stale ? 'warn' : '', text: `${i.sentOn ? `送付 ${jpDay(i.sentOn)}` : i.draft === 'failed' ? '未送付（下書きの作成に失敗）' : '未送付'}　期限 ${jpDay(i.dueDate)}` })),
-        act(el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: 'PDF' }), el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/xlsx`, text: 'Excel' }),
-          i.kind !== 'cash' && i.total > 0 && i.paid === i.total && el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/receipt`, text: '領収書' }),
-          !['cash', 'penalty'].includes(i.kind) && !i.sentOn && smallBtn(i.shipping ? `送料 ${yen(i.shipping.amount)}` : '送料を入力', () => shippingForm(i.accountId, i.eventId, i.name, i.shipping)),
-          i.kind !== 'cash' && !i.sentOn && smallBtn('メールの文面', async () => {
-            const m = await api('GET', `/api/billing/invoices/${i.id}/mail`);
-            if (!m.ok) return alertLine(m.message);
-            const text = el('textarea', { class: 'input', rows: 14, readonly: true, 'aria-label': '本文' }); text.value = m.body;
-            const copied = el('span', { class: 'note', role: 'status' });
-            openDialog('請求メールの文面', el('p', { class: 'note', text: 'PDF を添えて、ご自分のメールから送ってください。送ったら「送付済みにする」を押します。' }),
-              el('dl', { class: 'facts' }, el('dt', { text: '宛先' }), el('dd', { class: 'dyn', text: m.to || '（メールアドレスの登録なし）' }), el('dt', { text: '件名' }), el('dd', { class: 'dyn', text: m.subject })),
-              text,
-              el('div', { class: 'actions' },
-                smallBtn('本文を写す', async () => { try { await navigator.clipboard.writeText(m.body); copied.textContent = '写しました'; } catch { text.select(); copied.textContent = '選びました。コピーしてください'; } }, 'btn-primary'),
-                m.to && el('a', { class: 'btn', href: `mailto:${encodeURIComponent(m.to)}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`, text: 'メールソフトで開く' }),
-                closeBtn(), copied));
-          }),
-          i.kind !== 'cash' && (i.sentOn ? smallBtn('送付を取り消す', () => post(`/api/billing/invoices/${i.id}/unsent`)) : smallBtn('送付済みにする', () => post(`/api/billing/invoices/${i.id}/sent`), 'btn-primary'))))), '請求書は、まだありません。'),
-      moreBtn('invoices', inv, '請求書の一覧'));
-  }
   return nodes;
 }
 async function pickupPanel() {

@@ -424,6 +424,10 @@ try {
   // 当日現金の精算（受付）→ 請求書（領収書を兼ねる）→ 引き渡し
   await admin.click('#tabs [data-key=billing]');
   await admin.waitForFunction(() => { const t = document.querySelector('#panel table')?.textContent ?? ''; return t.includes('未精算') && t.includes('当日現金'); });
+  // 会員1人につき1行（発注者の指示。報告書 128 章）: 会員番号・名前・点数と合計・未入金が出る。品ごとの明細は、開くと出る
+  check(await admin.locator('#panel .memberrow').count() === 1 && (await admin.textContent('#panel .memberrow')).includes('1点') && (await admin.textContent('#panel .memberrow')).includes('未入金 ¥11,000') && await admin.locator('#panel .linerow').count() === 0, '請求の一覧は、会員1人につき1行（点数・合計・未入金）。品ごとの明細は、開くまで出ない');
+  await admin.click('#panel .memberrow .expander');
+  await admin.waitForSelector('#panel .linerow');
   check((await admin.textContent('#panel table')).includes('¥11,000') && (await admin.textContent('#panel table')).includes('落札 ¥10,000＋買歩銭 ¥1,000'), '落札すると、請求の画面に「未精算」の明細が出る。金額は、落札額＋買歩銭10%');
   await admin.check('#panel table input[type=checkbox]');
   await shot(admin, 'mvp-24-billing-settle');
@@ -441,6 +445,10 @@ try {
   await admin.click('#dlg >> button:has-text("引き渡す")');
   await admin.waitForSelector('#panel td >> text=引き渡し済み');
   check(true, '消し込みのあとに、引き渡しを記録できる');
+  // 請求書は、別の表にせず、会員の行に出す（報告書 128 章）
+  check(/\d{8}-0001/.test(await admin.textContent('#panel .memberrow')) && (await admin.textContent('#panel .memberrow')).includes('現金の精算') && !(await admin.textContent('#panel')).includes('請求番号'), '請求書の番号・種類は、会員の行に出る（請求書だけの表は、無い）');
+  if (shots) { await admin.waitForTimeout(700); await admin.mouse.move(5, 5); }
+  await shot(admin, 'mvp-25b-billing-member', { fullPage: true });
   await shot(admin, 'mvp-25-billing', { fullPage: true });
   await guest.goto(sys.base + '/mypage.html');
   await guest.waitForSelector('#invoices .invitems');

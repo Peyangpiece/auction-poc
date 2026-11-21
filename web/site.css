@@ -595,3 +595,17 @@ body:not(.app) main.narrow { max-width: 520px; }
 body.staffpage #login { margin-inline: auto; }
 /* 画面いっぱいでないものは、中央に置く（発注者の指示。報告書 127 章） */
 .lead, .narrowcol, body.staffpage #panel .form { margin-inline: auto; }
+
+/* ---- 請求の一覧: 会員1人につき1行。開くと、その下に、品ごとの明細（報告書 128 章） */
+.memberrow td { padding-top: 14px; padding-bottom: 14px; }
+.memberrow .expander { min-width: 44px; min-height: 44px; padding: 0; background: transparent; font-size: 1rem; }
+.linerow td { background: var(--ground-alt); }
+.linerow td:first-child { padding-left: 20px; }
+/* 絞り込みの欄の高さを、どのブラウザでもそろえる（Safari は、select の高さの指定を、そのままでは聞かない） */
+.filter select.input { -webkit-appearance: none; appearance: none; min-height: 44px; padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%235c616b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 8px; }
+/* 操作の列（⋯ のメニューを持つ）は、除く（メニューが、出たままになる） */
+.memberrow td:not(.act) > div { display: block; width: fit-content; margin-top: 4px; }
+.memberrow td.n > div { margin-left: 0; }
+.invline { white-space: nowrap; }
