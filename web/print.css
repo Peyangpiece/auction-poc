@@ -40,22 +40,32 @@ main:empty { display: none; }
 .slip .r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .slip tfoot td { font-weight: 700; }
 
-/* ---- 梱包の作業票: 顧客ごとのかたまりを、続けて並べる */
-[data-doc="sheet"] main { padding: 12mm 12mm 14mm; }
-.sheet__title { font-size: 13pt; margin-bottom: 5mm; }
-.work { padding: 4mm 0; border-top: 1px solid var(--ink); break-inside: avoid; }
-.work__name { font-size: 13pt; font-weight: 700; }
-.work__no { display: inline-block; margin-right: 4mm; padding: 0 2mm; border: 1px solid var(--ink); font-size: 9.5pt; font-weight: 600; }
-.work__name span:last-child { font-size: 10pt; font-weight: 400; }
-.work__items { list-style: none; margin: 3mm 0; display: grid; gap: 1.5mm; }
-.work__items li { display: grid; grid-template-columns: auto 1fr auto; gap: 3mm; align-items: center; font-size: 11pt; }
-.box { display: inline-block; width: 5mm; height: 5mm; border: 1.5px solid var(--ink); }
-.work__foot { display: grid; gap: 2mm; font-size: 10pt; }
-.work__write { display: flex; align-items: flex-end; flex-wrap: wrap; row-gap: 3mm; }
-.line { display: inline-block; width: 30mm; border-bottom: 1px solid var(--ink); height: 6mm; }
-.line--long { width: 55mm; }
-.line--short { width: 14mm; }
+/* ---- 梱包の作業票: 顧客1人につき1行の表。A4 の横（30人が、1〜2枚に収まる） */
+[data-doc="sheet"] main { width: 297mm; padding: 7mm 7mm 8mm; page: sheet; }
+.sheet__title { font-size: 11pt; margin-bottom: 3mm; }
+.sheet__title span { font-size: 9pt; font-weight: 400; color: var(--ink-2); }
+.worktable { width: 100%; border-collapse: collapse; font-size: 7.5pt; line-height: 1.25; table-layout: fixed; }
+.worktable th, .worktable td { border: 0.6pt solid var(--ink); padding: 0.7mm 1.2mm; vertical-align: middle; text-align: left; overflow-wrap: anywhere; }
+.worktable th { background: #eee; font-weight: 600; font-size: 7.5pt; }
+.worktable thead { display: table-header-group; } /* 2枚目にも、見出しを出す */
+.worktable tr { break-inside: avoid; }
+.worktable .c { text-align: center; }
+.worktable .r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.worktable th:nth-child(1) { width: 6mm; } .worktable th:nth-child(2) { width: 8mm; } .worktable th:nth-child(3) { width: 25mm; }
+.worktable th:nth-child(4) { width: 58mm; } .worktable th:nth-child(6) { width: 13mm; } .worktable th:nth-child(7) { width: 16mm; }
+.worktable th:nth-child(8) { width: 27mm; } .worktable th:nth-child(9) { width: 8mm; }
+.worktable .no { font-weight: 700; font-size: 9pt; }
+.worktable .name { font-weight: 700; font-size: 8.5pt; }
+.worktable .tel { margin-left: 2mm; color: var(--ink-2); font-size: 7pt; white-space: nowrap; }
+.worktable .items { line-height: 1.45; }
+.item { display: inline-flex; align-items: center; gap: 0.8mm; margin-right: 2.5mm; white-space: nowrap; }
+.item i { font-style: normal; font-size: 7pt; color: var(--ink-2); }
+.item--wait, .item--done { color: var(--ink-2); }
+.box { display: inline-block; width: 3.4mm; height: 3.4mm; border: 1.2px solid var(--ink); flex: none; }
+.box--s { width: 2.6mm; height: 2.6mm; border-width: 1px; }
+.worktable .write { height: 6.5mm; font-size: 7.5pt; }
 
+@page sheet { size: A4 landscape; margin: 0; }
 @page { size: A4; margin: 0; }
 @media print {
   body { background: #fff; }
