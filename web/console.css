@@ -226,3 +226,15 @@ main > *, .col, .col > section { min-width: 0; }
   .actions { margin-top: 8px; }
   #b_close, #b_next, #b_suspend, #b_resume, #b_back, #b_nv { min-height: 56px; }
 }
+/* スマホ・タブレット（1列）の進行コンソール: 映像を、画面の幅いっぱい（左右の余白なし）で、上の帯のすぐ下に大きく出す（発注者の指示。報告書 132 章）。
+   1列の画面は、もともと縦に送って使うので、板とボタンのために映像を縮めない。横向きでは、上の帯の下に収まる高さいっぱいにする */
+@media (max-width: 900px) {
+  main { padding-top: 0; }
+  #viewBox { margin-inline: -16px; }
+  .viewframe { width: min(100%, max(240px, calc((100dvh - 96px) * 4 / 3))); border-radius: 0; }
+}
+/* 待機中の画面の文字は、枠の幅に合わせる（枠が小さいときに、はみ出さないように） */
+.viewframe { container-type: inline-size; }
+.viewframe .standby { gap: clamp(4px, 2.4cqw, 10px); padding: clamp(8px, 4cqw, 20px); }
+.viewframe .standby__title { font-size: clamp(1rem, 5.2cqw, 1.875rem); }
+.viewframe .standby__logo { width: min(46%, 200px); margin-bottom: 0; }
