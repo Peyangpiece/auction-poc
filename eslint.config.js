@@ -4,7 +4,7 @@ import globals from 'globals';
 import fs from 'node:fs';
 
 // 画面のスクリプトが、common.js・site.js・外の再生ライブラリから受け取る名前
-const SHARED = 'params yen STATE_LABEL jstShort IVSPlayer setKeepCaret localNow jst takeToken Link showOverlay $ el setupNav api onSubmit telFmt jpDay field personFields markTab tabKeys dateFmt reloadOnNewEvent'.split(' ');
+const SHARED = 'params yen STATE_LABEL jstShort IVSPlayer setKeepCaret localNow jst takeToken Link showOverlay $ el setupNav api onSubmit telFmt jpDay field personFields markTab tabKeys dateFmt reloadOnNewEvent standbyKindOf fillStandby'.split(' ');
 
 const STAFF_SHARED = Object.fromEntries(fs.readdirSync(new URL('./web/', import.meta.url)).filter((f) => /^staff.*\.js$/.test(f))
   .flatMap((f) => [...fs.readFileSync(new URL('./web/' + f, import.meta.url), 'utf8').matchAll(/^(?:async function|function|const|let) (\w+)/gm)].map((m) => [m[1], 'writable'])));

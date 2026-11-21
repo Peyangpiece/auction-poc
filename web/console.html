@@ -66,7 +66,17 @@
       <h2 class="sr-only" id="viewTitle">参加者に届いている映像</h2>
       <div class="viewframe">
         <video id="viewVideo" playsinline muted aria-label="オンライン参加者に届いている映像"></video>
+        <!-- 待機中の画面（参加者の画面と同じもの。発注者の指示。報告書 132 章） -->
+        <div id="viewStandby" class="standby" hidden aria-hidden="true">
+          <span class="standby__glow"></span>
+          <img class="standby__logo" src="logo-dark.svg" width="178" height="48" alt="">
+          <strong class="standby__title"></strong>
+          <span class="standby__event dyn"></span>
+          <span class="standby__sub"></span>
+          <span class="standby__dots"><i></i><i></i><i></i></span>
+        </div>
         <p class="viewoff" id="viewOff">映像は停止中です</p>
+        <p class="sr-only" id="viewNote" role="status"></p>
         <button class="btn viewsound" type="button" id="viewSound" aria-pressed="false">音声を出す</button>
       </div>
     </section>

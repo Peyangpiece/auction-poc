@@ -147,11 +147,17 @@ function renderStream() {
 // ---- オンライン参加者と同じ映像（IVS のプレーヤーで再生。報告書 101 章）
 let viewPlayer = null, viewLoading = false, viewSound = false;
 function renderView(s) {
-  $('viewBox').hidden = s.mode === 'always-live' || !s.playbackUrl; // 映像をつないでいない設定では、枠ごと出さない
-  const live = !!s.live && !!s.playbackUrl && !document.hidden;
-  $('viewOff').hidden = !!s.live;
+  // 参加者の画面と同じ待機中の画面（開始前・休憩中・進行中で映像が届いていないあいだ。報告書 132 章）。終了後は、時間外の画面に切り替わる
+  const wait = standbyKindOf(S.event, false, s);
+  // 映像をつないでいない設定で、開催もないときは、枠ごと出さない
+  $('viewBox').hidden = !wait && (s.mode === 'always-live' || !s.playbackUrl);
+  fillStandby($('viewStandby'), wait, S.event);
+  const note = wait ? `参加者の画面: ${$('viewStandby').querySelector('.standby__title').textContent}` : '';
+  if ($('viewNote').textContent !== note) $('viewNote').textContent = note;
+  const live = !wait && !!s.live && !!s.playbackUrl && !document.hidden;
+  $('viewOff').hidden = !!wait || !!s.live;
   if (!s.live) $('viewOff').textContent = '映像は停止中です';
-  $('viewSound').hidden = !s.live;
+  $('viewSound').hidden = !!wait || !s.live;
   if (live) startView(s.playbackUrl); else stopView();
 }
 async function startView(url) {
@@ -347,7 +353,7 @@ function onMessage(msg, at) {
       log(`代理入札を取り消しました（受付連番 ${msg.seq}）`);
       render(); break;
     }
-    case 'event': S.event = msg.event; S.ended = !msg.event && !!msg.ended; S.schedule = null; if (msg.ended) log('開催を終了しました'); renderEvent(); render(); break; // render: 開催を始めると、品を開始するボタンが押せるようになる
+    case 'event': S.event = msg.event; S.ended = !msg.event && !!msg.ended; S.schedule = null; if (msg.ended) log('開催を終了しました'); renderEvent(); render(); if (S.stream) renderView(S.stream); break; // render: 開催を始めると、品を開始するボタンが押せるようになる
     case 'sold': S.sold = msg.sold; renderSold(); break;
     case 'result':
       link.send({ type: 'result_ack', lotId: msg.lotId, at: at + link.offset, net: 'console' });

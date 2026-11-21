@@ -222,3 +222,23 @@ function reloadOnNewEvent(S, msg) {
   S.eventKey = id;
   return false;
 }
+
+// 待機中の画面（発注者の指示。報告書 126・132 章）。入札の画面と進行コンソールで同じなので、ここに1つだけ置く。
+// どの場面か: ended 終了後 / before 開催を始める前 / break 休憩中 / nolive 進行中だが、映像が届いていない / null 映像を出す
+function standbyKindOf(event, ended, stream) {
+  if (ended) return 'ended';
+  if (!event) return null;
+  if (!event.phase) return 'before';
+  if (event.phase === 'break') return 'break';
+  return stream?.live && stream?.playbackUrl ? null : 'nolive';
+}
+// root の中の .standby__title / __event / __sub に、場面のことばを入れる
+function fillStandby(root, kind, event, title) {
+  root.hidden = !kind;
+  if (!kind) return;
+  root.dataset.kind = kind;
+  const set = (c, t) => { const n = root.querySelector(c); if (n.textContent !== t) n.textContent = t; };
+  set('.standby__title', { before: 'まもなく始まります', break: '休憩中', ended: '本日の競りは終了しました', nolive: '映像の配信をお待ちください' }[kind]);
+  set('.standby__event', title ?? event?.title ?? '');
+  set('.standby__sub', kind === 'before' ? `開始の予定 ${event.startsAt}` : kind === 'break' ? `再開の予定 ${event.resumeAt}` : kind === 'ended' ? 'ご参加ありがとうございました' : '競りは進行中です');
+}

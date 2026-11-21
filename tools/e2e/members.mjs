@@ -277,12 +277,17 @@ try {
   check(await con.isDisabled('#b_next'), '開催を始める前は、品を開始するボタンが押せない');
   // 待機中の画面（発注者の指示。報告書 126 章）: 開催を始める前は、映像の枠に「まもなく始まります」。カウントダウンは出さない
   const standby = (p) => p.evaluate(() => { const e = document.getElementById('standby'); return e.hidden ? '' : e.innerText.replace(/\s+/g, ' '); });
+  { const t = await con.evaluate(() => { const e = document.getElementById('viewStandby'); return e.hidden ? '' : e.innerText.replace(/\s+/g, ' '); });
+    check(t.includes('まもなく始まります') && t.includes('開始の予定') && await con.isVisible('#viewStandby'), '開催を始める前は、進行コンソールにも、待機中の画面が出る'); }
   { const t = await standby(phone); check(t.includes('まもなく始まります') && t.includes('開始の予定') && !/あと|残り|\d+:\d\d:\d\d/.test(t) && await phone.isVisible('#standby'), '開催を始める前は、待機中の画面が出る（開催の名前と、開始の予定。カウントダウンは無い）'); }
   await con.click('#b_evstart'); await con.click('#dlgOk');
   await con.waitForFunction(() => !document.getElementById('b_next').disabled && !document.getElementById('elapsed').hidden);
   check(await con.isHidden('#b_evstart') && await con.isVisible('#b_end') && await con.isVisible('#elapsed'), '始めると、休憩・終了が出て、右上に、開始からの経過時間が出る');
-  await phone.waitForFunction(() => document.getElementById('standby').hidden);
-  check(true, '開催を始めると、待機中の画面は消える');
+  // 進行中でも、映像が届いていないあいだは、待機中の画面を出しつづける（発注者の指示。報告書 132 章。この検証は、映像をつないでいない設定）
+  await phone.waitForFunction(() => document.getElementById('standby').dataset.kind === 'nolive');
+  { const t = await standby(phone); check(t.includes('映像の配信をお待ちください') && t.includes('競りは進行中です') && await phone.isVisible('#standby'), '開催を始めても、映像が届いていないあいだは、待機中の画面が出つづける（ことばは「映像の配信をお待ちください」に変わる）'); }
+  { const t = await con.evaluate(() => { const e = document.getElementById('viewStandby'); return e.hidden ? '' : e.innerText.replace(/\s+/g, ' '); });
+    check(t.includes('映像の配信をお待ちください') && await con.isVisible('#viewStandby') && await con.isHidden('#viewOff'), '進行コンソールにも、参加者と同じ待機中の画面が出る'); }
   await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
   await phone.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');

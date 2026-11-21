@@ -187,18 +187,12 @@ function renderStream() {
   // 配信が設定されていない（映像の再生先がない）ときは、映像の枠ごと出さない（「映像を準備しています」が出続けるだけになるため。報告書 86 章）
   const streaming = !!S.stream?.playbackUrl || (!!S.stream && S.stream.mode !== 'always-live'); // always-live は「配信を使わない」設定
   // 待機中の画面（発注者の指示。報告書 126 章）: 開催を始める前・休憩中・終了後は、映像の枠に、待機中の画面を出す（配信の設定が無くても出す）。
-  // 品と品のあいだは、出さない。待機中は、配信が流れていても、待機中の画面を上に出す（再生は止める）
+  // 進行中でも、映像が届いていないあいだは、常に待機中の画面を出す（発注者の指示。報告書 132 章）。開始前・休憩中・終了後は、配信が流れていても、待機中の画面を上に出す（再生は止める）
   const wait = standbyKind();
   const show = $('showVideo').checked && !venue && (streaming || !!wait);
   $('videoBox').style.display = show ? 'block' : 'none';
   document.querySelector('main').classList.toggle('novideo', !show);
-  $('standby').hidden = !wait;
-  if (wait) {
-    $('standby').dataset.kind = wait;
-    $('standbyTitle').textContent = { before: 'まもなく始まります', break: '休憩中', ended: '本日の競りは終了しました' }[wait];
-    $('standbyEvent').textContent = S.eventTitle ?? '';
-    $('standbySub').textContent = wait === 'before' ? `開始の予定 ${S.eventNow.startsAt}` : wait === 'break' ? `再開の予定 ${S.eventNow.resumeAt}` : 'ご参加ありがとうございました';
-  }
+  fillStandby($('standby'), wait, S.eventNow, S.eventTitle);
   const live = !wait && !!S.stream?.live && !!S.stream?.playbackUrl;
   $('break').style.display = live ? 'none' : 'flex';
   $('breakTitle').textContent = S.stream?.live ? '映像を準備しています' : '映像は停止中です';
@@ -296,8 +290,8 @@ async function startPlayer() {
     link.event('player_error', { message: err.message });
   } finally { playerLoading = false; }
 }
-// いま、待機中の画面を出す場面か（before: 開催を始める前 / break: 休憩中 / ended: 終了後）
-function standbyKind() { return S.ended ? 'ended' : S.eventNow && !S.eventNow.phase ? 'before' : S.eventNow?.phase === 'break' ? 'break' : null; }
+// いま、待機中の画面を出す場面か（before: 開催を始める前 / break: 休憩中 / ended: 終了後 / nolive: 進行中だが映像が届いていない）
+function standbyKind() { return standbyKindOf(S.eventNow, S.ended, S.stream); }
 function renderSound() {
   const live = !standbyKind() && !!S.stream?.live && !!S.stream?.playbackUrl;
   $('sound').hidden = !(live && $('showVideo').checked && !venue);
