@@ -1,9 +1,12 @@
 // 未引き取り（現地受け取りの期限）と配送の一覧（報告書 119 章で、billing.js から分けた。中身は、分ける前と同じ）
 import { csvCell, HttpError } from './shared.js';
+import { compose, subjectOf, kv, jpDay } from './mails.js';
+import iconv from 'iconv-lite';
+import { CARRIERS, trackingUrl, normTracking, carrierRows, refOf, parseRef } from './carriers.js';
 import { makeInvoiceList } from './invoice-files.js';
 
 export function createPickup(deps) {
-  const { account, audit, bad, db, displayName, invoiceAmounts, jst, needStaff, route, staffLineView, today, nowMs, getLine } = deps;
+  const { account, audit, bad, db, displayName, invoiceAmounts, jst, needStaff, route, staffLineView, today, nowMs, getLine, notifier, setting, payable } = deps;
   // ------------------------------------------------------------ 未引き取り（現地受け取り。FR-PAY-008）と、配送の一覧（FR-SHIP-005）
   route('GET', '/api/billing/pickup', (ctx) => {
     needStaff(ctx, 'admin', 'auctioneer', 'reception');
@@ -67,21 +70,48 @@ export function createPickup(deps) {
       const a = account(accountId);
       const [zip, addr] = addressParts(a);
       const fee = db.prepare("SELECT label, amount FROM bill_lines WHERE event_id = ? AND account_id = ? AND kind = 'shipping' AND cancelled_at IS NULL ORDER BY id DESC LIMIT 1").get(id, accountId) ?? null;
-      const lines = list.map((l) => { const lot = lotOf.get(l.lot_id) ?? {}; return { id: l.id, lotNo: lot.lot_no ?? null, label: l.label, amount: l.amount, state: shipState(l), shippedOn: l.delivered_at ? jst(l.delivered_at) : null, memo: l.ship_memo ?? '' }; });
-      return { accountId, name: displayName(a), zip, address: addr, phone: telCsv(a.withdrawn_phone ?? a.phone), lines, fee,
+      const lines = list.map((l) => { const lot = lotOf.get(l.lot_id) ?? {}; return { id: l.id, lotNo: lot.lot_no ?? null, label: l.label, amount: l.amount, payable: payable(l), state: shipState(l), shippedOn: l.delivered_at ? jst(l.delivered_at) : null, memo: l.ship_memo ?? '',
+        carrier: l.ship_carrier ?? '', tracking: l.ship_tracking ?? '', trackingUrl: trackingUrl(l.ship_carrier, l.ship_tracking), notifiedOn: l.ship_notified_at ? jst(l.ship_notified_at) : null }; });
+      return { accountId, name: displayName(a), zip, address: addr, phone: telCsv(a.withdrawn_phone ?? a.phone), hasEmail: !!a.email, lines, fee,
         // 顧客としての状態: 全部送った / 一部送った / まだ（送れるものがある） / お支払い待ち（送れるものが無い）
         state: lines.every((l) => l.state === 'shipped') ? 'shipped' : lines.some((l) => l.state === 'shipped') ? 'partial' : lines.some((l) => l.state === 'ready') ? 'ready' : 'unpaid' };
     });
     // 住所・電話番号を見た記録（個人の情報のため）
     audit(ctx, 'view.shipping', { target: id === null ? 'shipping' : `shipping:event:${id}`, after: { customers: customers.length } });
-    return { ok: true, today: today(), events, event: id, customers };
+    // 印刷（宛名ラベル・納品書・作業票）で使う、ご依頼主（主催者）と、運送会社の一覧
+    const sender = { name: setting('org_name'), address: setting('org_address'), tel: setting('org_tel') };
+    return { ok: true, today: today(), events, event: id, customers, sender, carriers: Object.entries(CARRIERS).map(([key, c]) => ({ key, name: c.name, system: c.system })) };
   });
+  /**
+   * 発送のお知らせメール（発注者の指示。報告書 131 章）: 配送済みにした品・運送会社・伝票番号・追跡のページを、落札者へ送る。
+   * 取引に伴う連絡なので、開催のお知らせメールの受信の設定（広告・宣伝のメール）とは、関係なく送る
+   */
+  async function notifyShipped(accountId, lines, { carrier, tracking }) {
+    const a = account(accountId);
+    if (!a?.email) return false;
+    const c = CARRIERS[carrier] ?? null;
+    const url = trackingUrl(carrier, tracking);
+    const ok = await notifier.email(a.email, 'shipped', subjectOf(`商品を発送しました（${lines.length}点）`), compose(setting, { name: displayName(a), lines: [
+      '落札された商品を、発送しました。',
+      '',
+      ...lines.map((l) => `・${l.label}`),
+      '',
+      ...kv([['発送日', jpDay(today())], ['運送会社', c?.name ?? (carrier ? carrier : null)], ['伝票番号', tracking || null]]),
+      ...(url ? ['', '配達の状況は、次のページで確かめられます（反映まで、時間がかかることがあります）。', url] : c?.page ? ['', `配達の状況は、${c.name}の「${c.pageName}」のページで、伝票番号を入れて確かめられます。`, c.page] : []),
+      '',
+      '届いた商品に、まちがいや不足があるときは、このメールにご返信ください。',
+    ] }));
+    if (ok) db.prepare(`UPDATE bill_lines SET ship_notified_at = ? WHERE id IN (${lines.map(() => '?').join(',')})`).run(nowMs(), ...lines.map((l) => l.id));
+    return ok;
+  }
   /** まとめて、配送済みにする（1回の操作は、全部できるか、何もしないか）。lineIds は、同じ画面で選んだ明細 */
-  route('POST', '/api/billing/shipping/ship', (ctx, body) => {
+  route('POST', '/api/billing/shipping/ship', async (ctx, body) => {
     const me = needStaff(ctx, 'admin', 'reception');
     const ids = [...new Set((Array.isArray(body.lineIds) ? body.lineIds : []).map(Number))].filter(Number.isInteger);
     if (!ids.length || ids.length > 2000) throw bad('配送済みにする品を、選んでください');
     const memo = String(body.memo ?? '').trim().slice(0, 200);
+    const carrier = CARRIERS[body.carrier] ? body.carrier : '';
+    const tracking = normTracking(body.tracking);
     const lines = ids.map((i) => getLine(i));
     for (const l of lines) {
       if (l.receive !== 'ship' || !['lot', 'promote'].includes(l.kind)) throw new HttpError(409, `「${l.label}」は、配送の品ではありません`);
@@ -90,10 +120,71 @@ export function createPickup(deps) {
     }
     const todo = lines.filter((l) => !l.delivered_at);
     const now = nowMs();
-    db.transaction(() => { for (const l of todo) db.prepare('UPDATE bill_lines SET delivered_at = ?, delivered_by = ?, ship_memo = ? WHERE id = ?').run(now, me.id, memo || null, l.id); })();
-    for (const l of todo) audit(ctx, 'billing.deliver', { target: `line:${l.id}`, after: { delivered: true, via: 'shipping', memo: memo || null } });
-    return { ok: true, shipped: todo.length };
+    db.transaction(() => { for (const l of todo) db.prepare('UPDATE bill_lines SET delivered_at = ?, delivered_by = ?, ship_memo = ?, ship_carrier = ?, ship_tracking = ? WHERE id = ?').run(now, me.id, memo || null, carrier || null, tracking || null, l.id); })();
+    for (const l of todo) audit(ctx, 'billing.deliver', { target: `line:${l.id}`, after: { delivered: true, via: 'shipping', carrier: carrier || null, tracking: tracking || null, memo: memo || null } });
+    // 発送のお知らせ: 落札者ごとに1通（この操作で、配送済みにした品だけ）。送れなくても、配送済みの記録は残す
+    let notified = 0, notifyFailed = 0;
+    if (body.notify !== false) {
+      const byAccount = new Map();
+      for (const l of todo) { if (!byAccount.has(l.account_id)) byAccount.set(l.account_id, []); byAccount.get(l.account_id).push(l); }
+      for (const [accountId, list] of byAccount) { if (await notifyShipped(accountId, list, { carrier, tracking })) notified++; else notifyFailed++; }
+    }
+    return { ok: true, shipped: todo.length, notified, notifyFailed };
   });
+  // ---- 運送会社の送り状発行システムへ取り込むファイル（ヤマト運輸 B2クラウド・佐川急便 e飛伝Ⅲ。報告書 131 章）
+  // 1人の顧客（1つの荷物）につき1行。お支払いの確認が済んでいて、まだ配送していない品のある顧客だけ。文字コードは Shift_JIS（両社のシステムと、表計算ソフトに合わせる）
+  route('GET', '/api/billing/shipping/carrier.csv', (ctx) => {
+    needStaff(ctx, 'admin');
+    const ev = exportEvent(ctx);
+    if (!ev) throw bad('開催を選んでください');
+    const carrier = ctx.url.searchParams.get('carrier'), form = ctx.url.searchParams.get('form') === 'simple' ? 'simple' : 'standard';
+    if (!CARRIERS[carrier]) throw bad('運送会社を選んでください');
+    const rows = db.prepare("SELECT * FROM bill_lines WHERE event_id = ? AND receive = 'ship' AND cancelled_at IS NULL AND kind IN ('lot','promote') AND cleared_at IS NOT NULL AND delivered_at IS NULL ORDER BY account_id, id").all(ev.id);
+    const byAccount = new Map();
+    for (const l of rows) { if (!byAccount.has(l.account_id)) byAccount.set(l.account_id, []); byAccount.get(l.account_id).push(l); }
+    const customers = [...byAccount].map(([accountId, lines]) => { const a = account(accountId); const [zip, addr] = addressParts(a); return { accountId, name: displayName(a), zip, address: addr, phone: telCsv(a.withdrawn_phone ?? a.phone), lines }; });
+    const t = carrierRows(carrier, form, { eventId: ev.id, shipDate: today(), customers, sender: { name: setting('org_name'), address: setting('org_address'), tel: setting('org_tel') },
+      codes: { yamatoBillingCode: setting('yamato_billing_code'), yamatoFareNo: setting('yamato_fare_no'), sagawaCustomerCode: setting('sagawa_customer_code') } });
+    audit(ctx, 'billing.carrier_export', { target: `shipping:event:${ev.id}`, after: { carrier, form, rows: t.rows.length } });
+    // Shift_JIS に無い文字（一部の人名の漢字・絵文字など）は「?」になる。運送会社のシステムの側で、直す
+    const text = [t.header, ...t.rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+    return { file: { body: iconv.encode(text, 'cp932'), type: 'text/csv; charset=Shift_JIS', name: `${carrier}-${form}-${ev.date}-event${ev.id}.csv` } };
+  });
+  /**
+   * 運送会社のシステムが出した「発行済みのデータ」から、伝票番号を取り込む。画面で読んだ表のうち、お客様管理番号と伝票番号の組を受け取る。
+   * 組ごとに、その顧客の、お支払いの確認が済んだ未配送の品を、配送済みにする（すでに配送済みで、伝票番号の無い品には、伝票番号だけを入れる）
+   */
+  route('POST', '/api/billing/shipping/import', async (ctx, body) => {
+    const me = needStaff(ctx, 'admin');
+    const carrier = CARRIERS[body.carrier] ? body.carrier : '';
+    if (!carrier) throw bad('運送会社を選んでください');
+    const pairs = (Array.isArray(body.rows) ? body.rows : []).slice(0, 5000);
+    if (!pairs.length) throw bad('取り込む行が、ありません');
+    const now = nowMs();
+    const result = { shipped: 0, customers: 0, updated: 0, notified: 0, notifyFailed: 0, unknown: [], unpaid: [], noNumber: [] };
+    const mails = [];
+    db.transaction(() => {
+      for (const row of pairs) {
+        const ref = parseRef(row.ref), tracking = normTracking(row.tracking);
+        if (!ref) { if (String(row.ref ?? '').trim()) result.unknown.push(String(row.ref).slice(0, 40)); continue; }
+        if (!tracking) { result.noNumber.push(refOf(ref.eventId, ref.accountId)); continue; }
+        const lines = db.prepare("SELECT * FROM bill_lines WHERE event_id = ? AND account_id = ? AND receive = 'ship' AND cancelled_at IS NULL AND kind IN ('lot','promote')").all(ref.eventId, ref.accountId);
+        if (!lines.length) { result.unknown.push(refOf(ref.eventId, ref.accountId)); continue; }
+        const todo = lines.filter((l) => l.cleared_at && !l.delivered_at);
+        const fill = lines.filter((l) => l.delivered_at && !l.ship_tracking);
+        for (const l of todo) db.prepare('UPDATE bill_lines SET delivered_at = ?, delivered_by = ?, ship_carrier = ?, ship_tracking = ? WHERE id = ?').run(now, me.id, carrier, tracking, l.id);
+        for (const l of fill) db.prepare('UPDATE bill_lines SET ship_carrier = ?, ship_tracking = ? WHERE id = ?').run(carrier, tracking, l.id);
+        if (!todo.length && !fill.length && lines.some((l) => !l.cleared_at)) result.unpaid.push(refOf(ref.eventId, ref.accountId));
+        result.shipped += todo.length; result.updated += fill.length;
+        if (todo.length) { result.customers++; mails.push({ accountId: ref.accountId, lines: todo, tracking }); }
+        for (const l of todo) audit(ctx, 'billing.deliver', { target: `line:${l.id}`, after: { delivered: true, via: 'import', carrier, tracking } });
+      }
+    })();
+    if (body.notify !== false) for (const m of mails) { if (await notifyShipped(m.accountId, m.lines, { carrier, tracking: m.tracking })) result.notified++; else result.notifyFailed++; }
+    audit(ctx, 'billing.carrier_import', { target: 'shipping', after: { carrier, rows: pairs.length, shipped: result.shipped, customers: result.customers } });
+    return { ok: true, ...result };
+  });
+
   /** 配送済みを、取り消す（主催者管理者だけ。理由が要る） */
   route('POST', '/api/billing/shipping/unship', (ctx, body) => {
     needStaff(ctx, 'admin');
@@ -102,20 +193,33 @@ export function createPickup(deps) {
     if (!ids.length) throw bad('取り消す品を、選んでください');
     if (!reason) throw bad('取り消しの理由を入力してください');
     const todo = ids.map((i) => getLine(i)).filter((l) => l.delivered_at && l.receive === 'ship');
-    db.transaction(() => { for (const l of todo) db.prepare('UPDATE bill_lines SET delivered_at = NULL, delivered_by = NULL, ship_memo = NULL WHERE id = ?').run(l.id); })();
+    db.transaction(() => { for (const l of todo) db.prepare('UPDATE bill_lines SET delivered_at = NULL, delivered_by = NULL, ship_memo = NULL, ship_carrier = NULL, ship_tracking = NULL, ship_notified_at = NULL WHERE id = ?').run(l.id); })();
     for (const l of todo) audit(ctx, 'billing.undeliver', { target: `line:${l.id}`, before: { delivered: true }, after: { delivered: false, via: 'shipping' }, reason });
     return { ok: true, unshipped: todo.length };
   });
   /** 配送のメモ（伝票番号など）だけを、直す */
-  route('POST', '/api/billing/shipping/memo', (ctx, body) => {
+  route('POST', '/api/billing/shipping/memo', async (ctx, body) => {
     needStaff(ctx, 'admin', 'reception');
     const ids = [...new Set((Array.isArray(body.lineIds) ? body.lineIds : []).map(Number))].filter(Number.isInteger);
     const memo = String(body.memo ?? '').trim().slice(0, 200);
     if (!ids.length) throw bad('品を、選んでください');
     const todo = ids.map((i) => getLine(i)).filter((l) => l.receive === 'ship');
-    db.transaction(() => { for (const l of todo) db.prepare('UPDATE bill_lines SET ship_memo = ? WHERE id = ?').run(memo || null, l.id); })();
-    audit(ctx, 'billing.ship_memo', { target: `lines:${todo.map((l) => l.id).join(',')}`, after: { memo: memo || null } });
-    return { ok: true };
+    // 運送会社・伝票番号は、送ってきたときだけ直す（前の版の画面は、メモだけを送る）
+    const withCarrier = body.carrier !== undefined || body.tracking !== undefined;
+    const carrier = CARRIERS[body.carrier] ? body.carrier : '', tracking = normTracking(body.tracking);
+    db.transaction(() => { for (const l of todo) {
+      if (withCarrier) db.prepare('UPDATE bill_lines SET ship_memo = ?, ship_carrier = ?, ship_tracking = ? WHERE id = ?').run(memo || null, carrier || null, tracking || null, l.id);
+      else db.prepare('UPDATE bill_lines SET ship_memo = ? WHERE id = ?').run(memo || null, l.id);
+    } })();
+    audit(ctx, 'billing.ship_memo', { target: `lines:${todo.map((l) => l.id).join(',')}`, after: { memo: memo || null, ...(withCarrier ? { carrier: carrier || null, tracking: tracking || null } : {}) } });
+    // 伝票番号を直したあとで、お知らせを送り直す（指示があったときだけ）
+    let notified = 0;
+    if (body.notify === true) {
+      const byAccount = new Map();
+      for (const l of todo.filter((x) => x.delivered_at)) { if (!byAccount.has(l.account_id)) byAccount.set(l.account_id, []); byAccount.get(l.account_id).push(l); }
+      for (const [accountId, list] of byAccount) { const now = list.map((l) => getLine(l.id)); if (await notifyShipped(accountId, now, { carrier: now[0].ship_carrier, tracking: now[0].ship_tracking })) notified++; }
+    }
+    return { ok: true, notified };
   });
 
   // 古物営業法16条の帳簿に使うための、取引の記録（FR-LEG-001）。引き渡した品を、日付・品目・数量・特徴・相手方で出す

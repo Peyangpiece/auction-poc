@@ -1,0 +1,66 @@
+/* 配送の印刷（報告書 131 章）。画面では、紙の形を見せる。印刷のときは、上の帯を消す */
+:root { --ink: #15181e; --ink-2: #5c616b; --line: #c7c7cc; --action: #00004d; }
+* { box-sizing: border-box; }
+html { font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", system-ui, sans-serif; color: var(--ink); font-size: 16px; line-height: 1.5; }
+body { margin: 0; background: #e9e9ee; }
+p, h1, ul { margin: 0; padding: 0; }
+.bar { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding: 12px 20px; background: #fff; border-bottom: 1px solid var(--line); }
+.bar span { margin-left: 12px; color: var(--ink-2); font-size: 0.875rem; }
+.bar__acts { display: flex; gap: 8px; }
+.btn { min-height: 44px; padding: 0 20px; border: 0; border-radius: 10px; background: var(--action); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.btn--plain { background: #f2f2f7; color: var(--action); }
+.msg { margin: 0; padding: 16px 20px; color: #c40000; font-weight: 600; }
+.msg:empty { display: none; }
+.small { font-size: 0.75rem; color: var(--ink-2); }
+main { width: 210mm; margin: 16px auto; background: #fff; box-shadow: 0 2px 12px rgb(0 0 0 / .12); }
+main:empty { display: none; }
+
+/* ---- 宛名ラベル: A4 に 6面（2列×3段。1面 105mm × 99mm） */
+[data-doc="labels"] main { display: grid; grid-template-columns: repeat(2, 105mm); grid-auto-rows: 99mm; }
+.label { display: grid; grid-template-rows: 1fr auto auto; gap: 3mm; padding: 9mm 8mm 6mm; border: 1px dashed var(--line); overflow: hidden; break-inside: avoid; }
+.label__zip { font-size: 13pt; letter-spacing: .04em; }
+.label__addr { font-size: 13pt; line-height: 1.45; overflow-wrap: anywhere; }
+.label__name { margin-top: 3mm; font-size: 20pt; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.label__name span { font-size: 14pt; font-weight: 400; }
+.label__tel { margin-top: 1mm; font-size: 10pt; }
+.label__from { padding-top: 2mm; border-top: 1px solid var(--line); font-size: 8pt; line-height: 1.4; }
+.label__fromhead { color: var(--ink-2); }
+.label__ref { font-size: 7.5pt; color: var(--ink-2); text-align: right; }
+
+/* ---- 納品書: 1人に1枚 */
+.slip { min-height: 297mm; padding: 18mm 16mm; display: grid; align-content: start; gap: 6mm; break-after: page; }
+.slip h1 { font-size: 20pt; text-align: center; letter-spacing: .3em; }
+.slip__head { display: grid; grid-template-columns: 1fr auto; gap: 10mm; align-items: start; }
+.slip__name { font-size: 15pt; font-weight: 700; border-bottom: 1px solid var(--ink); padding-bottom: 1mm; margin-bottom: 2mm; }
+.slip__name span { font-size: 11pt; font-weight: 400; }
+.slip__from { text-align: right; }
+.slip table { width: 100%; border-collapse: collapse; font-size: 10.5pt; }
+.slip th, .slip td { border: 1px solid var(--ink); padding: 2.2mm 3mm; text-align: left; vertical-align: top; }
+.slip th { background: #eee; font-weight: 600; }
+.slip .r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.slip tfoot td { font-weight: 700; }
+
+/* ---- 梱包の作業票: 顧客ごとのかたまりを、続けて並べる */
+[data-doc="sheet"] main { padding: 12mm 12mm 14mm; }
+.sheet__title { font-size: 13pt; margin-bottom: 5mm; }
+.work { padding: 4mm 0; border-top: 1px solid var(--ink); break-inside: avoid; }
+.work__name { font-size: 13pt; font-weight: 700; }
+.work__no { display: inline-block; margin-right: 4mm; padding: 0 2mm; border: 1px solid var(--ink); font-size: 9.5pt; font-weight: 600; }
+.work__name span:last-child { font-size: 10pt; font-weight: 400; }
+.work__items { list-style: none; margin: 3mm 0; display: grid; gap: 1.5mm; }
+.work__items li { display: grid; grid-template-columns: auto 1fr auto; gap: 3mm; align-items: center; font-size: 11pt; }
+.box { display: inline-block; width: 5mm; height: 5mm; border: 1.5px solid var(--ink); }
+.work__foot { display: grid; gap: 2mm; font-size: 10pt; }
+.work__write { display: flex; align-items: flex-end; flex-wrap: wrap; row-gap: 3mm; }
+.line { display: inline-block; width: 30mm; border-bottom: 1px solid var(--ink); height: 6mm; }
+.line--long { width: 55mm; }
+.line--short { width: 14mm; }
+
+@page { size: A4; margin: 0; }
+@media print {
+  body { background: #fff; }
+  .bar, .msg { display: none; }
+  main { margin: 0; box-shadow: none; }
+  .label { border-color: transparent; }
+}
+@media (max-width: 820px) { main { width: 100%; margin: 0; overflow-x: auto; } }

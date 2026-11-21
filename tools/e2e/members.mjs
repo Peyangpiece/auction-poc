@@ -453,6 +453,15 @@ try {
   await admin.click('#tabs [data-key=shipping]');
   await admin.waitForSelector('#panel [aria-label="配送の絞り込み"]');
   check(await admin.locator('#panel select[aria-label="開催"]').count() === 1 && (await admin.locator('#panel .shiprow').count() > 0 || (await admin.textContent('#panel .empty')).includes('配送の品')), '管理画面に「配送」の区分があり、開催を選ぶ欄と、顧客の行（無ければ、案内）が出る');
+  // 印刷のページ（報告書 131 章）: 宛名ラベル・納品書・作業票。開けて、画面のエラーが出ない（顧客がいなければ、その案内）
+  for (const doc of ['labels', 'slips', 'sheet']) {
+    const pp = await admin.context().newPage();
+    const perr = []; pp.on('pageerror', (e) => perr.push(e.message));
+    await pp.goto(`${sys.base}/print.html?doc=${doc}&event=1`);
+    await pp.waitForFunction(() => document.querySelector('#sheet').children.length > 0 || document.querySelector('#msg').textContent !== '');
+    check(perr.length === 0 && (await pp.title()).includes('令和の競り'), `印刷のページ（${doc}）が開ける`);
+    await pp.close();
+  }
   await admin.click('#tabs [data-key=billing]');
   await admin.waitForSelector('#panel .memberrow');
   // スマートフォンの幅の管理画面（報告書 129 章）: 表はカードに並べ替わり、ページが横に広がらない（これまでは、表の幅に引かれて、900px ほどに広がっていた）

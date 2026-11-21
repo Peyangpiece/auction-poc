@@ -56,6 +56,8 @@ function moreMenu(items) {
   return [btn, pop];
 }
 /** 「書き出す」のように、名前のあるボタンから開く一覧 */
+// 名前を付けた、まとめのボタン（「印刷する」など）
+function exportMenuNamed(name, items) { const [btn, pop] = moreMenu(items); btn.textContent = name; btn.removeAttribute('aria-label'); btn.classList.add('more__btn--text'); return el('span', {}, btn, pop); }
 function exportMenu(items) { const [btn, pop] = moreMenu(items); btn.textContent = '書き出す'; btn.removeAttribute('aria-label'); btn.classList.add('more__btn--text'); return el('span', {}, btn, pop); }
 const act = (...buttons) => {
   const list = buttons.flat().filter(Boolean);

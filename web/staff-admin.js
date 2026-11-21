@@ -119,6 +119,13 @@ async function settingsPanel() {
     el('div', { class: 'grid2' }, field('電話番号', 'orgTel', { value: s.orgTel, type: 'tel', inputMode: 'tel' }), field('メールアドレス', 'orgEmail', { value: s.orgEmail, type: 'email', spellcheck: false })),
     field('適格請求書発行事業者の登録番号', 'invoiceRegNo', { value: s.invoiceRegNo }, 'T から始まる番号'),
     field('振込先の口座', 'bankAccount', { value: s.bankAccount }),
+    // 配送: 運送会社の送り状発行システムへ取り込むファイルに入れる番号（契約のときに、運送会社から知らされるもの。報告書 131 章）
+    el('details', { class: 'fold' }, el('summary', { text: '配送（運送会社の番号）' }),
+      el('p', { class: 'note', text: '「配送」の画面の「運送会社へ」で書き出すファイルに入ります。空のままでも書き出せますが、運送会社のシステムの側で、入力が要ります。ご依頼主には、上の「主催者の名称」「住所」「電話番号」が入ります。' }),
+      el('div', { class: 'grid2' },
+        field('ヤマト運輸: ご請求先顧客コード', 'yamatoBillingCode', { value: s.yamatoBillingCode, inputMode: 'numeric', autocomplete: 'off' }),
+        field('ヤマト運輸: 運賃管理番号', 'yamatoFareNo', { value: s.yamatoFareNo, inputMode: 'numeric', autocomplete: 'off' })),
+      field('佐川急便: お客様コード', 'sagawaCustomerCode', { value: s.sagawaCustomerCode, inputMode: 'numeric', autocomplete: 'off' })),
     el('h2', { class: 'subhead', text: '印鑑（請求書に押す）' }),
     sealBox(!!s.sealFixed),
     el('h2', { class: 'subhead', text: '買歩銭' }),

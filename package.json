@@ -26,6 +26,7 @@
   "dependencies": {
     "better-sqlite3": "^13.2.0",
     "exceljs": "^4.4.0",
+    "iconv-lite": "^0.6.3",
     "jp-zipcode-lookup": "^0.3.5",
     "jsqr": "1.4.0",
     "pdfkit": "^0.20.2",

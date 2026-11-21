@@ -831,14 +831,24 @@ test('配送の管理（報告書 130 章）: 開催ごと・顧客ごとに、�
     for (const l of [l1, l2, l3]) { const line = (await t.lines()).find((x) => x.id === l.id); assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: line.payable })).status, 200); }
     assert.deepEqual((await get()).customers.map((x) => x.state), ['ready', 'ready']);
     // 品ごとに記録する → その顧客は「一部」
-    assert.deepEqual((await t.admin.post('/api/billing/shipping/ship', { lineIds: [l1.id], memo: '（例）伝票 1234' })).json, { ok: true, shipped: 1 });
+    // 運送会社・伝票番号を記録し、発送のお知らせメールを送る（報告書 131 章）。伝票番号は、数字だけにそろえる
+    const mailsTo = (to) => t.outbox().filter((m) => m.channel === 'email' && m.to === to && m.kind === 'shipped');
+    assert.deepEqual((await t.admin.post('/api/billing/shipping/ship', { lineIds: [l1.id], carrier: 'yamato', tracking: '1234-5678-9012', memo: '（例）伝票 1234' })).json, { ok: true, shipped: 1, notified: 1, notifyFailed: 0 });
+    { const m = mailsTo('m1@example.com').at(-1);
+      assert.match(m.subject, /商品を発送しました（1点）/);
+      assert.match(m.body, /飯ごう/); assert.match(m.body, /ヤマト運輸/); assert.match(m.body, /123456789012/);
+      assert.doesNotMatch(m.body, /寝袋/, 'まだ送っていない品は、書かない'); }
     s = await get();
-    assert.deepEqual([s.customers[0].state, s.customers[0].lines.map((x) => [x.state, x.memo])], ['partial', [['shipped', '（例）伝票 1234'], ['ready', '']]]);
+    assert.deepEqual([s.customers[0].state, s.customers[0].lines.map((x) => [x.state, x.memo, x.carrier, x.tracking, !!x.notifiedOn])], ['partial', [['shipped', '（例）伝票 1234', 'yamato', '123456789012', true], ['ready', '', '', '', false]]]);
     assert.equal(s.events[0].open, 2);
     // 顧客ごとに、残りをまとめて記録する（済んでいるものは、そのまま）
-    assert.equal((await t.admin.post('/api/billing/shipping/ship', { lineIds: [l1.id, l2.id], memo: '（例）伝票 5678' })).json.shipped, 1);
+    { const r = (await t.admin.post('/api/billing/shipping/ship', { lineIds: [l1.id, l2.id], carrier: 'sagawa', tracking: '９８７６５４３２１０', memo: '（例）伝票 5678', notify: false })).json;
+      assert.deepEqual([r.shipped, r.notified], [1, 0], 'お知らせを送らない、も選べる'); }
+    assert.equal(mailsTo('m1@example.com').length, 1);
     s = await get();
     assert.deepEqual([s.customers[0].state, s.customers[0].lines.map((x) => x.memo)], ['shipped', ['（例）伝票 1234', '（例）伝票 5678']], '先に記録した品のメモは、書き換えない');
+    assert.deepEqual(s.customers[0].lines.map((x) => [x.carrier, x.tracking]), [['yamato', '123456789012'], ['sagawa', '9876543210']], '全角の数字も、受ける');
+    assert.ok(s.sender && s.carriers.some((c) => c.key === 'sagawa' && c.name === '佐川急便'), '印刷で使う、ご依頼主と、運送会社の一覧');
     assert.equal((await t.line('飯ごう')).state, 'delivered', '配送済みは、引き渡しの記録と同じ');
     // 配送の品でないもの・現地受け取りの品は、断る
     assert.equal((await t.admin.post('/api/billing/shipping/ship', { lineIds: [(await t.line('水筒')).id] })).status, 409);
@@ -851,9 +861,63 @@ test('配送の管理（報告書 130 章）: 開催ごと・顧客ごとに、�
     assert.equal((await get()).customers[1].state, 'ready');
     assert.equal((await t.admin.post('/api/billing/shipping/memo', { lineIds: [l1.id], memo: '（例）直した番号' })).status, 200);
     assert.equal((await get()).customers[0].lines[0].memo, '（例）直した番号');
+    // 運送会社・伝票番号を直して、お知らせを送り直す
+    assert.deepEqual((await t.admin.post('/api/billing/shipping/memo', { lineIds: [l1.id], carrier: 'sagawa', tracking: '1111-2222-3333', memo: '', notify: true })).json, { ok: true, notified: 1 });
+    assert.deepEqual([(await get()).customers[0].lines[0].carrier, (await get()).customers[0].lines[0].tracking], ['sagawa', '111122223333']);
+    assert.match(mailsTo('m1@example.com').at(-1).body, /佐川急便[\s\S]*111122223333/);
     const types = t.store.db.prepare('SELECT type FROM audit_log').all().map((r) => r.type);
     for (const type of ['view.shipping', 'billing.deliver', 'billing.undeliver', 'billing.ship_memo']) assert.ok(types.includes(type), type);
     assert.equal((await a.get('/api/billing/shipping')).status, 401, '会員は、開けない');
     await new Promise((r) => setTimeout(r, 300));
+  } finally { await t.close(); }
+});
+
+test('運送会社との連携（報告書 131 章）: 取り込み用のファイル（ヤマト運輸・佐川急便）を書き出す。発行済みのデータから、伝票番号を取り込んで、配送済みにし、お知らせを送る', async () => {
+  const iconv = (await import('iconv-lite')).default;
+  const t = await setup();
+  try {
+    const a = await t.member(1, { receive: 'ship' }), b = await t.member(2, { receive: 'ship' }), c = await t.member(3, { receive: 'ship' });
+    t.sold('飯ごう', [[a, 2000]]); t.sold('寝袋', [[a, 3000]]); t.sold('水筒', [[b, 500]]); t.sold('ランタン', [[c, 1000]]);
+    await t.endEvent();
+    await t.admin.post('/api/settings', { ...(await t.admin.get('/api/settings')).json, orgAddress: '〒000-0000\n（例）静岡県掛川市1-2-3', orgTel: '000-0000-0000', yamatoBillingCode: '0000000000', yamatoFareNo: '01', sagawaCustomerCode: '00000000000' });
+    // 1郎と2郎は、お支払いの確認が済む。3郎は、まだ
+    for (const name of ['飯ごう', '寝袋', '水筒']) { const l = await t.line(name); assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: l.payable })).status, 200); }
+    const csv = async (q) => { const r = await t.admin.get(`/api/billing/shipping/carrier.csv?event=${t.eventId}&${q}`); assert.equal(r.status, 200, q); assert.match(r.type, /Shift_JIS/); return iconv.decode(r.buf, 'cp932').trim().split('\r\n').map((line) => line.split(',').map((v) => v.replace(/^"|"$/g, ''))); };
+    // ヤマト運輸（B2クラウド）: 95列。1人に1行。お支払いの確認が済んだ、未配送の顧客だけ（3郎は入らない）
+    const y = await csv('carrier=yamato&form=standard');
+    assert.deepEqual([y.length, y[0].length, y[0][0], y[0][3], y[0][15]], [3, 95, 'お客様管理番号', '伝票番号', 'お届け先名']);
+    const y1 = Object.fromEntries(y[0].map((h, i) => [h, y[1][i]]));
+    assert.deepEqual([y1['お客様管理番号'], y1['送り状種類'], y1['お届け先名'], y1['敬称'], y1['品名１'], y1['ご依頼主郵便番号'], y1['ご依頼主住所'], y1['ご請求先顧客コード'], y1['運賃管理番号'], y1['発行枚数']],
+      [`E${t.eventId}M${y[1][0].split('M')[1]}`, '0', '検証 1郎', '様', '飯ごう・寝袋', '000-0000', '（例）静岡県掛川市1-2-3', '0000000000', '01', '1']);
+    assert.match(y1['出荷予定日'], /^\d{4}\/\d{2}\/\d{2}$/);
+    assert.equal(y1['お届け先電話番号'], '090-6666-0001');
+    // 佐川急便（e飛伝Ⅲ）: 74列
+    const s = await csv('carrier=sagawa&form=standard');
+    assert.deepEqual([s.length, s[0].length], [3, 74]);
+    const s1 = Object.fromEntries(s[0].map((h, i) => [h, s[1][i]]));
+    assert.deepEqual([s1['お客様管理番号'], s1['お届け先名称１'], s1['お客様コード'], s1['出荷個数'], s1['品名１']], [y1['お客様管理番号'], '検証 1郎', '00000000000', '1', '飯ごう・寝袋']);
+    assert.match(s1['出荷日'], /^\d{8}$/);
+    // 項目名つきの簡単な形
+    const simple = await csv('carrier=yamato&form=simple');
+    assert.deepEqual([simple[0].slice(0, 3), simple[1][2]], [['お客様管理番号', '出荷予定日', 'お届け先名'], '検証 1郎']);
+    assert.equal((await t.admin.get(`/api/billing/shipping/carrier.csv?event=${t.eventId}&carrier=x`)).status, 400);
+    const reception = await t.staffLogin('reception', 'uketsuke3');
+    assert.equal((await reception.get(`/api/billing/shipping/carrier.csv?event=${t.eventId}&carrier=yamato`)).status, 403, '住所がまとまって入るファイルは、主催者管理者だけ');
+    // 伝票番号の取り込み: 管理番号と伝票番号の組。1郎（2点）は配送済みに、3郎はお支払い待ちのまま、知らない番号は、そのまま報告する
+    const ref = (n) => y.slice(1).find((r) => r[15] === `検証 ${n}郎`)?.[0];
+    const refC = `E${t.eventId}M${(await t.admin.get('/api/billing/shipping')).json.customers.find((x) => x.name === '検証 3郎').accountId}`;
+    const r = (await t.admin.post('/api/billing/shipping/import', { carrier: 'yamato', rows: [{ ref: ref(1), tracking: '1111-2222-3333' }, { ref: refC, tracking: '444455556666' }, { ref: 'E999M999', tracking: '1' }, { ref: 'なにか', tracking: '1' }, { ref: ref(2), tracking: '' }] })).json;
+    assert.deepEqual([r.shipped, r.customers, r.notified, r.unpaid, r.unknown, r.noNumber], [2, 1, 1, [refC], ['E999M999', 'なにか'], [ref(2)]]);
+    const after = (await t.admin.get('/api/billing/shipping')).json.customers;
+    assert.deepEqual(after.map((x) => [x.name, x.state, x.lines[0].tracking, x.lines[0].carrier]), [['検証 1郎', 'shipped', '111122223333', 'yamato'], ['検証 2郎', 'ready', '', ''], ['検証 3郎', 'unpaid', '', '']]);
+    const mail = t.outbox().filter((m) => m.channel === 'email' && m.kind === 'shipped').at(-1);
+    assert.match(mail.body, /飯ごう[\s\S]*寝袋[\s\S]*ヤマト運輸[\s\S]*111122223333/);
+    assert.match(mail.body, /kuronekoyamato\.co\.jp/, '追跡は、公式のサイトを案内する（伝票番号つきの直接のリンクは、作らない）');
+    // もう一度取り込んでも、二重にはならない。書き出しからは、配送済みの人が外れる
+    assert.equal((await t.admin.post('/api/billing/shipping/import', { carrier: 'yamato', rows: [{ ref: ref(1), tracking: '111122223333' }] })).json.shipped, 0);
+    assert.equal((await csv('carrier=sagawa&form=standard')).length, 2, '残りは、2郎だけ');
+    const types = t.store.db.prepare('SELECT type FROM audit_log').all().map((x) => x.type);
+    for (const type of ['billing.carrier_export', 'billing.carrier_import']) assert.ok(types.includes(type), type);
+    await new Promise((res) => setTimeout(res, 300));
   } finally { await t.close(); }
 });

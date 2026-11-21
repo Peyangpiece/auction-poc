@@ -227,6 +227,8 @@ export function createApi({ store, config, nowMs, persistStatus = () => null, du
   // ------------------------------------------------------------ 主催者設定（FR-ORG-001 の一部）・監査ログ・知らせ
   // 請求書・手数料に使う設定（FR-ORG-001 の一部）。未入力でも動くが、請求書には「（未設定）」と出る
   const BILLING_KEYS = { orgAddress: ['org_address', 200], orgTel: ['org_tel', 40], orgEmail: ['org_email', 254], invoiceRegNo: ['invoice_reg_no', 20], bankAccount: ['bank_account', 200], feeMinimum: ['fee_minimum', 12], feeTaxMode: ['fee_tax_mode', 12], buyerPremiumRate: ['buyer_premium_rate', 5],
+    // 配送: 運送会社の取り込み用のファイルに入れる番号（報告書 131 章）
+    yamatoBillingCode: ['yamato_billing_code', 20], yamatoFareNo: ['yamato_fare_no', 4], sagawaCustomerCode: ['sagawa_customer_code', 20],
     penaltyRateB2b: ['penalty_rate_b2b', 6], penaltyRateB2c: ['penalty_rate_b2c', 6], lateRateB2b: ['late_rate_b2b', 6], lateRateB2c: ['late_rate_b2c', 6] };
   route('GET', '/api/settings', (ctx) => {
     needStaff(ctx, 'admin');
