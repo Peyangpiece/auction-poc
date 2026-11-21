@@ -38,32 +38,41 @@ const eventQuery = () => (billingFilter.event ? `?event=${encodeURIComponent(bil
 async function billingPanel() {
   const res = await api('GET', withLimit(`/api/billing/lines${eventQuery()}`, 'lines'));
   if (!res.ok) return [el('p', { class: 'msg', text: res.message })];
-  const picked = new Set();
-  // 会場での精算は、当日現金と、当日クレジット（会場の決済端末でカードの決済を済ませてから、記録する。報告書 133 章）
-  const settleWith = (method) => smallBtn('', async () => {
-    const r = await api('POST', '/api/billing/settle', { lineIds: [...picked], method });
-    if (!r.ok) return alertLine(r.message);
-    show('billing');
-    openDialog('精算しました', el('p', { text: `${r.methodLabel}で精算し、請求書（領収書を兼ねる）${r.invoice.number} を発行しました。金額 ${yen(r.invoice.total)}` }),
-      el('div', { class: 'actions' }, el('a', { class: 'btn btn-primary', href: `/api/billing/invoices/${r.invoice.id}/pdf`, text: 'PDF を開く' }), closeBtn()));
-  }, 'btn-primary');
-  const settleBtn = settleWith('cash'), settleCardBtn = settleWith('card');
-  // 押せない大きなボタンを先に見せない。明細を選ぶと「○件を当日現金で精算」「○件を当日クレジットで精算」が出る
-  const syncSettle = () => {
-    settleBtn.hidden = settleCardBtn.hidden = picked.size === 0;
-    settleBtn.textContent = `${picked.size}件を、当日現金で精算`; settleCardBtn.textContent = `${picked.size}件を、当日クレジットで精算`;
+  // 会場での精算（当日現金・当日クレジット）: 会員の行の「精算」から、その人の未精算の明細を並べたダイアログを開く（報告書 134 章）。
+  // これまでは、明細を開く → 印を付ける → 画面の上のボタン、の3手だった。カードの決済は、会場の決済端末で済ませてから記録する（報告書 133 章）
+  const settleDialog = (name, lines, prefer) => {
+    const picked = new Set(lines.map((l) => l.id));
+    const total = el('b', { class: 'settle__total' });
+    const msg = msgLine();
+    const run = async (method) => {
+      if (!picked.size) { msg.textContent = '精算する品を選んでください'; return; }
+      const r = await api('POST', '/api/billing/settle', { lineIds: [...picked], method });
+      if (!r.ok) { msg.textContent = r.message; return; }
+      show('billing');
+      openDialog('精算しました', el('p', { text: `${r.methodLabel}で精算し、請求書（領収書を兼ねる）${r.invoice.number} を発行しました。金額 ${yen(r.invoice.total)}` }),
+        el('div', { class: 'actions' }, el('a', { class: 'btn btn-primary', href: `/api/billing/invoices/${r.invoice.id}/pdf`, text: 'PDF を開く' }), closeBtn()));
+    };
+    const btns = [['cash', '当日現金で精算'], ['card', '当日クレジットで精算']].map(([m, text]) => smallBtn(text, () => run(m), prefer === m || (m === 'cash' && prefer !== 'card') ? 'btn-primary' : ''));
+    const sync = () => { total.textContent = `${picked.size}点　${yen(lines.filter((l) => picked.has(l.id)).reduce((s, l) => s + l.payable, 0))}`; btns.forEach((b) => { b.disabled = picked.size === 0; }); };
+    sync();
+    openDialog(`${name}さんの精算`,
+      el('ul', { class: 'settle' }, lines.map((l) => el('li', {}, el('label', {},
+        el('input', { type: 'checkbox', checked: true, onchange: (ev) => { if (ev.target.checked) picked.add(l.id); else picked.delete(l.id); sync(); } }),
+        el('span', { class: 'dyn', text: l.label }), el('span', { class: 'n', text: yen(l.payable) }))))),
+      el('p', { class: 'settle__sum' }, '精算する金額　', total),
+      msg,
+      el('div', { class: 'actions settle__acts' }, btns, closeBtn('やめる')));
   };
-  syncSettle();
   const rows = res.lines.map((l) => {
-    const box = l.state === 'unsettled' && el('input', { type: 'checkbox', 'aria-label': `${l.label} を精算に選ぶ`, onchange: (ev) => { if (ev.target.checked) picked.add(l.id); else picked.delete(l.id); syncSettle(); } });
     const a = isAdmin();
     return el('tr', {},
-      el('td', {}, box || ''),
-      el('td', { class: 'n paddle', text: l.paddle ?? '' }),
-      el('td', { class: 'dyn' }, l.name, el('div', { class: 'note', text: l.label })),
+      el('td', {}),
+      el('td', {}),
+      // 開いた明細の行には、品の名前だけを出す（会員の名前は、上の会員の行にある）
+      el('td', { class: 'dyn' }, el('div', { class: 'linelabel', text: l.label })),
       // 払う金額は、落札額＋買歩銭
       el('td', { class: 'n' }, yen(l.payable), l.premium ? el('div', { class: 'note', text: `落札 ${yen(l.amount)}＋買歩銭 ${yen(l.premium)}` }) : null),
-      el('td', { text: `${RECV[l.receive] ?? ''}${l.payMethod ? '・' + PAY[l.payMethod] : ''}` }),
+      el('td', { text: PAY[l.payMethod] ?? '' }),
       el('td', {}, el('span', { class: l.state === 'unpaid' ? 'warn' : 'state', 'data-on': ['cleared', 'delivered'].includes(l.state) ? '1' : '0', text: LINE_STATE[l.state] }),
         l.invoice && el('div', { class: 'note', text: `${l.invoice.number}${l.invoice.dueDate ? '　期限 ' + jpDay(l.invoice.dueDate) : ''}` }),
         l.pickupBy && l.state === 'cleared' && el('div', { class: l.pickupLate ? 'warn' : 'note', text: `受け取り期限 ${jpDay(l.pickupBy)}` }),
@@ -122,59 +131,66 @@ async function billingPanel() {
     const sel = el('select', { class: 'input', 'aria-label': label, onchange: (ev) => { billingFilter[key] = ev.target.value; if (key === 'event') show('billing'); else applyFilter(); } },
       options.map(([value, text]) => el('option', { value, text })));
     sel.value = billingFilter[key];
-    return el('label', { class: 'filter' }, el('span', { text: label }), sel);
+    return el('label', { class: `filter${key === 'event' ? ' filter--event' : ''}` }, el('span', { class: 'sr-only', text: label }), sel);
   };
-  const search = el('input', { class: 'input', type: 'search', placeholder: '会員番号・名前・参加番号・品名', 'aria-label': '会員番号・名前・参加番号・品名で探す', value: billingFilter.q, oninput: (ev) => { billingFilter.q = ev.target.value; applyFilter(); } });
+  const search = el('input', { class: 'input', type: 'search', placeholder: '会員番号・名前・参加番号・品名で探す', 'aria-label': '会員番号・名前・参加番号・品名で探す', value: billingFilter.q, oninput: (ev) => { billingFilter.q = ev.target.value; applyFilter(); } });
   const evOptions = (res.events ?? []).map((e) => [String(e.id), `${jpDay(e.date)}　${e.title}（${e.lines}件${e.open ? `・未入金 ${e.open}件` : ''}）`]);
   // 選んでいる開催を、欄にも映す（最初は、サーバーが選んだ、いちばん新しい開催）
   billingFilter.event = res.event === null && (res.events ?? []).length ? 'all' : String(res.event ?? '');
-  const filterBar = el('div', { class: 'filters', role: 'search', 'aria-label': '請求の絞り込み' },
+  // 書き出しは、月に一度ほどの作業なので、ひとつの「書き出す」の中にまとめる（報告書 83 章）。絞り込みの行の右端に置く
+  const exportBtn = isAdmin() ? exportMenu([
+      // 書き出しは、上で選んだ開催の分（発注者の決定。報告書 125 章）。「すべての開催」のときは、これまでどおり（配送は全部、帳簿と請求書は今月）
+      ...(res.event !== null && res.event !== undefined ? [
+        el('a', { class: 'btn', href: `/api/billing/shipping.csv?event=${res.event}`, text: '配送の一覧（この開催・CSV）' }),
+        el('a', { class: 'btn', href: `/api/billing/ledger.csv?event=${res.event}`, text: '帳簿用の記録（この開催・CSV）' }),
+        el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?event=${res.event}`, text: '請求書の一覧（この開催・Excel）' }),
+      ] : [
+        el('a', { class: 'btn', href: '/api/billing/shipping.csv', text: '配送の一覧（すべての開催・CSV）' }),
+        el('a', { class: 'btn', href: `/api/billing/ledger.csv?month=${res.today.slice(0, 7)}`, text: '帳簿用の記録（今月・CSV）' }),
+        el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（今月・Excel）' }),
+      ])]) : null;
+  const filterBar = el('div', { class: 'filters filters--bare', role: 'search', 'aria-label': '請求の絞り込み' },
     pick('開催', 'event', evOptions.length ? [...evOptions, ['all', 'すべての開催']] : [['', '（明細のある開催は、まだありません）']]),
-    el('label', { class: 'filter filter--wide' }, el('span', { text: '会員・品' }), search),
-    pick('受け取り', 'receive', [['', 'すべて'], ['pickup', '現地受け取り'], ['ship', '配送']]),
-    pick('支払', 'payment', [['', 'すべて'], ...Object.entries(PAY)]),
-    pick('状態', 'state', [['', 'すべて'], ['open', '未入金（未精算・請求済み・未払い）'], ...Object.entries(LINE_STATE)]));
-  const summary = el('p', { class: 'note', role: 'status' });
-  // 支払方法ごとの集計（発注者の指示。報告書 133 章）: 上で選んだ開催の、銀行振込・当日現金・当日クレジットごとの、人数・点数・金額・入金済み・未入金。
-  // ほかの絞り込み（会員・受け取り・状態）には左右されない。「絞り込む」を押すと、その支払方法で絞り込む
+    el('label', { class: 'filter filter--wide' }, el('span', { class: 'sr-only', text: '会員・品' }), search),
+    pick('受け取り', 'receive', [['', '受け取り: すべて'], ['pickup', '現地受け取り'], ['ship', '配送']]),
+    pick('状態', 'state', [['', '状態: すべて'], ['open', '未入金'], ...Object.entries(LINE_STATE)]),
+    exportBtn);
+  // 絞り込んでいるときだけ、結果の人数・点数・合計と「解除」を出す（絞り込んでいないときは、下の札の「すべて」と同じなので、出さない）
+  const summary = el('p', { class: 'note filtersum', role: 'status' });
+  // 支払方法ごとの集計（報告書 133・134 章）: 選んだ開催の、すべて・銀行振込・当日現金・当日クレジットごとの、人数・点数・金額・未入金を、1行の札で出す。
+  // 札を押すと、その支払方法で絞り込む（支払の選択欄を兼ねる）。数は、ほかの絞り込み（会員・受け取り・状態）には左右されない
   const paySummary = (() => {
     const live = res.lines.filter((l) => l.state !== 'cancelled');
     if (!live.length) return null;
     const sum = (ls) => ls.reduce((s, l) => s + l.payable, 0);
     const paid = (l) => ['cleared', 'delivered'].includes(l.state);
-    // 表ではなく、カードで並べる（スマホでも読める。支払方法は3つ＋合計なので、横に並ぶ）
-    const card = (label, ls, key) => {
+    const chip = (label, ls, key) => {
       const open = sum(ls.filter((l) => !paid(l)));
-      const on = key !== undefined && key !== '' && billingFilter.payment === key;
-      return el('div', { class: 'paycard', role: 'listitem', 'data-on': on ? '1' : '0' },
-        el('b', { text: label }),
-        el('span', { class: 'paycard__n', text: `${new Set(ls.map((l) => l.accountId)).size}人・${ls.length}点` }),
-        el('span', { class: 'paycard__sum', text: yen(sum(ls)) }),
-        el('span', { class: 'note', text: `入金済み ${yen(sum(ls.filter(paid)))}` }),
-        el('span', { class: open ? 'warn' : 'note', text: `未入金 ${yen(open)}` }),
-        key === undefined ? null : smallBtn(key === '' ? 'すべて' : on ? '絞り込み中' : '絞り込む', () => { billingFilter.payment = key; show('billing'); }));
+      return el('button', { class: 'paychip', type: 'button', 'aria-pressed': String(billingFilter.payment === key), onclick: () => { billingFilter.payment = key; show('billing'); } },
+        el('span', { class: 'paychip__top' }, el('b', { text: label }), el('span', { text: `${new Set(ls.map((l) => l.accountId)).size}人・${ls.length}点` })),
+        el('span', { class: 'paychip__sum' }, el('span', { text: yen(sum(ls)) }),
+          ls.length ? el('span', { class: open ? 'warn' : 'paychip__ok', text: open ? `未入金 ${yen(open)}` : '入金済み' }) : null));
     };
-    const t = el('div', { class: 'paysum', role: 'list' },
-      ...Object.entries(PAY).map(([k, label]) => card(label, live.filter((l) => l.payMethod === k), k)),
-      ...(live.some((l) => !PAY[l.payMethod]) ? [card('未定', live.filter((l) => !PAY[l.payMethod]))] : []),
-      card('合計', live, ''));
-    return el('section', { 'aria-label': '支払方法ごとの集計' }, el('h2', { class: 'subhead', text: '支払方法ごとの集計' }), t,
-      el('p', { class: 'note', text: '入金済みの分は、実際に受け取った方法で数えます。未入金の分は、振込の請求書を出していれば銀行振込、出していなければ、本人が参加手続きで選んだ方法で数えます。' }));
+    if (billingFilter.payment && !live.some((l) => l.payMethod === billingFilter.payment) && !PAY[billingFilter.payment]) billingFilter.payment = '';
+    return el('div', { class: 'paysum', role: 'group', 'aria-label': '支払方法ごとの集計（押すと、その支払方法で絞り込む）' },
+      chip('すべて', live, ''),
+      ...Object.entries(PAY).map(([k, label]) => chip(label, live.filter((l) => l.payMethod === k), k)),
+      ...(live.some((l) => !PAY[l.payMethod]) ? [chip('未定', live.filter((l) => !PAY[l.payMethod]), 'none')] : []));
   })();
   // 会員1人につき1行（発注者の指示。報告書 128 章）。行を開くと、その会員の、品ごとの明細と操作が出る
-  const HEADS = ['', '会員番号', '落札者', '点数・金額', '受け取り・支払', '状態', ''];
+  const HEADS = ['', '会員番号', '落札者', '点数・金額', '受け取り・支払', '状態・請求書', ''];
   const body = el('tbody', {});
   const empty = el('p', { class: 'empty' });
-  const linesTable = el('div', {}, el('div', { class: 'tablewrap' }, el('table', {},
+  const linesTable = el('div', { class: 'billlist' }, el('div', { class: 'tablewrap' }, el('table', {},
     el('thead', {}, el('tr', {}, HEADS.map((h, i) => (h ? el('th', { scope: 'col', text: h }) : el('th', { scope: 'col' }, el('span', { class: 'sr-only', text: i === 0 ? '選択' : '操作' })))))), body)), empty);
   // 開いた明細の行（品ごと）の見出し。狭い画面のカードで使う
-  labelCells(['', '', '品', '金額', '受け取り・支払', '状態', ''], rows);
+  labelCells(['', '', '品', '金額', '支払', '状態', ''], rows);
   const items = res.lines.map((l, i) => ({ l, tr: rows[i] }));
   const OPEN = ['unsettled', 'billed', 'unpaid'];
   function applyFilter() {
     const q = billingFilter.q.trim().toLowerCase();
     const hit = items.filter(({ l }) => (!billingFilter.receive || l.receive === billingFilter.receive)
-      && (!billingFilter.payment || l.payMethod === billingFilter.payment)
+      && (!billingFilter.payment || (billingFilter.payment === 'none' ? !PAY[l.payMethod] : l.payMethod === billingFilter.payment))
       && (!billingFilter.state || (billingFilter.state === 'open' ? OPEN.includes(l.state) : l.state === billingFilter.state))
       && (!q || [String(l.accountId), l.name, String(l.paddle ?? ''), l.label].some((v) => String(v ?? '').toLowerCase().includes(q))));
     // 会員ごとにまとめる（会員番号の順）。見出しの行に、会員番号・名前・点数・合計・未入金を出す
@@ -187,6 +203,7 @@ async function billingPanel() {
       const total = live.reduce((s, { l }) => s + l.payable, 0);
       const openLines = live.filter(({ l }) => OPEN.includes(l.state)).map(({ l }) => l);
       const open = openLines.reduce((s, l) => s + l.payable, 0);
+      const unsettled = live.filter(({ l }) => l.state === 'unsettled' && l.kind === 'lot').map(({ l }) => l);
       const payable = live.filter(({ l }) => ['billed', 'unpaid'].includes(l.state)).map(({ l }) => l); // 請求書を出していて、入金を待っているもの
       const name = list[0].l.name;
       const invs = invoicesOf(accountId);
@@ -202,14 +219,17 @@ async function billingPanel() {
           el('span', { 'aria-hidden': 'true', text: isOpen ? '▾' : '▸' }))),
         el('td', { class: 'n paddle', text: String(accountId) }),
         el('td', { class: 'dyn' }, el('b', { text: name }), paddles.length ? el('div', { class: 'note', text: `参加番号 ${paddles.join('・')}` }) : null),
-        el('td', { class: 'n' }, `${live.length}点　${yen(total)}`, el('div', { class: open ? 'warn' : 'note', text: open ? `未入金 ${yen(open)}` : '未入金なし' })),
+        el('td', { class: 'n' }, `${live.length}点　${yen(total)}`, open ? el('div', { class: 'warn', text: `未入金 ${yen(open)}` }) : null),
         el('td', { text: [uniq(list.map(({ l }) => RECV[l.receive])).join('／'), uniq(list.map(({ l }) => PAY[l.payMethod])).join('／')].filter(Boolean).join('・') }),
         el('td', {}, el('span', { class: list.some(({ l }) => l.state === 'unpaid') ? 'warn' : 'state', 'data-on': openLines.length ? '0' : '1', text: stateText }),
           // 請求書: 番号・種類・金額と、送付・期限（1人に、2通以上あることもある: 当日現金の精算と、振込の請求書、違約金）
-          ...invs.map((i) => el('div', { class: 'note invline' }, `${i.number}　${INV_KIND[i.kind]}　${yen(i.total)}　`, invStatus(i)))),
+          // 種類は、振込のときは書かない（ふつうの請求書）。金額は、2通以上あるときだけ（1通なら、左の金額と同じ）
+          ...invs.map((i) => el('div', { class: 'note invline' }, `${i.number}　${i.kind === 'transfer' ? '' : INV_KIND[i.kind] + '　'}${invs.length > 1 ? yen(i.total) + '　' : ''}`, invStatus(i)))),
         act(
+          // 会場での精算: まだ請求書を出していない明細（未精算）があるとき
+          unsettled.length > 0 && smallBtn('精算', () => settleDialog(name, unsettled, unsettled[0].payment), 'btn-primary'),
           // まとめて入金を記録: この会員の、入金を待っている明細を、同じ日・同じ方法で、すべて消し込む
-          isAdmin() && payable.length > 0 && smallBtn(`入金を記録（${yen(payable.reduce((s, l) => s + l.payable, 0))}）`, () => askForm('入金の記録（まとめて消し込み）',
+          isAdmin() && payable.length > 0 && smallBtn('入金を記録', () => askForm('入金の記録（まとめて消し込み）',
             `${name}さん　${payable.length}件　合計 ${yen(payable.reduce((s, l) => s + l.payable, 0))}。受け取った金額が、この合計と同じときだけ、記録してください。一部だけの入金は、明細を開いて、1件ずつ記録します。`,
             [field('入金の日', 'paidOn', { type: 'date', value: todayStr(), max: todayStr(), required: true }, '振込なら、通帳・明細に載っている日'),
               field('方法', 'method', { options: [['transfer', '銀行振込'], ['cash', '現金'], ['card', 'クレジット']] }), field('メモ', 'memo', {}, '任意')],
@@ -222,7 +242,6 @@ async function billingPanel() {
               }
               return { ok: true };
             }, '記録する'), 'btn-primary'),
-          smallBtn(isOpen ? '明細をしまう' : `明細を見る（${list.length}件）`, toggle),
           ...invs.flatMap((i) => invActions(i, invs.length > 1)))));
       // 開いた明細の行: 2列目は、会員番号の列なので、空にする（参加番号は、会員の行に出している）
       if (isOpen) out.push(...list.map((it) => { it.tr.classList.add('linerow'); it.tr.children[1].textContent = ''; return it.tr; }));
@@ -233,22 +252,14 @@ async function billingPanel() {
     empty.hidden = !!hit.length;
     empty.textContent = items.length ? 'この条件に合う明細は、ありません。' : '落札した品は、まだありません。';
     const liveAll = hit.filter(({ l }) => l.state !== 'cancelled');
-    summary.textContent = hit.length ? `${groups.size}人・${liveAll.length}点　合計 ${yen(liveAll.reduce((s, { l }) => s + l.payable, 0))}` : '';
+    const narrowed = !!(q || billingFilter.receive || billingFilter.state);
+    summary.hidden = !narrowed;
+    summary.replaceChildren(...(narrowed ? [`絞り込みの結果　${groups.size}人・${liveAll.length}点　合計 ${yen(liveAll.reduce((s, { l }) => s + l.payable, 0))}　`,
+      smallBtn('絞り込みを解除', () => { Object.assign(billingFilter, { q: '', receive: '', state: '' }); show('billing'); })] : []));
   }
   applyFilter();
   const nodes = [
     // 書き出しは、月に一度ほどの作業なので、ひとつの「書き出す」の中にまとめる（報告書 83 章）
-    el('div', { class: 'toolbar' }, el('div', { class: 'toolbar__acts' }, settleBtn, settleCardBtn), isAdmin() && exportMenu([
-      // 書き出しは、上で選んだ開催の分（発注者の決定。報告書 125 章）。「すべての開催」のときは、これまでどおり（配送は全部、帳簿と請求書は今月）
-      ...(res.event !== null && res.event !== undefined ? [
-        el('a', { class: 'btn', href: `/api/billing/shipping.csv?event=${res.event}`, text: '配送の一覧（この開催・CSV）' }),
-        el('a', { class: 'btn', href: `/api/billing/ledger.csv?event=${res.event}`, text: '帳簿用の記録（この開催・CSV）' }),
-        el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?event=${res.event}`, text: '請求書の一覧（この開催・Excel）' }),
-      ] : [
-        el('a', { class: 'btn', href: '/api/billing/shipping.csv', text: '配送の一覧（すべての開催・CSV）' }),
-        el('a', { class: 'btn', href: `/api/billing/ledger.csv?month=${res.today.slice(0, 7)}`, text: '帳簿用の記録（今月・CSV）' }),
-        el('a', { class: 'btn', href: `/api/billing/invoices.xlsx?month=${res.today.slice(0, 7)}`, text: '請求書の一覧（今月・Excel）' }),
-      ])])),
     el('p', { class: 'msg', id: 'line', role: 'alert' }),
     filterBar,
     ...(paySummary ? [paySummary] : []),

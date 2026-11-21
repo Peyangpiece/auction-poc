@@ -672,15 +672,42 @@ body.staffpage #login { margin-inline: auto; }
   .shiprow td:nth-child(5) > div { flex-basis: 100%; margin-left: 0; width: auto; text-align: left; }
   .shiprow td:nth-child(4) > div { margin-left: auto; }
 }
-/* 請求: 支払方法ごとの集計（報告書 133 章）。銀行振込・当日現金・当日クレジット・合計を、カードで横に並べる */
-.paysum { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 8px; }
-.paycard { display: grid; gap: 2px; align-content: start; padding: 12px 14px; border: 1px solid var(--edge); border-radius: var(--r); background: var(--ground); min-width: 0; }
-.paycard[data-on="1"] { border-color: var(--action); border-width: 2px; padding: 11px 13px; }
-.paycard b { font-size: 0.9375rem; }
-.paycard__n { font-size: 0.8125rem; color: var(--ink-2); }
-.paycard__sum { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-.paycard > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
-.paycard .btn { margin-top: 6px; justify-self: start; white-space: normal; }
-/* せまい画面では、2列に固定する（文字の幅で、カードが画面からはみ出さないように） */
-@media (max-width: 700px) { .paysum { grid-template-columns: repeat(2, minmax(0, 1fr)); } .paycard { padding: 10px; } .paycard[data-on="1"] { padding: 9px; } }
-#billing .paysum + .note { margin-bottom: 16px; }
+/* ==== 請求のページ（報告書 134 章）: 絞り込み1行・集計の札1行・会員の一覧、の3段に詰める ==== */
+/* 絞り込み: 見出しの行を出さない（欄の中の文字で分かる）。開催・検索・受け取り・状態・書き出す、を1行に */
+.filters--bare { align-items: center; gap: 8px; margin-bottom: 10px; }
+.filters--bare .filter { min-width: 0; }
+.filters--bare .filter--event { flex: 0 1 17rem; }
+.filters--bare .filter--wide { flex: 1 1 9rem; }
+/* 支払方法ごとの集計: 押すと絞り込む札。すべて・銀行振込・当日現金・当日クレジット */
+.paysum { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; margin-bottom: 12px; }
+.paychip { display: grid; gap: 2px; min-width: 0; padding: 8px 12px; text-align: left; font: inherit; color: var(--ink); background: var(--ground); border: 1px solid var(--edge); border-radius: var(--r); cursor: pointer; }
+.paychip:hover { background: var(--ground-alt); }
+.paychip[aria-pressed="true"] { border-color: var(--action); box-shadow: inset 0 0 0 1px var(--action); background: color-mix(in srgb, var(--action) 6%, var(--ground)); }
+.paychip__top, .paychip__sum { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 8px; min-width: 0; }
+.paychip__top b { font-size: 0.875rem; }
+.paychip__top span { font-size: 0.75rem; color: var(--ink-2); }
+.paychip__sum > span:first-child { font-size: 1.0625rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.paychip__sum .warn, .paychip__ok { font-size: 0.75rem; }
+.paychip__ok { color: var(--ok); }
+.filtersum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0 0 8px; }
+.filtersum[hidden] { display: none; }
+.filtersum .btn { min-height: 32px; padding: 2px 10px; font-size: 0.8125rem; }
+.linelabel { font-weight: 600; }
+/* 請求書の行は、折り返してよい（1行に固定すると、表が横に伸びて、右端の操作が画面の外に出ていた） */
+.billlist .invline { white-space: normal; }
+@media (min-width: 701px) {
+  .billlist td:nth-child(3), .billlist td:nth-child(4), .billlist td:nth-child(4) > div, .billlist td.act .btn { white-space: nowrap; }
+  .billlist td.act { white-space: nowrap; }
+  .billlist .memberrow td { padding-top: 10px; padding-bottom: 10px; }
+}
+/* 精算のダイアログ: その人の未精算の品（印つき）と、精算する金額 */
+.settle { list-style: none; margin: 0 0 8px; padding: 0; border-top: 1px solid var(--line); max-height: 46vh; overflow: auto; }
+.settle label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 44px; padding: 4px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.settle__sum { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 4px; }
+.settle__total { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.settle__acts { flex-wrap: wrap; }
+.billlist .invline span { white-space: nowrap; }
+@media (max-width: 700px) {
+  .paysum { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .filters--bare .filter--event { flex: none; }
+}

@@ -435,11 +435,14 @@ try {
   await admin.click('#panel .memberrow .expander');
   await admin.waitForSelector('#panel .linerow');
   check((await admin.textContent('#panel table')).includes('¥11,000') && (await admin.textContent('#panel table')).includes('落札 ¥10,000＋買歩銭 ¥1,000'), '落札すると、請求の画面に「未精算」の明細が出る。金額は、落札額＋買歩銭10%');
-  await admin.check('#panel table input[type=checkbox]');
+  // 会場での精算は、会員の行の「精算」から（報告書 134 章）。その人の未精算の品と金額が出て、当日現金か当日クレジットかを選ぶ
+  await admin.click('#panel .memberrow td.act >> text=精算');
+  await admin.waitForSelector('#dlg[open] .settle');
   await shot(admin, 'mvp-24-billing-settle');
-  check(await admin.isVisible('#panel >> text=1件を、当日クレジットで精算'), '明細を選ぶと、当日現金と当日クレジットの、精算のボタンが出る');
-  { const t = (await admin.textContent('#panel .paysum')).replace(/\s+/g, ' '); check(t.includes('銀行振込') && t.includes('当日現金') && t.includes('当日クレジット') && t.includes('合計'), '請求の画面に、支払方法ごとの集計（銀行振込・当日現金・当日クレジット）が出る'); }
-  await admin.click('#panel >> text=1件を、当日現金で精算');
+  { const t = (await admin.textContent('#dlg')).replace(/\s+/g, ' '); check(t.includes('¥11,000') && t.includes('当日現金で精算') && t.includes('当日クレジットで精算'), '会員の行の「精算」で、その人の未精算の品と金額が出て、当日現金・当日クレジットを選べる'); }
+  { const t = (await admin.textContent('#panel .paysum')).replace(/\s+/g, ' '); check(t.includes('すべて') && t.includes('銀行振込') && t.includes('当日現金') && t.includes('当日クレジット') && t.includes('未入金 ¥11,000'), '請求の画面に、支払方法ごとの集計（すべて・銀行振込・当日現金・当日クレジット）が出る'); }
+  await admin.click('#dlg >> text=当日現金で精算');
+  await admin.waitForFunction(() => document.getElementById('dlg').textContent.includes('発行しました'));
   await admin.waitForSelector('#dlg[open]');
   check(/請求書（領収書を兼ねる）\d{8}-0001 を発行しました/.test(await admin.textContent('#dlg')), '精算すると、請求書（領収書を兼ねる）を発行する');
   const pdfUrl = await admin.getAttribute('#dlg a', 'href');
