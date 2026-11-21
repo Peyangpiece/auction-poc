@@ -4,19 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#04052a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="robots" content="noindex">
 <title>管理｜令和の競り</title>
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-title" content="令和の競り">
-<!-- impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 -->
-<link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="site.css">
 </head>
-<body>
+<body class="staffpage">
 <a class="skip" href="#main">本文へ進む</a>
 <header class="brandbar">
   <div>
@@ -30,30 +28,54 @@
 <section id="login" hidden>
   <div class="pagehead"><h1>スタッフ ログイン</h1><hr class="rule"></div>
   <form class="form" id="loginForm" novalidate>
-    <label class="field">メールアドレス<input class="input" name="email" type="text" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" required><span class="err" role="alert"></span></label>
-    <label class="field">パスワード<input class="input" name="password" type="password" autocomplete="current-password" required><span class="err" role="alert"></span></label>
+    <label class="field">メールアドレス<input class="input" name="email" type="text" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" required><span class="err"></span></label>
+    <label class="field">パスワード<input class="input" name="password" type="password" autocomplete="current-password" required><span class="err"></span></label>
     <p class="msg" role="alert" tabindex="-1"></p>
     <div class="actions"><button class="btn btn-primary btn-lg" type="submit">ログイン</button></div>
     <p class="aside"><button class="textbtn" type="button" id="firstTime">はじめての方（パスワードを決める）</button></p>
   </form>
+  <!-- はじめての方: メールアドレスを入れると、パスワードを決めるためのメールが届く -->
+  <form class="form" id="requestForm" novalidate hidden>
+    <p class="note">スタッフとして登録されたメールアドレスを入れてください。パスワードを決めるためのメールをお送りします。</p>
+    <label class="field">メールアドレス<input class="input" name="email" type="email" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" required><span class="err"></span></label>
+    <p class="msg" role="status" tabindex="-1"></p>
+    <div class="actions"><button class="btn btn-primary btn-lg" type="submit">メールを送る</button></div>
+    <p class="aside"><button class="textbtn" type="button" id="backToLogin">ログインに戻る</button></p>
+  </form>
+  <!-- メールのリンクを開いた人: パスワードを決める -->
   <form class="form" id="setupForm" novalidate hidden>
-    <p class="note">主催者管理者が登録したメールアドレスを入れて、パスワードを決めてください。</p>
-    <label class="field">メールアドレス<input class="input" name="email" type="text" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" required><span class="err" role="alert"></span></label>
-    <label class="field">新しいパスワード<small>12文字以上</small><input class="input" name="password" type="password" autocomplete="new-password" required><span class="err" role="alert"></span></label>
-    <label class="field">新しいパスワード（もう一度）<input class="input" name="password2" type="password" autocomplete="new-password" required><span class="err" role="alert"></span></label>
+    <p class="verified dyn" id="setupWho"></p>
+    <label class="field">新しいパスワード<input class="input" name="password" type="password" autocomplete="new-password" placeholder="12文字以上" required><span class="err"></span></label>
+    <label class="field">新しいパスワード（もう一度）<input class="input" name="password2" type="password" autocomplete="new-password" required><span class="err"></span></label>
     <p class="msg" role="alert" tabindex="-1"></p>
     <div class="actions"><button class="btn btn-primary btn-lg" type="submit">パスワードを決めて、ログインする</button></div>
-    <p class="aside"><button class="textbtn" type="button" id="backToLogin">ログインに戻る</button></p>
   </form>
 </section>
 <section id="app" hidden>
-  <div class="toolbar"><div class="pagehead"><h1>管理</h1><p id="who"></p></div><div><a class="btn" id="toMonitor" href="/monitor.html" hidden>会場モニターを開く</a> <a class="btn btn-primary" id="toConsole" href="/console.html" hidden>進行コンソールを開く</a></div></div>
-  <div class="tabs" role="tablist" id="tabs"></div>
-  <div id="panel" role="tabpanel"></div>
+  <h1 class="sr-only">管理</h1>
+  <!-- 左の列: 区分、ほかの画面への入口、自分のアカウント（上の帯の大きなボタンと見出しは、なくした。報告書 83 章） -->
+  <div class="side">
+    <div class="tabs" role="tablist" id="tabs" aria-label="管理の区分"></div>
+    <nav class="screens" aria-label="ほかの画面">
+      <a id="toConsole" href="/console.html" hidden>進行コンソール</a>
+      <a id="toCaller" href="/caller.html" hidden>オークショニア画面</a>
+      <a id="toMonitor" href="/monitor.html" hidden>会場モニター</a>
+    </nav>
+    <div class="me"><span id="who"></span><button class="textbtn" type="button" id="myPassword">パスワードを変える</button></div>
+  </div>
+  <div id="panel" role="tabpanel" tabindex="-1"></div>
 </section>
-<dialog class="wide" id="dlg"></dialog>
+<dialog class="wide" id="dlg" aria-labelledby="dlgTitle"></dialog>
 </main>
 <script src="site.js"></script>
+<script src="staff-ui.js"></script>
+<script src="staff-events.js"></script>
+<script src="staff-members.js"></script>
+<script src="staff-reception.js"></script>
+<script src="staff-billing.js"></script>
+<script src="staff-shipping.js"></script>
+<script src="staff-admin.js"></script>
 <script src="staff.js"></script>
+<script src="ops-alert.js"></script>
 </body>
 </html>

@@ -9,13 +9,13 @@ let phone = '';
 const after = new URLSearchParams(location.search).get('next') === 'bidder' ? '/bidder.html' : '/';
 const pwForm = $('#pwForm');
 // SMS を使わない設定（本番）のときは、連絡先の欄を、メールアドレスだけにする
+let smsOn = true;
 api('GET', '/api/terms').then((t) => {
   if (t.sms !== false) return;
+  smsOn = false;
   const input = phoneForm.elements.id;
   input.closest('label').firstChild.textContent = 'メールアドレス';
   input.type = 'email'; input.placeholder = 'taro@example.com'; input.autocomplete = 'email';
-  const note = phoneForm.querySelector('.note');
-  if (note) note.textContent = '登録したメールアドレスに、認証番号をお送りします。ログインのあと、マイページで、新しいパスワードを決めてください。';
 });
 
 onSubmit(pwForm, async (data) => {
@@ -33,9 +33,9 @@ onSubmit(phoneForm, async (data) => {
   const res = await api('POST', '/api/login/start', { id: phone });
   if (res.ok) {
     $('#sentTo').textContent = res.via === 'email'
-      ? `確認済みのアドレスであれば、${phone} に認証番号を送りました。届かない場合は、携帯電話の番号でお試しください`
-      : `登録済みの番号であれば、${phone} に認証番号を送りました`;
-    if (res.devCode) $('#sentTo').textContent += `　【お試し用】認証番号 ${res.devCode}`;
+      // SMS を使わない設定では、携帯電話の番号を案内しない（本番運用の評価 U9）
+      ? `確認済みのアドレスであれば、${phone} に認証番号を送りました。5分以内に入力してください。${smsOn ? '届かない場合は、携帯電話の番号でお試しください' : '届かない場合は、迷惑メールのフォルダーを確かめるか、主催者にお問い合わせください'}`
+      : `登録済みの番号であれば、${phone} に認証番号を送りました。5分以内に入力してください`;
     phoneForm.hidden = true;
     codeForm.hidden = false;
     codeForm.elements.code.focus();
@@ -55,6 +55,7 @@ $('#resend').addEventListener('click', async (ev) => {
   const msg = $('.msg', codeForm);
   msg.classList.toggle('ok', res.ok);
   msg.textContent = res.ok ? '認証番号を送り直しました' : res.message;
+  codeForm.elements.code.focus(); // 押したボタンは10秒止まるので、次に入れる欄へ（フォーカスが外れないように）
   setTimeout(() => { ev.target.disabled = false; }, 10000);
 });
 
@@ -63,5 +64,6 @@ $('#resend').addEventListener('click', async (ev) => {
   if (after === '/bidder.html') for (const link of document.querySelectorAll('a[href="/register.html"]')) link.href = '/register.html?next=bidder';
   const me = await setupNav();
   if (me.member) location.replace(after);
-  else pwForm.elements.loginId.focus();
+  // 開いてすぐの欄へのフォーカスは、広い画面だけ（スマホでは、キーボードが急に出て、画面の上半分が隠れるため。報告書 82 章）
+  else if (matchMedia('(min-width: 641px)').matches) pwForm.elements.loginId.focus();
 })();

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<title>オークショニア｜令和の競り</title>
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-title" content="令和の競り">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="caller.css">
+</head>
+<body>
+<!-- オークショニアの画面（発注者の指示。報告書 73・74 章）: 次の品の開始と、競りの最中の開始価格・うりきり・締め・流札・中断・再開を操作する。
+     すべてのボタンを、スクロールなしで1画面に収める（タブレットの縦・横、スマホ、パソコン） -->
+<div class="overlay" id="overlay" role="alert"><div><span id="overlayText">接続しています…</span></div></div>
+<div class="app">
+  <header class="bar">
+    <!-- 役割の名前と時計は出さない（本人は分かっている。時刻はスマホの上に出ている。報告書 87 章） -->
+    <!-- 競りの時間外だけ、トップページへ戻る道を出す（競りの最中は、誤って押して画面を離れないように出さない） -->
+    <span class="bar__meta"><a class="homelink" id="homeLink" href="/" hidden><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg>ホーム</a><span id="presence">参加者 0人</span></span>
+    <button class="btn barbtn" type="button" id="suspend" hidden>中断</button>
+  </header>
+
+  <!-- 競りの時間外（本日の開催がない・終わった）: 操作のボタンは出さず、そのことと次の開催だけを出す（発注者の指示。報告書 87 章） -->
+  <section class="offhours" id="offhours" hidden aria-live="polite">
+    <p class="offhours__title" id="offTitle"></p>
+    <div class="offhours__next" id="offNext" hidden>
+      <span class="offhours__label">次の開催</span>
+      <b class="offhours__date" id="offDate"></b>
+      <span class="offhours__info dyn" id="offInfo"></span>
+    </div>
+  </section>
+  <main class="stage" id="main" tabindex="-1">
+    <h1 class="sr-only">オークショニア</h1>
+    <!-- 品と価格 -->
+    <section class="lot">
+      <div class="lot__head">
+        <p class="lot__name"><span class="num" id="lotNo"></span><span class="dyn" id="title">品を待っています</span></p>
+        <span class="state" id="status" data-st="idle">待機中</span>
+      </div>
+      <p class="lot__label" id="priceLabel">現在価格</p>
+      <p class="lot__price digits" id="price">—</p>
+      <ul class="facts" id="facts">
+        <li><span>最高入札者</span><b class="num" id="leader">—</b></li>
+        <li><span>うりきりまで</span><b id="urikiriState">—</b></li>
+      </ul>
+    </section>
+
+    <div class="controls">
+    <!-- 開始価格 -->
+    <section class="start" id="startBox" aria-labelledby="startTitle">
+      <h2 class="sr-only" id="startTitle">開始価格</h2>
+      <form class="start__row" id="startForm" novalidate>
+        <button class="btn step" type="button" id="stepDown" aria-label="1段下げる">−</button>
+        <label class="amount"><span class="yen" aria-hidden="true">¥</span><input id="startInput" inputmode="numeric" autocomplete="off" aria-label="新しい開始価格（円）"></label>
+        <button class="btn step" type="button" id="stepUp" aria-label="1段上げる">＋</button>
+        <button class="btn btn-primary" type="submit" id="setStart">変更</button>
+      </form>
+    </section>
+
+    <!-- 操作 -->
+    <section class="acts" aria-label="操作">
+      <button class="act act--urikiri" type="button" id="urikiri"><b>うりきり</b><span id="urikiriSub"></span></button>
+      <button class="act act--pass" type="button" id="pass"><b>流札</b><span id="passSub"></span></button>
+      <button class="act act--close" type="button" id="close"><b id="closeLabel">締め</b><span id="closeSub"></span></button>
+    </section>
+    <p class="msg" id="msg" role="status"></p>
+    <p class="sr-only" id="lotSay" role="status" aria-atomic="true"></p>
+    </div>
+  </main>
+</div>
+
+<!-- 開始価格の入力（進行役がパソコンで品名だけを登録すると、自動で開く。発注者の指示。報告書 76 章） -->
+<dialog id="startSheet" class="sheet" aria-labelledby="sheetTitle">
+  <form id="sheetForm" novalidate>
+    <p class="sheet__lot" id="sheetLot"></p>
+    <h2 id="sheetTitle">開始価格を入力</h2>
+    <label class="amount amount--lg"><span class="yen" aria-hidden="true">¥</span><input id="sheetInput" inputmode="numeric" autocomplete="off" aria-label="開始価格（円）" placeholder="0"></label>
+    <p class="sheet__err" id="sheetMsg" role="alert"></p>
+    <button class="act act--close sheet__go" type="submit" id="sheetGo"><b>競りを開始</b><span id="sheetSub"></span></button>
+    <button class="textbtn" type="button" id="sheetLater">あとで</button>
+  </form>
+</dialog>
+
+<!-- 確かめ（取り消せない操作だけ） -->
+<dialog id="dlg" aria-labelledby="dlgTitle">
+  <form method="dialog" id="dlgForm">
+    <h2 id="dlgTitle"></h2>
+    <p id="dlgBody"></p>
+    <div class="actions"><button class="btn" type="button" id="dlgCancel" value="cancel">やめる</button><button class="btn btn-primary" type="submit" id="dlgOk">実行する</button></div>
+  </form>
+</dialog>
+<script src="common.js"></script>
+<script src="caller.js"></script>
+</body>
+</html>

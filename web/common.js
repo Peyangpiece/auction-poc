@@ -1,5 +1,15 @@
 // 検証用の画面の共通部品（本番には引き継がない）: 接続、再接続、時刻合わせ。
 'use strict';
+/** 入力中に区切り（, や -）を付け直しても、カーソルを、同じ数字のあとに戻す（末尾へ飛ばない。報告書 82 章） */
+function setKeepCaret(input, text) {
+  const at = input.selectionStart ?? input.value.length;
+  const digitsBefore = input.value.slice(0, at).replace(/[^0-9０-９]/g, '').length;
+  input.value = text;
+  if (document.activeElement !== input) return;
+  let pos = 0, seen = 0;
+  while (pos < text.length && seen < digitsBefore) { if (/[0-9]/.test(text[pos])) seen++; pos++; }
+  try { input.setSelectionRange(pos, pos); } catch { /* 選べない種類の欄 */ }
+}
 
 // 金額と時刻は Intl で整形する（金額は全桁をそのまま表示する。隠さない・並べ替えない）
 const yenFmt = new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY' });
@@ -36,6 +46,32 @@ const CLOSE_REASON = {
   4409: '同時に開ける画面の数を超えました',
   4429: '送信が多すぎるため、接続を切りました',
 };
+
+// 切られたときに、次に行く先（報告書 80 章）。サーバーが切る直前に送った理由（code）で決める
+// page: 'bidder' | 'console' | 'caller' | 'monitor'
+function overlayAction(code, page) {
+  const staffPage = page !== 'bidder';
+  if (code === 'LOGIN' || code === 'SIGNED_OUT') return staffPage ? { href: `/staff.html?next=${page}`, text: 'ログインし直す' } : { href: '/login.html?next=bidder', text: 'ログインし直す' };
+  if (code === 'FORBIDDEN') return { href: '/staff.html', text: '管理の画面に戻る' };
+  if (code === 'NOT_JOINED' || code === 'NOT_CHECKED_IN') return { href: '/bidder.html', text: '開き直す' };
+  if (code === 'NO_EVENT') return { href: '/mypage.html', text: 'マイページへ' };
+  return null;
+}
+/** 接続の状態を、画面いっぱいの帯で出す。行き先があれば、ボタンを付ける */
+function showOverlay(up, why, code, page) {
+  document.getElementById('overlay').style.display = up ? 'none' : 'flex';
+  // 切れているあいだは、後ろの画面をぼかす（古い価格を、いまの価格と読み違えないように。本番運用の評価 C）
+  document.body.classList.toggle('offline', !up);
+  // 帯を出しているあいだは、後ろの画面に Tab で移れないようにする（押しても通らない操作に、迷い込まないように。報告書 82 章）
+  for (const node of document.body.children) if (node.id !== 'overlay' && node.id !== 'gate' && !['SCRIPT', 'DIALOG'].includes(node.tagName)) node.inert = !up;
+  const text = document.getElementById('overlayText');
+  text.textContent = why ?? '再接続中…';
+  let a = document.getElementById('overlayAction');
+  const act = up ? null : overlayAction(code, page);
+  if (!act) { a?.remove(); return; }
+  if (!a) { a = document.createElement('a'); a.id = 'overlayAction'; a.className = 'btn btn-primary overlay__action'; text.after(a); }
+  a.href = act.href; a.textContent = act.text;
+}
 
 const STATE_LABEL = {
   waiting: '待機', preparing: '配信準備中', preparing_warn: '配信準備中（警告）', open: '受付中',
@@ -84,6 +120,7 @@ class Link {
       const at = localNow();
       this.lastHeardAt = at;
       const msg = JSON.parse(ev.data);
+      if (msg.type === 'error' && msg.code) this.closeInfo = { code: msg.code, message: msg.message }; // 切られる直前に届く理由
       if (msg.type === 'time' || msg.type === 'bid_result' || msg.type === 'cmd_result' || msg.type === 'comment_result') {
         const key = msg.type === 'time' ? 't' + msg.t0 : msg.reqId;
         const w = this.waiters.get(key);
@@ -91,6 +128,7 @@ class Link {
         if (msg.type === 'time') return;
       }
       if (msg.type === 'welcome') {
+        this.closeInfo = null;
         const wasDown = this.downAt;
         this.attempt = 0;
         this.downAt = null;
@@ -110,7 +148,12 @@ class Link {
     };
     ws.onclose = (ev) => {
       if (ws !== this.ws) return; // すでに見切りをつけて、つなぎ直しに入っている
-      if (CLOSE_REASON[ev.code]) { this.ws = { readyState: 3, send() {}, close() {} }; return this.onStatus(false, CLOSE_REASON[ev.code]); } // つなぎ直さない
+      if (ev.code === 4503) return this.dropped('busy'); // 混み合っている: 少し待って、つなぎ直す
+      if (CLOSE_REASON[ev.code]) { // つなぎ直さない。サーバーが理由を送っていれば、その文を出す（固定の文では、何が起きたか分からないため）
+        this.ws = { readyState: 3, send() {}, close() {} };
+        const info = ev.code === 4403 ? this.closeInfo : null;
+        return this.onStatus(false, info?.message ?? CLOSE_REASON[ev.code], false, info?.code ?? null);
+      }
       this.dropped('close');
     };
     ws.onerror = () => {};
@@ -125,9 +168,14 @@ class Link {
     this.lastDropCause = cause;
     // 応答を待っている操作（入札など）を、時間切れまで待たせない。届いたかどうかは、再接続後の表示で分かる
     for (const [key, w] of this.waiters) { this.waiters.delete(key); w(null); }
-    this.onStatus(false);
-    // 切れてから1秒後に1回目を試し、その後は2秒ごとに試す（FR-UI-001）
-    setTimeout(() => this.connect(), this.attempt++ === 0 ? 1000 : 2000);
+    this.onStatus(false, cause === 'busy' ? '混み合っています。自動でつなぎ直します' : undefined);
+    // 切れてから1秒後に1回目を試し、その後は約2秒ごとに試す（FR-UI-001）。サーバーの入れ替えで全員が同時に切れても、
+    // 同じ瞬間につなぎ直さないように、幅を持たせてばらす（本番運用の評価 C7）。1回目は 1〜1.5秒（前より早くはしない。
+    // 起動し直している最中のサーバーに、早くつなぎに行かないように）、2回目からは 1.5〜2.5秒。
+    // 混み合っているときは、2〜6秒の間でばらして試す
+    const wait = cause === 'busy' ? 2000 + Math.random() * 4000 : this.attempt === 0 ? 1000 + Math.random() * 500 : 1500 + Math.random() * 1000;
+    this.attempt++;
+    setTimeout(() => this.connect(), wait);
   }
 
   send(obj) {
@@ -165,3 +213,32 @@ class Link {
 // 競りの画面を開いているあいだ、10分ごとに、サーバーへ短い問い合わせを送る。
 // 入札の通信（WebSocket）だけが続いていると、置き場所によっては「だれも使っていない」と見なされて、サーバーが休んでしまうため
 setInterval(() => { fetch('/healthz', { cache: 'no-store' }).catch(() => {}); }, 10 * 60 * 1000);
+
+// 開催が切り替わったら（別の開催が始まった・終わった）、画面を読み込み直して、最初からにする（報告書 112 章）。
+// 4つの画面（入札・進行コンソール・オークショニア・会場モニター）で同じなので、ここに1つだけ置く（報告書 120 章）
+function reloadOnNewEvent(S, msg) {
+  const id = msg.event?.id ?? null;
+  if (S.eventKey !== undefined && S.eventKey !== id) { location.reload(); return true; }
+  S.eventKey = id;
+  return false;
+}
+
+// 待機中の画面（発注者の指示。報告書 126・132 章）。入札の画面と進行コンソールで同じなので、ここに1つだけ置く。
+// どの場面か: ended 終了後 / before 開催を始める前 / break 休憩中 / nolive 進行中だが、映像が届いていない / null 映像を出す
+function standbyKindOf(event, ended, stream) {
+  if (ended) return 'ended';
+  if (!event) return null;
+  if (!event.phase) return 'before';
+  if (event.phase === 'break') return 'break';
+  return stream?.live && stream?.playbackUrl ? null : 'nolive';
+}
+// root の中の .standby__title / __event / __sub に、場面のことばを入れる
+function fillStandby(root, kind, event, title) {
+  root.hidden = !kind;
+  if (!kind) return;
+  root.dataset.kind = kind;
+  const set = (c, t) => { const n = root.querySelector(c); if (n.textContent !== t) n.textContent = t; };
+  set('.standby__title', { before: 'まもなく始まります', break: '休憩中', ended: '本日の競りは終了しました', nolive: '映像の配信をお待ちください' }[kind]);
+  set('.standby__event', title ?? event?.title ?? '');
+  set('.standby__sub', kind === 'before' ? `開始の予定 ${event.startsAt}` : kind === 'break' ? `再開の予定 ${event.resumeAt}` : kind === 'ended' ? 'ご参加ありがとうございました' : '競りは進行中です');
+}

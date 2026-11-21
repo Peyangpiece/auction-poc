@@ -67,12 +67,36 @@ test('入札があっても、最低落札額に届かないまま締めると�
   assert.equal((await m[2].bid(lot.id, 11000)).code, 'AFTER_CLOSE');
 });
 
-test('最低落札額のないロットは、いつでも「うりきり」。設定の誤りは拒否する', async () => {
-  const lot = await createLot(A, 9500);
-  assert.deepEqual([lot.reservePrice, lot.urikiri], [null, true]);
-  const same = await createLot(A, 9500, null, 'テスト品', 9500); // 開始価格と同じなら、設定なしと同じ
-  assert.deepEqual([same.reservePrice, same.urikiri], [null, true]);
-  for (const bad of [9000, 10500, 1.5]) {
+test('最低落札額の入力がないロットは、オークショニアが「うりきり」を押すまでランプが点かない（発注者の決定。報告書 89 章）', async () => {
+  const lot = await createLot(A, 9500, null, 'テスト品', null, { urikiri: false });
+  assert.deepEqual([lot.reservePrice, lot.urikiri], [null, false], '入力がなければ、ランプは消えたまま');
+  await A.cmd('start', { lotId: lot.id });
+  const r1 = await m[0].bid(lot.id, 9500);
+  assert.deepEqual([r1.accepted, r1.urikiri], [true, false], '入札があっても、押すまでは点かない');
+  assert.equal((await A.cmd('urikiri', { lotId: lot.id })).ok, true);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(m[1].lots.get(lot.id).urikiri, true, '押すと、会員の画面のランプが点く');
+  assert.equal((await A.cmd('urikiri', { lotId: lot.id })).message, 'すでに、うりきりです');
+  assert.match((await A.cmd('pass', { lotId: lot.id })).message, /うりきりのため/, 'ランプが点いたら、流札にできない');
+  assert.equal((await A.cmd('close', { lotId: lot.id })).status, 'sold', '押したあとに締めれば、落札');
+
+  // 押さずに締めると、入札があっても流札（2つのランプがそろわない）
+  const lot2 = await createLot(A, 9500, null, 'テスト品', null, { urikiri: false });
+  await A.cmd('start', { lotId: lot2.id });
+  assert.equal((await m[0].bid(lot2.id, 9500)).accepted, true);
+  const closed = await A.cmd('close', { lotId: lot2.id });
+  assert.equal(closed.status, 'unsold', '押さずに締めると、流札');
+});
+
+test('最低落札額が開始価格と同じなら、最初の入札でランプが点く。設定の誤りは拒否する', async () => {
+  const same = await createLot(A, 9500, null, 'テスト品', 9500);
+  assert.deepEqual([same.reservePrice, same.urikiri], [9500, false], '最低落札額は、そのまま持つ（入札の前は、まだ点かない）');
+  await A.cmd('start', { lotId: same.id });
+  assert.equal((await m[0].bid(same.id, 9500)).urikiri, true, '最初の入札で届いて、点く');
+  await A.cmd('close', { lotId: same.id });
+  const odd = await createLot(A, 9500, null, 'テスト品', 10501); // 1円単位で入札できるので、最低落札額も段に合わせなくてよい
+  assert.equal(odd.reservePrice, 10501);
+  for (const bad of [9000, 1.5]) {
     const r = await A.cmd('create_lot', { title: 'x', startPrice: 9500, reservePrice: bad });
     assert.equal(r.ok, false, String(bad));
     assert.ok(r.message);

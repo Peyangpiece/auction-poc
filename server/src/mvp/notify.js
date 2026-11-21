@@ -31,7 +31,10 @@ export function httpMailSender(url, other) {
     if (!res.ok) {
       let why = '';
       try { why = (await res.json()).error ?? ''; } catch { /* 理由なし */ }
-      throw new Error(`メールを送れませんでした（${res.status}）${why ? ' ' + why : ''}`);
+      const err = new Error(`メールを送れませんでした（${res.status}）${why ? ' ' + why : ''}`);
+      // 宛先や中身がおかしいと言われたとき（400 番台。混雑の 429 と時間切れの 408 は除く）は、送り直しても同じなので、やり直さない
+      /** @type {any} */ (err).permanent = res.status >= 400 && res.status < 500 && res.status !== 429 && res.status !== 408;
+      throw err;
     }
     await res.body?.cancel();
   };
@@ -42,12 +45,32 @@ export class Notifier {
    * @param {(message: object) => Promise<void>} send 1通を送る関数（失敗したら例外を投げる）
    * @param {(failure: object) => void} onGiveUp 再送しても失敗したときに呼ぶ（主催者管理者への知らせに使う）
    */
-  constructor(send, onGiveUp = () => {}, { retries = 3, waitMs = 500 } = {}) {
+  constructor(send, onGiveUp = () => {}, { retries = 3, waitMs = 500, intervalMs = 0 } = {}) {
     this.send = send;
     this.onGiveUp = onGiveUp;
     this.retries = retries;
     this.waitMs = waitMs;
+    // メールは、1通ずつ、決まった間隔をあけて送る（送信サービスの速さの上限に当たって、一斉に送ったお知らせが落ちないように。本番運用の評価 B11）
+    this.intervalMs = intervalMs;
+    // 待ちの列は2本。急ぎ（認証番号）は、ふつうのメール（お知らせ・請求）より先に送る。
+    // 1本だけだと、大量のお知らせや、いたずらの登録が、認証番号を何分も待たせてしまう
+    this.urgent = []; this.normal = []; this.pumping = false;
   }
+
+  async #pump() {
+    if (this.pumping) return;
+    this.pumping = true;
+    try {
+      for (;;) {
+        const job = this.urgent.shift() ?? this.normal.shift();
+        if (!job) break;
+        job.resolve(await this.#deliver(job.message));
+        await new Promise((r) => setTimeout(r, this.intervalMs));
+      }
+    } finally { this.pumping = false; }
+  }
+  /** まだ送っていないメールの数（急ぎ・ふつう） */
+  get waiting() { return { urgent: this.urgent.length, normal: this.normal.length }; }
 
   async #deliver(message) {
     let lastError = null;
@@ -58,6 +81,7 @@ export class Notifier {
         return true;
       } catch (err) {
         lastError = err;
+        if (err?.permanent) break;
       }
       if (attempt < this.retries) await new Promise((r) => setTimeout(r, this.waitMs * (attempt + 1)));
     }
@@ -78,6 +102,10 @@ export class Notifier {
   }
 
   email(to, kind, subject, body) {
-    return this.#deliver({ channel: 'email', to, kind, subject, body });
+    if (!this.intervalMs) return this.#deliver({ channel: 'email', to, kind, subject, body });
+    return new Promise((resolve) => {
+      (kind === 'otp' ? this.urgent : this.normal).push({ message: { channel: 'email', to, kind, subject, body }, resolve });
+      this.#pump();
+    });
   }
 }

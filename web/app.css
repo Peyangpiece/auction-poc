@@ -1,33 +1,30 @@
 /*
  * 株式会社レイワ「令和の競り」 画面の共通スタイル。
- * 配色は、会社のシンボル（金の輪・紺の地球・赤い REIWA）から取る:
- *   紺 #000156 … 要所（ボタン・表示板・見出し）
- *   金 #d4aa00 … 細い線と、表示板の上のしるし
- *   赤 #ff0000 … 警告と、選んでいる場所の輪郭だけ。地は白
- *   書体 … 日本語は Noto Sans JP（400 本文・500 ラベルとボタン・700 見出し）、数字と英字は Inter
+ * 配色（発注者の指示で、装飾を外して整えた。報告書 71 章）:
+ *   ブランドの色は、ロゴと「紺」1色だけで伝える。紺は、押せるもの（主のボタン・リンク・選んでいるタブ）にだけ使う。
+ *   面は、白と Apple の灰色（#F2F2F7）。影・金の線・光の演出は使わない。
+ *   色で意味を伝えるのは、受付中・成功（緑）と、警告・誤り（赤）だけ
+ *   書体 … 端末の書体（iPhone・Mac はヒラギノ角ゴシックと San Francisco、Android は Noto Sans CJK、Windows は 游ゴシック）。
+ *          書体を読み込まないので、表示の途中で文字が切り替わらない（Apple の純正アプリと同じ考え方）。数字は等幅にそろえる
  *   角丸 … 6px、ボタンは高さ 48px・太字
- * この画面だけのしるしは1つ: 競り場の「表示板」（紺の板・金の細線・大きな数字・2つのランプ）。それ以外は静かにする。
+ * 表示板（価格の板）も、灰色の面に大きな数字。色の面で目立たせず、数字の大きさで目立たせる。
  */
-@font-face { font-family: "Noto Sans JP"; src: url("notosansjp-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "Noto Sans JP"; src: url("notosansjp-500.woff2") format("woff2"); font-weight: 500 600; font-display: swap; }
-@font-face { font-family: "Noto Sans JP"; src: url("notosansjp-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-/* impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 */
-@font-face { font-family: "Inter"; src: url("inter.woff2") format("woff2"); font-weight: 400 700; font-display: swap; unicode-range: U+0020-007E, U+00A5; }
 
 :root {
   color-scheme: light dark;
   --navy: #000156;         /* シンボルの紺。白地で 19.5:1 */
   --navy-dk: #00013a;
   --red: #ff0000;          /* シンボルの赤。輪郭にだけ使う（白地で 4.0:1） */
-  --gold: #d4aa00;         /* シンボルの金。細い線にだけ使う（文字には使わない。紺の上では 8.5:1） */
   --red-text: #c40000;     /* 文字に使う赤。白地で 6.3:1 */
 
   --ground: #ffffff;
-  --ground-alt: #f3f4f7;
+  --ground-alt: #f2f2f7;   /* Apple の灰色の地 */
+  --ground-3: #e5e5ea;
+  --placeholder: #767676;  /* 入力欄の見本の文字。白地で 4.5:1（入れた文字 #15181e とは、はっきり違う） */
   --ink: #15181e;
   --ink-2: #596170;        /* 補助の文字。白地で 6.0:1 */
   --ink-3: #596170;
-  --line: #e6e8ee;
+  --line: #e5e5ea;
   --edge: #868e9b;         /* 入力欄の縁。白地で 3.3:1 */
   --field: #ffffff;
   --action: var(--navy);
@@ -35,67 +32,72 @@
   --action-ink: #ffffff;
   --danger: var(--red-text);
   --danger-ink: #ffffff;
-  --alarm: var(--red-text); /* 上回られたときに、画面全体に敷く色 */
+  --alarm: var(--red-text); /* 上回られたときの知らせの帯の色 */
   --ok: #1f6b3a;
 
-  /* 表示板。エンブレムと同じ、紺の地に赤い線 */
-  --board: var(--navy-dk);
-  --board-ink: #ffffff;
-  --board-ink-2: #c9cbe0;  /* 板の上で 10.2:1 */
-  --board-line: rgba(255, 255, 255, .18);
-  --board-ng: #f08a8a;     /* 板の上の赤。5.5:1 */
-  --lamp-off: #5a6096;
-  --lamp-green: #ffffff;
-  --lamp-amber: #ffffff;
+  /* 表示板: 灰色の面に、ふつうの文字の色 */
+  --board: var(--ground-alt);
+  --board-ink: var(--ink);
+  --board-ink-2: #5c616b;  /* #F2F2F7 の上で 5.6:1 */
+  --board-line: var(--ground-3);
+  --board-ng: var(--red-text);
+  --lamp-off: var(--edge);
 
   /* 角の丸み（Apple のデザインにそろえる）: 小さな印は 6px、ボタン・入力欄は 12px、面（表示板・映像の枠・ダイアログ・カード）は 20px。
      入れ子の角は、外側の丸み ＝ 内側の丸み ＋ 余白 を目安にする */
   --r-sm: 6px;
   --r: 12px;
   --r-lg: 20px;
-  /* 影: 細い縁どり＋近い影＋遠い影を重ねる（線で囲む代わりに、面を少し浮かせる） */
-  --shadow-1: 0 0 0 1px rgba(0, 0, 0, .04), 0 1px 2px rgba(0, 0, 0, .04), 0 6px 16px -6px rgba(0, 0, 0, .08);
-  --shadow-2: 0 0 0 1px rgba(0, 0, 0, .05), 0 4px 12px rgba(0, 0, 0, .08), 0 24px 48px -12px rgba(0, 0, 0, .25);
-  --shadow-btn: inset 0 1px 0 rgba(255, 255, 255, .14), 0 1px 2px rgba(0, 0, 0, .2), 0 4px 10px -4px rgba(0, 0, 0, .3); /* 影は、色を付けない（黒のうすい影） */
+  /* 影: 面には付けない（灰色の地の上の白い面で分ける）。浮いて出るもの（ダイアログ・知らせの帯）にだけ、うすい影 */
+  --shadow-1: none;
+  --shadow-2: 0 12px 40px rgba(0, 0, 0, .16);
+  --shadow-btn: none;
   --tint: color-mix(in srgb, var(--action) 6%, var(--ground));       /* 押せるものの、うすい塗り */
   --tint-2: color-mix(in srgb, var(--action) 11%, var(--ground));
   --ring: color-mix(in srgb, var(--action) 18%, transparent);        /* 入力中の欄のまわりの、うすい輪 */
-  --font: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
-  --digits: "Inter", "Helvetica Neue", Arial, var(--font);
+  --font: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic UI", "Yu Gothic", Meiryo, system-ui, sans-serif;
+  --digits: var(--font);
   --ease: cubic-bezier(.16, 1, .3, 1);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: #04052a;
-    --ground-alt: #0c0e3c;
-    --ink: #eef0f6;
-    --ink-2: #bcc0ee;
-    --ink-3: #bcc0ee;
-    --line: rgba(255, 255, 255, .16);
-    --edge: #7d84a6;
-    --field: #0c0e3c;
+    /* 暗い配色は、Apple の暗い配色の灰色にそろえる（地は黒、カードは #1C1C1E）。紺は、表示板とブランドの色にだけ残す */
+    --ground: #000000;
+    --ground-alt: #1c1c1e;
+    --ground-3: #2c2c2e;
+    --board: #1c1c1e;
+    --board-ink-2: #a1a1a8;
+    --board-line: #38383a;
+    --board-ng: #ff6961;
+    --placeholder: #98989d;  /* #1C1C1E の上で 5.6:1、#2C2C2E の上で 4.7:1 */
+    --ink: #ffffff;
+    --ink-2: #a1a1a8;        /* #1C1C1E の上で 6.6:1 */
+    --ink-3: #a1a1a8;
+    --line: rgba(84, 84, 88, .65);
+    --edge: #7c7c82;         /* 入力欄の縁。#1C1C1E の上で 3.9:1 */
+    --field: #1c1c1e;
     --action: #c3c9ff;
     --action-hover: #dfe2ff;
     --action-ink: #00013a;
     --danger: #f08a8a;
     --danger-ink: #00013a;   /* 明るい赤の上の文字。6.6:1 */
     --alarm: #9c0000;
-    --ok: #86d994;
-    --board: #0a0c6e;
-    --shadow-btn: none;
-    --shadow-1: 0 0 0 1px rgba(255, 255, 255, .08);
-    --shadow-2: 0 0 0 1px rgba(255, 255, 255, .12), 0 24px 48px -12px rgba(0, 0, 0, .6);
+    --ok: #30d158;           /* Apple の暗い配色の緑（スイッチのオン） */
+    --shadow-2: 0 0 0 1px rgba(255, 255, 255, .1), 0 12px 40px rgba(0, 0, 0, .5);
   }
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scrollbar-color: var(--ink-3) transparent; }
+html { -webkit-text-size-adjust: 100%; scrollbar-color: var(--ink-3) transparent;
+  /* 上に留まる帯・下に固定した表示板の下に、Tab で進んだ欄が隠れないように（報告書 81 章） */
+  scroll-padding-top: 72px; scroll-padding-bottom: calc(var(--board-h, 0px) + 16px); }
 body {
   margin: 0;
   background: var(--ground);
   color: var(--ink);
-  font: 400 16px/1.75 var(--font);
-  letter-spacing: .02em;
+  /* Apple の文字の決まり（本文 17pt・字間なし）に合わせる */
+  font: 400 1.0625rem/1.6 var(--font);
+  letter-spacing: 0;
   font-kerning: normal;
   text-rendering: optimizeLegibility;
   -moz-osx-font-smoothing: grayscale;
@@ -107,10 +109,10 @@ body {
 }
 ::selection { background: var(--action); color: var(--action-ink); }
 h1, h2, h3, p, dl, dd, ul { margin: 0; }
-/* 見出し・ボタン・ラベルは、かなと約物を詰めて組む（palt）。本文は、読みやすさを優先して、詰めない */
-h1, h2, h3, .btn, .field, .tabs, .tabbar, .menu, th, .state, .board-top, .lamp { font-feature-settings: "palt" 1; }
-h1, h2, h3 { font-weight: 700; line-height: 1.35; text-wrap: balance; letter-spacing: .01em; }
-h2 { font-size: 15px; color: var(--action); }
+/* 字を詰める組み方（palt）と、字間の足し算はしない（Apple の純正アプリの日本語は、詰めずに、字間 0 で組む） */
+h1, h2, h3 { font-weight: 700; line-height: 1.35; text-wrap: balance; letter-spacing: 0; }
+h2, h3 { font-weight: 600; }
+h2 { font-size: 1.0625rem; color: var(--ink); } /* 見出しは、文字の色（Apple の見出しは、色を付けない） */
 p { text-wrap: pretty; }
 .num { font-variant-numeric: tabular-nums; }
 .digits { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0; }
@@ -119,14 +121,14 @@ p { text-wrap: pretty; }
 .skip:focus-visible { top: 8px; }
 main:focus { outline: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.note { font-size: 13px; line-height: 1.7; color: var(--ink-3); }
+.note { font-size: 0.8125rem; line-height: 1.7; color: var(--ink-3); }
 :focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
-/* 紺の面の上では、白い輪にする */
-.board :focus-visible, .today :focus-visible, #videoBox :focus-visible, .overlay :focus-visible { outline-color: #fff; }
+/* 暗い面（映像・再接続中）の上では、白い輪にする */
+#videoBox :focus-visible, .overlay :focus-visible { outline-color: #fff; }
 
 /* ---- ボタン: 形は1種類。主・従・取り消せない操作は、塗りと色だけで分ける */
 .btn {
-  appearance: none; font: 500 15px/1.4 var(--font); letter-spacing: .02em; color: var(--action); white-space: nowrap; text-decoration: none;
+  appearance: none; font: 600 1.0625rem/1.35 var(--font); letter-spacing: 0; color: var(--action); white-space: nowrap; text-decoration: none;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: 48px; padding: 8px 20px; border: 1px solid transparent; border-radius: var(--r);
   background: var(--tint); cursor: pointer; touch-action: manipulation; user-select: none;
@@ -135,35 +137,35 @@ main:focus { outline: none; }
 .btn:hover:not(:disabled) { background: var(--tint-2); }
 .btn:active:not(:disabled) { transform: scale(.97); }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
-/* 主のボタン: 紺の塗り。上の縁に細い光、下に短い影（押せる面に見せる） */
-.btn-primary { background: var(--action); color: var(--action-ink); font-weight: 700; box-shadow: var(--shadow-btn); }
+/* 主のボタン: 紺の塗りだけ（影・光は付けない） */
+.btn-primary { background: var(--action); color: var(--action-ink); font-weight: 600; }
 .btn-primary:hover:not(:disabled) { background: var(--action-hover); }
 .btn-danger { color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, var(--ground)); }
 .btn-danger:hover:not(:disabled) { background: var(--danger); color: var(--danger-ink); }
-.btn-lg { min-height: 56px; font-size: 17px; font-weight: 700; border-radius: 14px; }
+.btn-lg { min-height: 52px; font-size: 1.0625rem; font-weight: 600; border-radius: 14px; }
 
 /* ---- 入力 */
-.field { display: grid; gap: 6px; font-size: 13px; font-weight: 500; color: var(--ink-2); min-width: 0; }
+.field { display: grid; gap: 6px; font-size: 0.9375rem; font-weight: 600; color: var(--ink); min-width: 0; } /* 欄の名前は、ふつうの文字の色で読めるように */
 .input {
-  font: 400 16px/1.5 var(--font); color: var(--ink); min-height: 48px; padding: 8px 14px; width: 100%;
+  font: 400 1rem/1.5 var(--font); color: var(--ink); min-height: 48px; padding: 8px 14px; width: 100%;
   border: 1px solid var(--edge); border-radius: var(--r); background: var(--field);
   transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
 }
-.input::placeholder { color: color-mix(in srgb, var(--ink-3) 70%, transparent); }
+.input::placeholder { color: var(--placeholder); opacity: 1; } /* 入れた文字（濃い色）とはっきり分かる薄さ。それでも 4.5:1 以上 */
 .input:hover { border-color: var(--ink-2); }
 /* 入力中の欄: 紺の縁と、まわりのうすい輪 */
-.input:focus-visible, .input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 4px var(--ring); }
+.input:focus-visible, .input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 3px var(--ring); }
 
 /* ---- 表示板（この画面のしるし） */
 /* 角を丸めた面には、太い上線を付けない（線が、角の曲がりとぶつかる） */
 .board { background: var(--board); color: var(--board-ink); border-radius: var(--r-lg); padding: 16px; display: grid; gap: 12px; min-width: 0; }
-.board-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--board-ink-2); }
+.board-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 0.875rem; color: var(--board-ink-2); }
 .board-top b { color: var(--board-ink); font-weight: 600; }
-.price { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -.02em; font-size: 72px; transition: transform .2s var(--ease); transform-origin: left bottom; }
+.price { font-family: var(--digits); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -.02em; font-size: 4.5rem; transition: transform .2s var(--ease); transform-origin: left bottom; }
 .price.tick { transform: scale(1.03); }
 /* ロットがない間は、数字の場所を空けずに、案内だけを出す */
 .board.idle .pricewrap { display: none; }
-.board-result { font-size: 18px; font-weight: 700; }
+.board-result { font-size: 1.125rem; font-weight: 700; }
 .board-result:empty { display: none; }
 
 .lamps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--board-line); padding-top: 12px; }
@@ -171,21 +173,30 @@ main:focus { outline: none; }
 .lamp + .lamp { border-left: 1px solid var(--board-line); padding-left: 12px; }
 /* ランプは、点灯＝塗りつぶし、消灯＝輪郭。色に頼らず形でも分かる */
 /* ランプは、押せる丸（選択ボタン）に見えないよう、縦長の灯りの形にする */
-.bulb { width: 10px; height: 24px; border-radius: 4px; border: 2px solid var(--lamp-off); grid-row: span 2; transition: background-color .2s var(--ease), border-color .2s var(--ease); }
-.lamp b { font-size: 16px; font-weight: 700; color: var(--board-ink-2); line-height: 1.3; }
+/* ランプ: 消えているときは細い輪、点いたら塗った丸にチェック（形だけでなく、印と、横の言葉でも伝える） */
+.bulb { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--lamp-off); grid-row: span 2; background: transparent center / 22px no-repeat; transition: background-color .2s var(--ease), border-color .2s var(--ease); }
+.lamp.on .bulb, .lamp.won .bulb { background-color: var(--action); border-color: var(--action);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Cpath d='M6 11.5l3.2 3.2L16 7.8' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+@media (prefers-color-scheme: dark) {
+  .lamp.on .bulb, .lamp.won .bulb { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Cpath d='M6 11.5l3.2 3.2L16 7.8' fill='none' stroke='%2300013a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+}
+.lamp b { font-size: 1rem; font-weight: 700; color: var(--board-ink-2); line-height: 1.3; }
 /* 補足がないランプは、印と名前を1行でそろえる */
 .lamp small:empty { display: none; }
 .lamp:has(small:empty) .bulb { grid-row: auto; }
-.lamp small { font-size: 13px; color: var(--board-ink-2); line-height: 1.3; overflow-wrap: anywhere; }
+.lamp small { font-size: 0.8125rem; color: var(--board-ink-2); line-height: 1.3; overflow-wrap: anywhere; }
 .lamp.on b, .lamp.won b { color: var(--board-ink); }
-#urikiri.on .bulb { background: var(--lamp-green); border-color: var(--lamp-green); }
-#right.on .bulb { background: var(--lamp-amber); border-color: var(--lamp-amber); }
-#right.won .bulb { background: var(--lamp-green); border-color: var(--lamp-green); }
 
 /* ---- 状態の文字（点＋言葉。枠で囲まない） */
 .state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; white-space: nowrap; }
 .state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
 .state[data-on="1"]::before { background: currentColor; }
+/* 表示板の状態は、色の付いた丸と言葉の札（受付中は緑、中断は橙、配信準備中は黄、終わった品は灰） */
+.board .state[data-st] { padding: 4px 12px 4px 10px; border-radius: 999px; background: var(--ground); font-size: 0.875rem; color: var(--board-ink); }
+.board .state[data-st]::before { border: 0; width: 9px; height: 9px; background: #8e8e93; }
+.board .state[data-st="open"]::before { background: #30d158; }
+.board .state[data-st="suspended"]::before { background: #ff9f0a; }
+.board .state[data-st="preparing"]::before, .board .state[data-st="preparing_warn"]::before { background: #ffd60a; }
 
 /* ---- 表（区切りは細い線だけ） */
 .rows { list-style: none; padding: 0; }
@@ -195,9 +206,12 @@ main:focus { outline: none; }
 /* ---- 再接続中（大きく表示する。FR-UI-001） */
 .overlay {
   position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; text-align: center;
-  padding: 24px; background: rgba(0, 1, 58, .94); color: #fff; font-size: 32px; font-weight: 700; overscroll-behavior: contain;
+  padding: 24px; background: rgba(0, 0, 0, .86); color: #fff; font-size: 2rem; font-weight: 700; overscroll-behavior: contain;
 }
-.overlay small { display: block; font-size: 15px; font-weight: 400; color: rgba(255, 255, 255, .78); margin-top: 8px; }
+/* 切れているあいだは、後ろの画面（価格など）をぼかして読めなくする。動きを減らす設定でも、ぼかしは変わらない（動きではないため） */
+body.offline > :not(.overlay):not(script):not(dialog) { filter: blur(10px); }
+.overlay__action { display: flex; width: fit-content; margin: 20px auto 0; font-size: 1.0625rem; }
+.overlay small { display: block; font-size: 0.9375rem; font-weight: 400; color: rgba(255, 255, 255, .78); margin-top: 8px; }
 
 /* ---- ダイアログ（取り消せない操作の確認だけに使う） */
 dialog {
@@ -207,11 +221,11 @@ dialog {
   opacity: 1; transform: none; transition: opacity .2s var(--ease), transform .25s var(--ease), overlay .2s allow-discrete, display .2s allow-discrete;
 }
 @starting-style { dialog[open] { opacity: 0; transform: translateY(12px) scale(.98); } }
-dialog::backdrop { background: rgba(0, 1, 40, .45); backdrop-filter: blur(6px); }
-dialog h2 { font-size: 19px; margin-bottom: 8px; letter-spacing: .02em; color: var(--ink); }
-dialog p { color: var(--ink-2); font-size: 15px; }
+dialog::backdrop { background: rgba(0, 0, 0, .32); }
+dialog h2 { font-size: 1.1875rem; margin-bottom: 8px; letter-spacing: 0; color: var(--ink); }
+dialog p { color: var(--ink-2); font-size: 0.9375rem; }
 dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-dialog .error { color: var(--danger); font-size: 13px; min-height: 20px; }
+dialog .error { color: var(--danger); font-size: 0.8125rem; min-height: 20px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -227,17 +241,96 @@ details[open] > summary::before { transform: rotate(45deg); }
 /* 上の帯: 画面の上に留まり、下の中身がうっすら透ける */
 .brandbar { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--ground) 86%, transparent); backdrop-filter: saturate(180%) blur(16px); -webkit-backdrop-filter: saturate(180%) blur(16px); box-shadow: 0 1px 0 var(--line); }
 .brandbar > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; margin: 0 auto; }
-.brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; color: var(--ink); text-decoration: none; }
+.brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; min-height: 44px; color: var(--ink); text-decoration: none; }
 /* ロゴ（会社のシンボル＋毛筆の「令和の競り」）。暗い画面では、白い文字の版に切り替える */
 .brand__logo { display: block; height: 42px; width: auto; }
 .brand picture { display: block; }
 .brand__text { display: grid; line-height: 1.3; min-width: 0; }
-.brand__name { font-weight: 700; font-size: 17px; letter-spacing: .04em; white-space: nowrap; }
-.brand__service { font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--action); white-space: nowrap; }
+.brand__name { font-weight: 700; font-size: 1.0625rem; letter-spacing: 0; white-space: nowrap; }
+.brand__service { font-size: 0.75rem; font-weight: 700; letter-spacing: 0; color: var(--action); white-space: nowrap; }
 /* 後から入る文字（商品名・コメント）は、切り出した書体に無い字が混ざらないよう、端末の書体で通して表示する */
-.dyn { font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", "Noto Sans JP", sans-serif; letter-spacing: .02em; }
+.dyn { letter-spacing: 0; }
 
 /* なめらかに続く角（Apple の角と同じ、連続した曲線）。対応しているブラウザでだけ効く。丸（50%）の部品には付けない */
 @supports (corner-shape: squircle) {
   .btn, .input, .board, dialog, .seg, #videoBox, .mode, .amount, .pick label, .choice label, .banner, .today, .verified, .secret, .board-result, #eventNote { corner-shape: squircle; }
 }
+
+/* ==== リキッドグラス（発注者の指示。報告書 77 章） ====
+   参考: liquid-glass-frontend-skill（ngocanhnckh）と、Apple の Liquid Glass の考え方。
+   - ガラスは「浮いている層」だけに使う: 上の帯・下のタブバー・下に固定した表示板・シート・ダイアログ・映像の上の札。
+     中身（カード・表・価格の数字）は、これまでどおり不透明の面（読みやすさを優先）
+   - ガラスの4つの要素: 強いぼかし（blur）・彩度の持ち上げ（saturate）・上の縁の光（inset の白い線）・うすい影
+   - ガラスの中に、もう1枚ガラスを重ねない（backdrop-filter の入れ子は描画が崩れる）。中の部品は「インセット」（ぼかしなし）
+   - 「透明度を下げる」「コントラストを上げる」の設定、ぼかしに対応していないブラウザでは、不透明の面に戻す */
+:root {
+  --glass-tint: color-mix(in srgb, var(--ground) 62%, transparent);        /* 帯・タブバー */
+  --glass-tint-strong: color-mix(in srgb, var(--ground) 78%, transparent); /* シート・表示板（文字が多い所は、濃いめ） */
+  --glass-filter: blur(30px) saturate(190%);
+  --glass-edge: inset 0 1px 0 rgb(255 255 255 / .6), inset 0 0 0 1px rgb(255 255 255 / .28);
+  --glass-shadow: 0 10px 30px -12px rgb(0 0 0 / .18), 0 0 0 1px rgb(0 0 0 / .05);
+  --ease: cubic-bezier(.22, 1, .36, 1); /* 動きの曲線は1つにそろえる（スキルの共通の曲線） */
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --glass-tint: color-mix(in srgb, #1c1c1e 58%, transparent);
+    --glass-tint-strong: color-mix(in srgb, #1c1c1e 80%, transparent);
+    --glass-filter: blur(30px) saturate(170%);
+    --glass-edge: inset 0 1px 0 rgb(255 255 255 / .14), inset 0 0 0 1px rgb(255 255 255 / .07);
+    --glass-shadow: 0 10px 30px -12px rgb(0 0 0 / .6), 0 0 0 1px rgb(255 255 255 / .06);
+  }
+}
+/* 共通の部品: .glass（帯）・.glass-strong（シート・ダイアログ） */
+.glass { background: var(--glass-tint); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-edge), var(--glass-shadow); }
+.glass-strong { background: var(--glass-tint-strong); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-edge), var(--glass-shadow); }
+
+/* 上の帯: ガラス（スクロールした中身が、ぼけて透ける） */
+.brandbar { background: var(--glass-tint); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 rgb(255 255 255 / .35); }
+/* ダイアログ: 濃いめのガラス（文字が多いので、透けすぎない） */
+dialog { background: var(--glass-tint-strong); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-edge), var(--shadow-2); }
+dialog::backdrop { background: rgb(0 0 0 / .22); }
+
+/* ぼかしが使えない・透明度を下げる・コントラストを上げる: 不透明の面に戻す（読みやすさを優先） */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root { --glass-tint: var(--ground); --glass-tint-strong: var(--ground); }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root { --glass-tint: var(--ground); --glass-tint-strong: var(--ground); --glass-filter: none; }
+  .brandbar, .glass, .glass-strong, dialog { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .tabbar { background: var(--ground) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; } /* 下のタブバーも、不透明に（報告書 82 章） */
+}
+/* マウスで使う画面では、ページの端での引っぱり（はね返り）をしない */
+@media (pointer: fine) { html { overscroll-behavior: none; } }
+@media (prefers-contrast: more) {
+  :root { --glass-edge: inset 0 0 0 1px var(--edge); }
+}
+
+/* ---- 運用の警告（スタッフの画面の上。保存の失敗・控えの遅れ）。報告書 118 章 */
+.opsalert { position: sticky; top: 0; z-index: 50; background: var(--danger); color: var(--danger-ink); padding: 12px 16px; font-weight: 600; line-height: 1.6; white-space: pre-line; }
+.opsalert[hidden] { display: none; }
+
+/* ==== 待機中の画面（発注者の指示。報告書 126 章） ====
+   開催を始める前・休憩中・終了後と、進行中でも映像が届いていないあいだ（報告書 132 章）、映像の枠いっぱいに出す。入札の画面と進行コンソールで同じ。暗い面に、ロゴ・ひとこと・開催の名前・予定の時刻。
+   ゆっくり動く光と、3つの点で、「止まっているのではなく、待っている」ことを伝える。カウントダウンは出さない */
+.standby { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  padding: 20px; text-align: center; color: #fff; background: #0b0b14; overflow: hidden; }
+.standby[hidden] { display: none; }
+.standby > * { position: relative; }
+.standby__glow { position: absolute !important; inset: -40%; background:
+  radial-gradient(40% 40% at 30% 35%, rgb(60 70 200 / .55), transparent 70%),
+  radial-gradient(35% 35% at 70% 65%, rgb(196 0 0 / .32), transparent 70%);
+  filter: blur(24px); animation: standby-drift 18s ease-in-out infinite alternate; }
+@keyframes standby-drift { from { transform: translate3d(-6%, -4%, 0) rotate(0deg) scale(1); } to { transform: translate3d(6%, 4%, 0) rotate(18deg) scale(1.12); } }
+.standby__logo { width: min(46%, 200px); height: auto; margin-bottom: 6px; }
+.standby__title { font-size: clamp(1.25rem, 5.2vw, 1.875rem); font-weight: 700; letter-spacing: .02em; line-height: 1.3; }
+.standby__event { font-size: 0.9375rem; color: rgb(255 255 255 / .86); overflow-wrap: anywhere; }
+.standby__event:empty { display: none; }
+.standby__sub { font-size: 0.9375rem; color: rgb(255 255 255 / .72); font-variant-numeric: tabular-nums; }
+.standby__dots { display: flex; gap: 8px; margin-top: 10px; }
+.standby__dots i { width: 8px; height: 8px; border-radius: 50%; background: #fff; opacity: .25; animation: standby-dot 1.5s ease-in-out infinite; }
+.standby__dots i:nth-child(2) { animation-delay: .25s; }
+.standby__dots i:nth-child(3) { animation-delay: .5s; }
+@keyframes standby-dot { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+/* 終了後は、待っているわけではないので、点は出さない */
+.standby[data-kind="ended"] .standby__dots { display: none; }
+@media (prefers-reduced-motion: reduce) { .standby__glow, .standby__dots i { animation: none; } .standby__dots i { opacity: .6; } }

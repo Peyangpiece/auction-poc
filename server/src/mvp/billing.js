@@ -3,13 +3,18 @@
 // 送料は一切扱わない（FR-SHIP-001）。請求書に載せるのは、落札代金と、違約金・遅延損害金だけ。
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeInvoiceFiles, makeInvoiceList } from './invoice-files.js';
-
-// CSV の1マス。表計算ソフトが式として動かす文字（= + - @ など）で始まる文字列は、先頭に ' を付けて、ただの文字にする
-export const csvCell = (v) => {
-  const t = String(v ?? '');
-  return `"${(typeof v === 'string' && /^[=+\-@\t\r]/.test(t) ? "'" + t : t).replaceAll('"', '""')}"`;
-};
+import { makeInvoiceFiles } from './invoice-files.js';
+import { Worker } from 'node:worker_threads';
+import { migrate } from '../migrate.js';
+import { jpDay, compose, subjectOf, kv, signature } from './mails.js';
+import { createPickup } from './pickup.js';
+import { createInvoiceRoutes } from './invoice-routes.js';
+import { createClearing } from './clearing.js';
+import { createUnpaid } from './unpaid.js';
+import { createBillingMypage } from './billing-mypage.js';
+import { createFees } from './fees.js';
+import { RECV, addDays, csvCell } from './shared.js';
+export { addDays, csvCell };
 
 export const BILLING_SCHEMA = `
 -- 明細: 落札した品1つにつき1行（FR-INV-003）。違約金・遅延損害金・繰り上げも、同じ形の行として持つ
@@ -62,13 +67,6 @@ CREATE INDEX IF NOT EXISTS bill_lines_account ON bill_lines(account_id);
 CREATE INDEX IF NOT EXISTS bill_lines_invoice ON bill_lines(invoice_id);
 `;
 
-const DAY = 86400000;
-const PAY = { transfer: '銀行振込', cash: '当日現金' };
-const RECV = { pickup: '現地受け取り', ship: '配送' };
-const FEE_RATE = 5; // 手数料 5%（FR-FEE-001。決定）
-
-/** 日付（YYYY-MM-DD）に日数を足す */
-export const addDays = (date, n) => new Date(Date.parse(date + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
 
 export function createBilling({ db, config, nowMs, audit, notifier, setting, route, needStaff, needMember, HttpError, bad }) {
   // 以前の版のデータベース: 明細の種類に「送料」を足すには、表を作り直すしかない（SQLite の制約）。行の id は変えない
@@ -82,7 +80,15 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     })();
   }
   db.exec(BILLING_SCHEMA);
+  // 形の変更は、番号を付けて1回ずつ（migrate.js）
+  migrate(db, 'billing', [
+    { v: 1, name: '無効にした領収書（取り消した日と、取り消す前の明細）', up: (d) => { d.exec('ALTER TABLE invoices ADD COLUMN voided_at REAL'); d.exec('ALTER TABLE invoices ADD COLUMN void_lines TEXT'); } },
+    { v: 2, name: '配送のメモ（伝票番号など）', up: (d) => d.exec('ALTER TABLE bill_lines ADD COLUMN ship_memo TEXT') },
+    { v: 3, name: '配送: 運送会社・伝票番号・発送のお知らせを送った時刻', up: (d) => { d.exec('ALTER TABLE bill_lines ADD COLUMN ship_carrier TEXT'); d.exec('ALTER TABLE bill_lines ADD COLUMN ship_tracking TEXT'); d.exec('ALTER TABLE bill_lines ADD COLUMN ship_notified_at REAL'); } },
+  ], { nowMs });
   if (!db.prepare("SELECT 1 FROM pragma_table_info('bill_lines') WHERE name = 'premium'").get()) db.exec('ALTER TABLE bill_lines ADD COLUMN premium INTEGER NOT NULL DEFAULT 0');
+  // 繰り上げの打診のときの買歩銭（打診のあとに割合を変えても、案内した金額のまま請求する。本番運用の評価 C）
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('offers') WHERE name = 'premium'").get()) db.exec('ALTER TABLE offers ADD COLUMN premium INTEGER');
   const invoiceDir = path.join(config.dataDir, 'invoices');
   fs.mkdirSync(invoiceDir, { recursive: true });
   const jst = (ms) => new Date(ms + 9 * 3600000).toISOString().slice(0, 10); // 日本時間の日付（DATA-006）
@@ -97,6 +103,38 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   // 印影は、悪用されると困るものなので、ソースコードには入れない。データの置き場（data/brand）にだけ置く
   const brandDir = path.join(config.dataDir, 'brand');
   const sealFile = () => ['seal.png', 'seal.jpg'].map((f) => path.join(brandDir, f)).find((f) => fs.existsSync(f)) ?? null;
+  // ---- 原本の発行者の情報（発注者の指示: 請求書の会社情報を、原本と全く同じにする。報告書 72 章）
+  // 値は、公開のリポジトリには入れない。GitHub の秘密の値（INVOICE_ORIGINAL）を、配るときにデータの保存先の brand/original.json に置き、
+  // 起動のたびに、ここで設定と印鑑に反映する。この値がある項目は、管理画面からは変えられない（変えても、原本の値に戻る）
+  const ORIGINAL_KEYS = ['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'];
+  const originalFile = path.join(brandDir, 'original.json');
+  function readOriginal() {
+    if (!fs.existsSync(originalFile)) return null;
+    try {
+      const o = JSON.parse(fs.readFileSync(originalFile, 'utf8'));
+      return o && typeof o === 'object' ? o : null;
+    } catch (e) { console.error('[original] brand/original.json を読めません:', e.message); return null; }
+  }
+  const original = readOriginal();
+  /** 原本の値で固定している設定の名前 */
+  const fixedKeys = () => (original ? ORIGINAL_KEYS.filter((k) => typeof original[k] === 'string' && original[k] !== '') : []);
+  // 原本の印鑑の画像は、別のファイル（brand/original-seal.jpg か .png）。配るときに、秘密の値から作って置く（画像はそのまま。変換しない）
+  const originalSeal = ['original-seal.png', 'original-seal.jpg'].map((f) => path.join(brandDir, f)).find((f) => fs.existsSync(f)) ?? null;
+  const sealFixed = () => !!originalSeal;
+  if (original) {
+    for (const k of fixedKeys()) db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, original[k].replace(/\r\n/g, '\n'));
+  }
+  if (originalSeal) {
+    const buf = fs.readFileSync(originalSeal);
+    const png = buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), jpg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+    if (png || jpg) {
+      const name = png ? 'seal.png' : 'seal.jpg';
+      for (const f of ['seal.png', 'seal.jpg']) if (f !== name) fs.rmSync(path.join(brandDir, f), { force: true });
+      const target = path.join(brandDir, name);
+      if (!fs.existsSync(target) || !fs.readFileSync(target).equals(buf)) fs.writeFileSync(target, buf, { mode: 0o600 });
+    } else console.error('[original] 原本の印鑑の画像が、PNG でも JPEG でもありません');
+  }
+
   route('GET', '/api/settings/seal', (ctx) => {
     needStaff(ctx, 'admin');
     const file = sealFile();
@@ -105,6 +143,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   });
   route('POST', '/api/settings/seal', (ctx, body) => {
     needStaff(ctx, 'admin');
+    if (sealFixed()) throw new HttpError(409, '印鑑は、原本の画像で固定しています（配るときの設定で変えます）');
     fs.mkdirSync(brandDir, { recursive: true });
     for (const f of ['seal.png', 'seal.jpg']) fs.rmSync(path.join(brandDir, f), { force: true });
     if (!body.image) { audit(ctx, 'settings.seal', { target: 'seal', after: { registered: false } }); return { ok: true, registered: false }; }
@@ -123,6 +162,19 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   const premiumRate = () => { const r = Number(setting('buyer_premium_rate')); return Number.isFinite(r) && r >= 0 && r <= 100 ? r : 10; };
   /** 1つの落札についての買歩銭。1円未満は切り捨てる【前提】 */
   const premiumOf = (amount) => Math.floor(amount * premiumRate() / 100);
+  /** 繰り上げの打診で案内した買歩銭（前の版で作った打診には持っていないので、いまの割合で数える） */
+  const offerPremiumOf = (o) => o.premium ?? premiumOf(o.amount);
+  /**
+   * 請求書の、いまの金額。解除した明細は除く（解除しても、発行したときの合計 invoices.total は、記録として変えない。本番運用の評価 C）
+   * due: 払ってもらう金額 / paid: 消し込んだ金額 / cancelled: 解除した明細の数 / lines: 明細の数
+   */
+  function invoiceAmounts(i) {
+    const lines = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ?').all(i.id);
+    const live = lines.filter((l) => !l.cancelled_at);
+    return { due: live.reduce((s, l) => s + payable(l), 0), paid: live.filter((l) => l.cleared_at).reduce((s, l) => s + payable(l), 0), cancelled: lines.length - live.length, lines: lines.length };
+  }
+  /** 一覧の件数（?limit=。既定の件数から、最大 50,000 件まで） */
+  const listLimit = (ctx, def) => Math.min(50000, Math.max(def, Math.floor(Number(ctx.url.searchParams.get('limit')) || def)));
   /** 落札者が払う金額（落札額＋買歩銭） */
   const payable = (l) => l.amount + (l.premium ?? 0);
 
@@ -143,7 +195,19 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
         .run('lot', r.event_id, r.lot_id, r.participant_id, r.account_id, `No.${r.lot_no} ${r.title}`, r.amount, premium, r.receive, nowMs());
       const a = account(r.account_id);
       // 落札者に、メールでも知らせる（画面には、締めの時点で出ている）
-      notifier.email(a.email, 'won', '落札のお知らせ', `No.${r.lot_no} ${r.title} を、${yen(r.amount)}（税込）で落札しました。\n買歩銭 ${yen(premium)}（落札額の${premiumRate()}%）を合わせた、お支払いの金額は ${yen(r.amount + premium)} です。\nお支払いと受け取りについては、マイページをご覧ください。\n落札価格に送料は含まれません。`);
+      notifier.email(a.email, 'won', subjectOf(`落札しました　No.${r.lot_no} ${r.title}`), compose(setting, { name: displayName(a), lines: [
+        `No.${r.lot_no} ${r.title} を、落札しました。`,
+        '',
+        ...kv([
+          ['落札額', `${yen(r.amount)}（税込）`],
+          ['買歩銭', `${yen(premium)}（落札額の${premiumRate()}%）`],
+          ['お支払いの金額', yen(r.amount + premium)],
+          ['お受け取り', { ship: '配送（送料は別にかかります）', pickup: '現地受け取り' }[r.receive]],
+        ]),
+        '',
+        '当日、会場で精算しなかった品は、開催の終了後に、銀行振込の請求書をお送りします。',
+        'お支払いと受け取りの状況は、マイページでいつでも確かめられます。',
+      ] }));
     }
     return rows.length;
   }
@@ -155,7 +219,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     return `${day}-${String(n).padStart(4, '0')}`;
   }
   /** lineIds の明細を載せた請求書を1通発行する。kind: cash（精算。領収書を兼ねる）/ transfer / promote / penalty */
-  function issueInvoice(kind, lineIds, { dueDays = null, shiftHoliday = false, draft = false } = {}) {
+  function issueInvoice(kind, lineIds, { dueDays = null, draft = false } = {}) {
     const lines = lineIds.map(getLine);
     const first = lines[0];
     const total = lines.reduce((s, l) => s + payable(l), 0); // 落札額＋買歩銭
@@ -175,27 +239,154 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
    * 請求書のファイル（PDF・Excel）を、いまの明細から作る。送料を足したり直したりしたときは、作り直す
    * （作り直せるのは、送付済みにする前だけ。送ったあとの請求書は、変えない）。
    */
-  function renderInvoice(invoiceId, { draft = false } = {}) {
+  /**
+   * 請求メールの下書きの件名と本文（発注者の指示で見直した）。開いてすぐ分かるように、上から
+   * 「いつの、何の請求か」→ ご請求額とお支払い期限 → 内訳 → お振込先 → 受け取り → 連絡先 の順に書く。
+   * 金額・期限・振込先は、添付の請求書（PDF）と同じ値。PDF に載せていない注記（依頼人名・振込手数料・受け取り方法）は、ここに書く。
+   */
+  function invoiceMail(inv, lines, shipping, a, org) {
+    const day = jpDay;
+    const ev = db.prepare('SELECT starts_at FROM events WHERE id = ?').get(inv.event_id);
+    const evDay = ev ? day(ev.starts_at.slice(0, 10)) : '';
+    const due = inv.due_date ? day(inv.due_date) : '';
+    const what = inv.kind === 'penalty' ? '落札の解除などに伴うご請求'
+      : inv.kind === 'promote' ? '繰り上げ落札をご承諾いただいた品のご請求'
+      : `${evDay}の競りで落札された品のご請求`;
+    const subject = `【令和の競り】${inv.kind === 'penalty' ? '違約金などの' : inv.kind === 'promote' ? '繰り上げ落札の' : `${evDay}の`}ご請求　${yen(inv.total)}（お支払い期限 ${due}）`;
+    const RECV = { pickup: '現地受け取り', ship: '配送' };
+    const premiumTotal = lines.reduce((t, l) => t + (l.premium ?? 0), 0);
+    const tax = inv.kind === 'penalty' ? null : Math.floor(inv.total * 10 / 110);
+    const items = [
+      ...lines.map((l) => `・${l.label}　${yen(l.amount)}${l.receive && RECV[l.receive] && !['penalty', 'late'].includes(l.kind) ? `（${RECV[l.receive]}）` : ''}`),
+      ...(premiumTotal ? [`・買歩銭（落札額の${premiumRate()}%）　${yen(premiumTotal)}`] : []),
+      ...shipping.map((l) => `・${l.label}　${yen(l.amount)}`),
+    ];
+    const ships = lines.some((l) => l.receive === 'ship'), picks = lines.some((l) => l.receive === 'pickup');
+    const receive = [
+      // 発送の時期は、決まりがないので書かない。送料が、この請求に入っているかどうかだけを書く
+      ...(ships ? [shipping.length ? '・配送の品の送料は、このご請求に含まれています。' : '・配送の品の送料は、このご請求には含まれていません。'] : []),
+      ...(picks ? ['・現地受け取りの品は、ご入金の確認から7日以内に、会場でお受け取りください。'] : []),
+    ];
+    const body = [
+      `${displayName(a)} 様`,
+      '',
+      'いつも令和の競りをご利用いただき、ありがとうございます。',
+      `${what}をお送りします。請求書（PDF）を添付しています。`,
+      '',
+      `ご請求額　　　${yen(inv.total)}（税込）`,
+      `お支払い期限　${due}`,
+      `請求書番号　　${inv.number}`,
+      '',
+      '【内訳】',
+      ...items,
+      `合計　${yen(inv.total)}${tax !== null ? `（うち消費税 ${yen(tax)}）` : '（消費税の対象外）'}`,
+      '',
+      '【お振込先】',
+      org.bank_account || '（振込先は、添付の請求書をご覧ください）',
+      `・ご依頼人名の前に、請求書番号「${inv.number}」を入れてください。`,
+      '・振込手数料は、お客様のご負担となります。',
+      ...(receive.length ? ['', '【お受け取り】', ...receive] : []),
+      '',
+      'ご不明な点は、このメールにご返信ください。',
+      '',
+      ...signature(setting),
+    ].join('\n');
+    return { subject, body };
+  }
+
+  // 請求書のファイルは、別のスレッドで作る（競りの最中の精算で、入札の受け付けを止めない。報告書 118 章）。
+  // スレッドを使えないとき・途中で落ちたときは、これまでどおり、同じスレッドで作る
+  // 作っている最中のもの。止まる前（と、テストの後始末の前）に、書き終わりを待てるようにする
+  const pendingFiles = new Set();
+  const track = (p) => { const q = Promise.resolve(p).catch(() => {}).finally(() => pendingFiles.delete(q)); pendingFiles.add(q); return p; };
+  const filesIdle = async () => { while (pendingFiles.size) await Promise.all([...pendingFiles]); };
+  let worker = null, jobSeq = 0;
+  const jobs = new Map();
+  function filesWorker() {
+    if (worker || config.invoiceWorker === false) return worker;
+    try {
+      worker = new Worker(new URL('./invoice-worker.js', import.meta.url));
+      worker.unref(); // 待ちが無いときは、プロセスの終了を妨げない
+      worker.on('message', ({ id, ok, error }) => { const j = jobs.get(id); if (!j) return; jobs.delete(id); if (!jobs.size) worker?.unref(); ok ? j.resolve() : j.reject(new Error(error)); });
+      const lost = (err) => { worker = null; for (const [id, j] of jobs) { jobs.delete(id); j.retry(err); } };
+      worker.on('error', lost);
+      worker.on('exit', () => lost(new Error('請求書を作るスレッドが止まりました')));
+    } catch { worker = null; }
+    return worker;
+  }
+  function makeFiles(args) {
+    const pdf = path.join(args.dir, `${args.invoice.number}${args.receipt ? '-receipt' : ''}.pdf`), xlsx = path.join(args.dir, `${args.invoice.number}.xlsx`);
+    const w = filesWorker();
+    if (!w) return makeInvoiceFiles(args);
+    const done = new Promise((resolve, reject) => {
+      const id = ++jobSeq;
+      // スレッドが落ちたら、同じスレッドで作り直す（請求書を作れないままにしない）
+      jobs.set(id, { resolve, reject, retry: () => makeInvoiceFiles(args).done.then(resolve, reject) });
+      w.ref();
+      w.postMessage({ id, args });
+    });
+    return { pdf, xlsx, done };
+  }
+
+  // 同じ請求書の作り直しは、1つずつ行う（送料の更新が重なると、同じファイルに同時に書いて PDF が壊れていた。本番運用の評価 B3）
+  const rendering = new Map();
+  function renderInvoice(invoiceId, opts = {}) {
+    const prev = rendering.get(invoiceId) ?? Promise.resolve();
+    let result;
+    const done = prev.catch(() => {}).then(() => { result = renderInvoiceNow(invoiceId, opts); return result.done; });
+    rendering.set(invoiceId, done.catch(() => {}));
     const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
-    const all = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ? ORDER BY id').all(invoiceId);
+    return { ...inv, done };
+  }
+  /** 請求書・領収書のファイルに書く中身（発行者・宛先・件名・印鑑） */
+  const fileArgs = (inv, lines, shipping, a, org) => ({
+    // 会場で精算した請求書（領収書を兼ねる）には、受け取った方法（現金・クレジット）を書く（報告書 133 章）
+    dir: invoiceDir, invoice: { ...inv, paidMethod: lines.length && lines.every((l) => l.cleared_method === 'card') ? 'card' : 'cash' }, lines, shipping, org, to: { name: displayName(a), address: a.kind === 'b2b' && a.billing ? a.billing : a.address },
+    seal: sealFile(),
+    premium: { total: lines.reduce((s, l) => s + (l.premium ?? 0), 0), rate: premiumRate() },
+    issuedOn: jst(inv.issued_at), paidOn: inv.kind === 'cash' ? jst(inv.issued_at) : null,
+    // 件名: 開催日と「令和の競り」だけ（発注者の指示。例: 12.7 令和の競り）
+    subject: (() => { const e = db.prepare('SELECT starts_at FROM events WHERE id = ?').get(inv.event_id); return e ? `${Number(e.starts_at.slice(5, 7))}.${Number(e.starts_at.slice(8, 10))} 令和の競り` : '令和の競り'; })(),
+  });
+  /**
+   * 領収書（振込などで払った人。発注者の決定。報告書 123 章）。請求書の明細（解除したものを除く）が、すべて消し込み済みのときだけ作れる。
+   * 当日現金の精算は、請求書が領収書を兼ねるので、作らない。開くたびに、いまの消し込みの内容で作り直す
+   */
+  const receiptJobs = new Map(); // 同じ領収書を、同時に2つ書かない
+  function renderReceipt(inv) {
+    const running = receiptJobs.get(inv.id);
+    if (running) return running;
+    if (inv.kind === 'cash') throw new HttpError(409, '会場での精算（当日現金・当日クレジット）は、請求書が領収書を兼ねています');
+    const all = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ? AND cancelled_at IS NULL ORDER BY id').all(inv.id);
+    if (!all.length || all.some((l) => !l.cleared_at)) throw new HttpError(409, 'お支払いの確認が済んでいないので、領収書は、まだ発行できません');
     const lines = all.filter((l) => l.kind !== 'shipping'), shipping = all.filter((l) => l.kind === 'shipping');
     const a = account(inv.account_id);
     const org = Object.fromEntries(['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'].map((k) => [k, setting(k)]));
-    const files = makeInvoiceFiles({
-      dir: invoiceDir, invoice: inv, lines, shipping, org, to: { name: displayName(a), address: a.kind === 'b2b' && a.billing ? a.billing : a.address },
-      seal: sealFile(),
-      premium: { total: lines.reduce((s, l) => s + (l.premium ?? 0), 0), rate: premiumRate() },
-      issuedOn: jst(inv.issued_at), paidOn: inv.kind === 'cash' ? jst(inv.issued_at) : null,
-      // 件名: 開催日と「令和の競り」だけ（発注者の指示。例: 12.7 令和の競り）
-      subject: (() => { const e = db.prepare('SELECT starts_at FROM events WHERE id = ?').get(inv.event_id); return e ? `${Number(e.starts_at.slice(5, 7))}.${Number(e.starts_at.slice(8, 10))} 令和の競り` : '令和の競り'; })(),
-    });
+    const last = all.reduce((x, l) => (l.cleared_at > x.cleared_at ? l : x));
+    // 領収の日は、入金の日（消し込みに記録した日）のうち、いちばん新しい日
+    const files = makeFiles({ ...fileArgs(inv, lines, shipping, a, org), receipt: { paidOn: jst(last.cleared_at), method: ['cash', 'card'].find((m) => all.every((l) => l.cleared_method === m)) ?? 'transfer', total: all.reduce((s, l) => s + payable(l), 0) } });
+    track(files.done);
+    receiptJobs.set(inv.id, files);
+    files.done.catch(() => {}).finally(() => receiptJobs.delete(inv.id));
+    return files;
+  }
+  function renderInvoiceNow(invoiceId, { draft = false } = {}) {
+    const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
+    // 無効にした領収書（精算をすべて取り消したもの）は、取り消す前の明細で作り、「無効」の印を入れる（発注者の決定。報告書 123 章）
+    const all = inv.voided_at ? JSON.parse(inv.void_lines || '[]') : db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ? ORDER BY id').all(invoiceId);
+    const lines = all.filter((l) => l.kind !== 'shipping'), shipping = all.filter((l) => l.kind === 'shipping');
+    const a = account(inv.account_id);
+    const org = Object.fromEntries(['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'].map((k) => [k, setting(k)]));
+    const files = makeFiles({ ...fileArgs(inv, lines, shipping, a, org), voidedOn: inv.voided_at ? jst(inv.voided_at) : null });
     db.prepare('UPDATE invoices SET pdf_file = ?, xlsx_file = ? WHERE id = ?').run(files.pdf, files.xlsx, inv.id);
     // 送付用のメールの下書き（FR-INV-007）。送信は、利用会社の担当者が自分で行う。当日現金の精算では作らない
     if (draft) {
-      files.done.then(() => notifier.draft(a.email, `【${org.org_name}】ご請求書（${inv.number}）`, `${displayName(a)} 様\n\n令和の競りのご請求書をお送りします。\n請求書番号: ${inv.number}\nご請求額: ${yen(inv.total)}（税込）\n\nお振込の際は、依頼人名に請求書番号を入れてください。振込手数料は、お客様のご負担となります。`, [files.pdf]))
+      const mail = invoiceMail(inv, lines, shipping, a, org);
+      track(files.done.then(() => notifier.draft(a.email, mail.subject, mail.body, [files.pdf]))
         .then((ok) => db.prepare('UPDATE invoices SET draft_state = ? WHERE id = ?').run(ok ? 'made' : 'failed', inv.id))
-        .catch(() => db.prepare("UPDATE invoices SET draft_state = 'failed' WHERE id = ?").run(inv.id));
+        .catch(() => db.prepare("UPDATE invoices SET draft_state = 'failed' WHERE id = ?").run(inv.id)));
     }
+    track(files.done);
     return { ...inv, done: files.done };
   }
 
@@ -218,13 +409,14 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
         else if (existing) db.prepare('UPDATE bill_lines SET amount = ?, label = ? WHERE id = ?').run(amount, label, existing.id);
         else if (amount > 0) db.prepare("INSERT INTO bill_lines (kind, event_id, account_id, label, amount, invoice_id, created_at) VALUES ('shipping',?,?,?,?,?,?)").run(eventId, accountId, label, amount, open.id, nowMs());
         const sum = db.prepare('SELECT COALESCE(SUM(amount + premium), 0) AS n FROM bill_lines WHERE invoice_id = ?').get(open.id).n;
-        db.prepare('UPDATE invoices SET total = ? WHERE id = ?').run(sum, open.id);
+        // 作り直す請求書は、今日の発行として、支払期限も決め直す（送料を足した日に、すでに期限を過ぎていることがないように。本番運用の評価 B2）
+        db.prepare('UPDATE invoices SET total = ?, issued_at = ?, due_date = ? WHERE id = ?').run(sum, nowMs(), open.due_days ? addDays(today(), open.due_days) : open.due_date, open.id);
       })();
       inv = renderInvoice(open.id, { draft: true }); // 請求書と下書きを、送料入りで作り直す
     } else {
       if (amount === 0) throw new HttpError(409, '消せる送料の行がありません');
       const r = db.prepare("INSERT INTO bill_lines (kind, event_id, account_id, label, amount, created_at) VALUES ('shipping',?,?,?,?,?)").run(eventId, accountId, label, amount, nowMs());
-      inv = issueInvoice('transfer', [Number(r.lastInsertRowid)], { dueDays: 5, shiftHoliday: true, draft: true });
+      inv = issueInvoice('transfer', [Number(r.lastInsertRowid)], { dueDays: 5, draft: true });
     }
     await inv.done;
     audit(ctx, 'billing.shipping', { target: `invoice:${inv.number}`, after: { amount, label } });
@@ -235,7 +427,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   function onEventEnd(eventId, ctx) {
     syncLines();
     const groups = db.prepare("SELECT account_id, GROUP_CONCAT(id) AS ids FROM bill_lines WHERE event_id = ? AND kind = 'lot' AND invoice_id IS NULL AND cancelled_at IS NULL GROUP BY account_id").all(eventId);
-    const made = groups.map((g) => issueInvoice('transfer', g.ids.split(',').map(Number), { dueDays: 5, shiftHoliday: true, draft: true }));
+    const made = groups.map((g) => issueInvoice('transfer', g.ids.split(',').map(Number), { dueDays: 5, draft: true }));
     if (made.length) audit(ctx, 'invoice.issue_on_end', { target: `event:${eventId}`, after: { invoices: made.map((i) => i.number) } });
     return made;
   }
@@ -243,7 +435,8 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   // ------------------------------------------------------------ 画面に出す形
   function lineView(l) {
     const inv = l.invoice_id ? db.prepare('SELECT * FROM invoices WHERE id = ?').get(l.invoice_id) : null;
-    const overdue = !!inv?.due_date && inv.due_date < today() && !l.cleared_at && !l.cancelled_at;
+    // 期限切れは、送った請求書だけ（送っていない請求書で、停止・督促・解除まで進まないように。本番運用の評価 B2）
+    const overdue = !!inv?.sent_at && !!inv?.due_date && inv.due_date < today() && !l.cleared_at && !l.cancelled_at;
     // 現地受け取りの期限: 消し込みの日の翌日から数えて7日目まで（FR-PAY-008）
     const pickupBy = l.receive === 'pickup' && l.cleared_at && l.kind !== 'penalty' && l.kind !== 'late' ? addDays(jst(l.cleared_at), 7) : null;
     return {
@@ -258,8 +451,12 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   const staffLineView = (l) => {
     const a = account(l.account_id);
     const p = l.participant_id ? db.prepare('SELECT paddle_no, payment, mode FROM members WHERE id = ?').get(l.participant_id) : null;
+    const v = lineView(l);
     return {
-      ...lineView(l), name: displayName(a), accountId: a.id, paddle: p?.paddle_no ?? null, payment: p?.payment ?? null,
+      ...v, name: displayName(a), accountId: a.id, paddle: p?.paddle_no ?? null, payment: p?.payment ?? null,
+      // 請求の管理で使う支払方法（報告書 133 章）: 入金が済んでいれば、実際に受け取った方法。まだなら、振込の請求書を出していれば銀行振込、
+      // 出していなければ、本人が参加手続きで選んだ方法（当日現金・当日クレジットを選んで、会場で精算しなかった人は、開催終了のあと、銀行振込になる）
+      payMethod: l.cleared_method ?? (v.invoice && v.invoice.kind !== 'cash' ? 'transfer' : p?.payment ?? null),
       dunning: db.prepare('SELECT at, method, body FROM dunning WHERE line_id = ? ORDER BY id').all(l.id),
       refunds: db.prepare('SELECT amount, refunded_on AS refundedOn, method, reason FROM refunds WHERE line_id = ? ORDER BY id').all(l.id),
       offer: db.prepare('SELECT state, amount, deadline FROM offers WHERE line_id = ?').get(l.id) ?? null,
@@ -268,257 +465,44 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   };
 
   // ------------------------------------------------------------ 一覧（主催者管理者・受付係。進行役は未引き取りだけ）
+  /** 請求の一覧で選ぶ開催。明細のある開催を、新しい順に。?event=番号 / all / なし（いちばん新しい開催） */
+  function pickEvent(ctx) {
+    const events = db.prepare(`SELECT e.id, e.title, substr(e.starts_at, 1, 10) AS date, COUNT(l.id) AS lines,
+      SUM(CASE WHEN l.cleared_at IS NULL AND l.cancelled_at IS NULL THEN 1 ELSE 0 END) AS open
+      FROM events e JOIN bill_lines l ON l.event_id = e.id GROUP BY e.id ORDER BY e.starts_at DESC, e.id DESC`).all();
+    const want = ctx.url.searchParams.get('event');
+    const id = want === 'all' ? null : events.find((e) => String(e.id) === want)?.id ?? events[0]?.id ?? null;
+    return { events, id };
+  }
   route('GET', '/api/billing/lines', (ctx) => {
     needStaff(ctx, 'admin', 'reception');
     syncLines();
-    return { today: today(), lines: db.prepare('SELECT * FROM bill_lines ORDER BY id DESC LIMIT 1000').all().map(staffLineView) };
-  });
-
-  // ------------------------------------------------------------ 当日現金の精算（FR-PAY-010。受付係・主催者管理者）
-  route('POST', '/api/billing/settle', async (ctx, body) => {
-    const me = needStaff(ctx, 'admin', 'reception');
-    syncLines();
-    const ids = [...new Set((Array.isArray(body.lineIds) ? body.lineIds : []).map(Number))];
-    if (!ids.length) throw bad('精算する明細を選んでください');
-    const lines = ids.map(getLine);
-    if (new Set(lines.map((l) => l.account_id)).size !== 1) throw bad('1回の精算は、1人の落札者の明細だけにしてください');
-    for (const l of lines) {
-      if (l.kind !== 'lot' || l.invoice_id || l.cleared_at || l.cancelled_at) throw new HttpError(409, `${l.label} は、当日現金では精算できません（請求済み、または精算済みです）`);
+    // 新しい順に limit 件。ただし、まだ入金のない明細は、古くても必ず出す（一覧の上限で、未払いが見えなくならないように。本番運用の評価 C）
+    const limit = listLimit(ctx, 1000);
+    // 開催ごとに分けて出す（発注者の決定。報告書 124 章）。指定が無ければ、明細のある、いちばん新しい開催。event=all で、すべての開催
+    const picked = pickEvent(ctx);
+    if (picked.id !== null) {
+      const rows = db.prepare('SELECT * FROM bill_lines WHERE event_id = ? ORDER BY account_id, id').all(picked.id);
+      return { today: today(), lines: rows.map(staffLineView), limit, more: false, events: picked.events, event: picked.id };
     }
-    const now = nowMs();
-    db.transaction(() => {
-      for (const l of lines) {
-        db.prepare("UPDATE bill_lines SET cleared_at = ?, cleared_method = 'cash', cleared_by = ? WHERE id = ?").run(now, me.id, l.id);
-        db.prepare("INSERT INTO clearings (line_id, amount, method, cleared_at) VALUES (?,?,'cash',?)").run(l.id, l.amount, now);
-      }
-    })();
-    // 精算した明細だけを載せた請求書（領収書を兼ねる）を発行する。その場で渡すので、メールの下書きは作らない
-    const inv = issueInvoice('cash', ids);
-    await inv.done;
-    audit(ctx, 'billing.settle', { target: `invoice:${inv.number}`, after: { lines: ids, total: inv.total, method: 'cash' } });
-    return { ok: true, invoice: { id: inv.id, number: inv.number, total: inv.total } };
+    const rows = db.prepare(`SELECT * FROM bill_lines WHERE id >= coalesce((SELECT id FROM bill_lines ORDER BY id DESC LIMIT 1 OFFSET ?), 0)
+      OR (cleared_at IS NULL AND cancelled_at IS NULL) ORDER BY id DESC`).all(limit - 1);
+    return { today: today(), lines: rows.map(staffLineView), limit, more: db.prepare('SELECT COUNT(*) AS n FROM bill_lines').get().n > rows.length, events: picked.events, event: null };
   });
 
-  // ------------------------------------------------------------ 振込の消し込みと、その取り消し（FR-PAY-001・011。主催者管理者だけ）
-  route('POST', '/api/billing/lines/:id/clear', (ctx, body, id) => {
-    const me = needStaff(ctx, 'admin');
-    const l = getLine(id);
-    if (l.cancelled_at) throw new HttpError(409, '解除した明細は、消し込めません。入金があった場合は、返金として記録してください'); // AC-FR-PAY-006-1
-    if (l.cleared_at) throw new HttpError(409, 'この明細は、消し込み済みです');
-    if (!l.invoice_id) throw new HttpError(409, 'まだ請求書を発行していない明細です。当日現金は「精算」で、振込は開催終了の後に消し込みます');
-    // 明細の金額と入金の金額が一致するときだけ、消し込める（一部だけ・多すぎる入金の扱いは未決。OQ-26）
-    if (Number(body.amount) !== payable(l)) throw bad(`入金の金額が、明細の金額（${yen(payable(l))}）と一致しません。一致しない入金は、システムの外で対応し、理由をメモに残してください`);
-    const now = nowMs();
-    db.transaction(() => {
-      db.prepare("UPDATE bill_lines SET cleared_at = ?, cleared_method = 'transfer', cleared_by = ?, clear_memo = ? WHERE id = ?").run(now, me.id, text(body.memo) || null, id);
-      db.prepare("INSERT INTO clearings (line_id, amount, method, cleared_at) VALUES (?,?,'transfer',?)").run(id, l.amount, now);
-    })();
-    audit(ctx, 'billing.clear', { target: `line:${id}`, before: { cleared: false }, after: { cleared: true, amount: payable(l), method: 'transfer' } });
-    return { ok: true };
-  });
-  route('POST', '/api/billing/lines/:id/unclear', (ctx, body, id) => {
-    needStaff(ctx, 'admin');
-    const l = getLine(id);
-    const reason = text(body.reason);
-    if (!reason) throw bad('取り消しの理由を入力してください');
-    if (!l.cleared_at) throw new HttpError(409, 'この明細は、消し込まれていません');
-    if (l.delivered_at) throw new HttpError(409, '引き渡し済みの明細は、消し込みを取り消せません。先に、引き渡しの記録を取り消してください');
-    db.transaction(() => {
-      db.prepare('UPDATE bill_lines SET cleared_at = NULL, cleared_method = NULL, cleared_by = NULL WHERE id = ?').run(id);
-      db.prepare('UPDATE clearings SET reversed_at = ?, reverse_reason = ? WHERE line_id = ? AND reversed_at IS NULL').run(nowMs(), reason, id);
-    })();
-    audit(ctx, 'billing.unclear', { target: `line:${id}`, before: { cleared: true }, after: { cleared: false }, reason });
-    return { ok: true };
-  });
-  route('POST', '/api/billing/lines/:id/memo', (ctx, body, id) => {
-    needStaff(ctx, 'admin');
-    getLine(id);
-    db.prepare('UPDATE bill_lines SET clear_memo = ? WHERE id = ?').run(text(body.memo) || null, id);
-    audit(ctx, 'billing.memo', { target: `line:${id}`, after: { memo: text(body.memo) } });
-    return { ok: true };
-  });
+  // ------------------------------------------------------------ 当日現金の精算（clearing.js）
+  createClearing({ HttpError, audit, bad, db, getLine, issueInvoice, renderInvoice, needStaff, nowMs, payable, route, syncLines, text, today, yen });
 
-  // ------------------------------------------------------------ 引き渡し（FR-PAY-003・004。主催者管理者・受付係）
-  route('POST', '/api/billing/lines/:id/deliver', (ctx, body, id) => {
-    const me = needStaff(ctx, 'admin', 'reception');
-    const l = getLine(id);
-    if (l.kind === 'penalty' || l.kind === 'late' || l.kind === 'shipping') throw new HttpError(409, '違約金・遅延損害金・送料には、引き渡しはありません');
-    if (l.cancelled_at) throw new HttpError(409, '解除した明細は、引き渡せません');
-    if (!l.cleared_at) throw new HttpError(409, '消し込みが済んでいない明細は、引き渡せません');
-    if (l.delivered_at) return { ok: true };
-    db.prepare('UPDATE bill_lines SET delivered_at = ?, delivered_by = ? WHERE id = ?').run(nowMs(), me.id, id);
-    audit(ctx, 'billing.deliver', { target: `line:${id}`, after: { delivered: true } });
-    return { ok: true };
-  });
-  route('POST', '/api/billing/lines/:id/undeliver', (ctx, body, id) => {
-    needStaff(ctx, 'admin');
-    const l = getLine(id);
-    const reason = text(body.reason);
-    if (!reason) throw bad('取り消しの理由を入力してください');
-    if (!l.delivered_at) throw new HttpError(409, 'この明細は、引き渡しを記録していません');
-    db.prepare('UPDATE bill_lines SET delivered_at = NULL, delivered_by = NULL WHERE id = ?').run(id);
-    audit(ctx, 'billing.undeliver', { target: `line:${id}`, before: { delivered: true }, after: { delivered: false }, reason });
-    return { ok: true };
-  });
-  // 開催終了の後の、受け取り方法の変更（明細ごと。主催者管理者だけ。FR-SHIP-008）。発行済みの請求書は出し直さない
-  route('POST', '/api/billing/lines/:id/receive', (ctx, body, id) => {
-    needStaff(ctx, 'admin');
-    const l = getLine(id);
-    if (!RECV[body.receive]) throw bad('受け取り方法を選んでください');
-    db.prepare('UPDATE bill_lines SET receive = ? WHERE id = ?').run(body.receive, id);
-    audit(ctx, 'billing.receive', { target: `line:${id}`, before: { receive: l.receive }, after: { receive: body.receive } });
-    return { ok: true };
-  });
+  // ------------------------------------------------------------ 請求書の一覧・送付済み（invoice-routes.js）
+  createInvoiceRoutes({ HttpError, account, audit, db, renderReceipt, pickEvent, displayName, invoiceAmounts, invoiceMail, jst, listLimit, needStaff, nowMs, renderInvoice, route, setting, today });
 
-  // ------------------------------------------------------------ 請求書の一覧・送付済み（FR-INV-008）・ファイル
-  const invoiceView = (i) => {
-    const a = account(i.account_id);
-    return {
-      id: i.id, number: i.number, kind: i.kind, name: displayName(a), email: a.email, total: i.total, issuedOn: jst(i.issued_at),
-      sentOn: i.sent_at ? jst(i.sent_at) : null, dueDate: i.due_date, draft: i.draft_state, accountId: i.account_id, eventId: i.event_id,
-      shipping: db.prepare("SELECT amount, label FROM bill_lines WHERE invoice_id = ? AND kind = 'shipping'").get(i.id) ?? null,
-      // 下書きを作ってから1日たっても送付済みにならない請求書は、強調する
-      stale: i.kind !== 'cash' && !i.sent_at && nowMs() - i.issued_at > DAY,
-    };
-  };
-  route('GET', '/api/billing/invoices', (ctx) => {
-    needStaff(ctx, 'admin');
-    return { invoices: db.prepare('SELECT * FROM invoices ORDER BY id DESC LIMIT 1000').all().map(invoiceView) };
-  });
-  route('POST', '/api/billing/invoices/:id/sent', (ctx, body, id) => {
-    needStaff(ctx, 'admin');
-    const i = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
-    if (!i) throw new HttpError(404, '請求書が見つかりません');
-    if (i.kind === 'cash') throw new HttpError(409, '当日現金の精算の請求書は、その場で渡すので、送付の記録はありません');
-    if (i.sent_at) return { ok: true, dueDate: i.due_date };
-    // 送ったことを記録する（FR-INV-008）。支払期限は、発行したときに決まっている（発行日の5日後）ので、ここでは変えない
-    db.prepare('UPDATE invoices SET sent_at = ? WHERE id = ?').run(nowMs(), id);
-    audit(ctx, 'invoice.sent', { target: `invoice:${i.number}`, after: { sentOn: today(), dueDate: i.due_date } });
-    return { ok: true, dueDate: i.due_date };
-  });
-  route('POST', '/api/billing/invoices/:id/unsent', (ctx, body, id) => {
-    needStaff(ctx, 'admin');
-    const i = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
-    if (!i?.sent_at) throw new HttpError(409, '送付済みの記録がありません');
-    db.prepare('UPDATE invoices SET sent_at = NULL WHERE id = ?').run(id);
-    audit(ctx, 'invoice.unsent', { target: `invoice:${i.number}`, before: { sentOn: jst(i.sent_at), dueDate: i.due_date } });
-    return { ok: true };
-  });
-  const sendFile = (i, kind) => {
-    const file = kind === 'pdf' ? i.pdf_file : i.xlsx_file;
-    if (!file || !fs.existsSync(file)) throw new HttpError(404, 'ファイルが見つかりません');
-    return { file: { body: fs.readFileSync(file), type: kind === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: `${i.number}.${kind}` } };
-  };
-  route('GET', '/api/billing/invoices/:id/pdf', (ctx, body, id) => {
-    const i = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
-    // 主催者管理者・受付係（精算の領収書を渡す）と、その請求書の本人だけが開ける
-    if (!i || !(ctx.staff && ['admin', 'reception'].includes(ctx.staff.role)) && ctx.member?.id !== i.account_id) throw new HttpError(404, '請求書が見つかりません');
-    return sendFile(i, 'pdf');
-  });
-  route('GET', '/api/billing/invoices/:id/xlsx', (ctx, body, id) => {
-    needStaff(ctx, 'admin'); // 落札者にも Excel を渡すかは未決（OQ-28）なので、主催者管理者だけ
-    const i = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
-    if (!i) throw new HttpError(404, '請求書が見つかりません');
-    return sendFile(i, 'xlsx');
-  });
-
-  // ------------------------------------------------------------ 未払い: 督促・解除・違約金・繰り上げ・返金（FR-PAY-005〜007・012、FR-PEN-002）
-  const isUnpaid = (l) => lineView(l).state === 'unpaid';
-  route('POST', '/api/billing/lines/:id/dun', (ctx, body, id) => {
-    const me = needStaff(ctx, 'admin');
-    getLine(id);
-    const method = text(body.method, 50), note = text(body.body, 1000);
-    if (!method || !note) throw bad('督促の方法と内容を入力してください');
-    db.prepare('INSERT INTO dunning (line_id, at, method, body, staff_id) VALUES (?,?,?,?,?)').run(id, nowMs(), method, note, me.id);
-    audit(ctx, 'billing.dun', { target: `line:${id}`, after: { method } });
-    return { ok: true };
-  });
-  route('POST', '/api/billing/lines/:id/cancel', (ctx, body, id) => {
-    needStaff(ctx, 'admin');
-    const l = getLine(id);
-    const reason = text(body.reason);
-    if (!reason) throw bad('解除の理由を入力してください');
-    if (!isUnpaid(l)) throw new HttpError(409, '解除できるのは、支払期限を過ぎて消し込まれていない（未払いの）明細だけです');
-    db.prepare('UPDATE bill_lines SET cancelled_at = ?, cancel_reason = ? WHERE id = ?').run(nowMs(), reason, id);
-    const a = account(l.account_id);
-    notifier.email(a.email, 'cancelled', '落札の解除のお知らせ', `${l.label}（${yen(l.amount)}）について、お支払いの確認が取れなかったため、落札を解除しました。\n理由: ${reason}`);
-    audit(ctx, 'billing.cancel', { target: `line:${id}`, before: { cancelled: false }, after: { cancelled: true }, reason });
-    return { ok: true };
-  });
-  // 違約金・遅延損害金の請求（金額は、主催者管理者が確かめて確定する。設定の値は未決。OQ-04b）
-  route('POST', '/api/billing/lines/:id/penalty', async (ctx, body, id) => {
-    needStaff(ctx, 'admin');
-    const l = getLine(id);
-    const kind = body.kind === 'late' ? 'late' : 'penalty';
-    const amount = Number(body.amount);
-    if (!Number.isSafeInteger(amount) || amount < 1) throw bad('金額を、1円以上の整数で入力してください');
-    if (kind === 'penalty' && !l.cancelled_at) throw new HttpError(409, '違約金は、解除した明細について請求します');
-    if (kind === 'late' && !(l.cleared_at || l.cancelled_at)) throw new HttpError(409, '遅延損害金は、入金（または解除）のあとに請求します');
-    const r = db.prepare('INSERT INTO bill_lines (kind, event_id, lot_id, participant_id, account_id, label, amount, parent_line_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(kind, l.event_id, l.lot_id, l.participant_id, l.account_id, `${kind === 'late' ? '遅延損害金' : '違約金'}（${l.label}）`, amount, l.id, nowMs());
-    // 支払期限は、送付日の翌日から数えて7日目。休業日でも前に繰り上げない（FR-PEN-002）
-    const inv = issueInvoice('penalty', [Number(r.lastInsertRowid)], { dueDays: 7, shiftHoliday: false, draft: true });
-    await inv.done;
-    audit(ctx, 'billing.penalty', { target: `line:${id}`, after: { kind, amount, invoice: inv.number } });
-    return { ok: true, invoice: inv.number };
-  });
-  // 違約金・遅延損害金の金額の案（FR-PEN-001・002）。主催者設定の率から計算した値を示し、主催者管理者が確かめて確定する
-  route('GET', '/api/billing/lines/:id/penalty-suggest', (ctx, body, id) => {
-    needStaff(ctx, 'admin');
-    const l = getLine(id);
-    const a = account(l.account_id);
-    const kind = ctx.url.searchParams.get('kind') === 'late' ? 'late' : 'penalty';
-    const rate = Number(setting(`${kind}_rate_${a.kind}`)); // 法人と個人で、別の率を持つ
-    if (!(rate > 0)) return { amount: null, basis: '率が設定されていないため、金額を手で入力してください' };
-    if (kind === 'penalty') return { amount: Math.floor(l.amount * rate / 100), basis: `落札額 ${yen(l.amount)} × ${rate}%` };
-    // 遅延損害金: 支払期限の翌日から、消し込みの日（または解除の日。どちらもまだなら今日）までの日数で日割りし、1円未満は切り捨てる
-    const inv = l.invoice_id ? db.prepare('SELECT due_date FROM invoices WHERE id = ?').get(l.invoice_id) : null;
-    if (!inv?.due_date) return { amount: null, basis: '支払期限が決まっていない（未送付の）請求です' };
-    const end = l.cleared_at ? jst(l.cleared_at) : l.cancelled_at ? jst(l.cancelled_at) : today();
-    const days = Math.max(0, Math.round((Date.parse(end) - Date.parse(inv.due_date)) / DAY));
-    return { amount: Math.floor(payable(l) * rate / 100 * days / 365), days, basis: `${yen(payable(l))} × 年${rate}% × ${days}日 ÷ 365` };
-  });
-  /** 次点: 落札者を除いた参加者のうち、その品で最も高い有効な入札をした人。停止中の会員は除く（FR-PAY-007） */
-  function runnerUp(l) {
-    const rows = db.prepare(`SELECT b.amount, m.id AS participant_id, m.account_id FROM bids b JOIN members m ON m.id = b.member_id
-      WHERE b.lot_id = ? AND b.result = 'ACCEPTED' AND b.valid = 1 AND m.account_id IS NOT NULL AND m.account_id <> ? ORDER BY b.amount DESC, b.seq DESC`).all(l.lot_id, l.account_id);
-    const top = rows[0];
-    if (!top) return null;
-    return suspension(top.account_id) ? { ...top, blocked: true } : top;
-  }
-  route('POST', '/api/billing/lines/:id/offer', (ctx, body, id) => {
-    needStaff(ctx, 'admin');
-    const l = getLine(id);
-    if (l.kind !== 'lot' || !l.cancelled_at) throw new HttpError(409, '繰り上げを打診できるのは、解除した落札の明細だけです');
-    if (db.prepare('SELECT 1 FROM offers WHERE line_id = ?').get(id)) throw new HttpError(409, 'この明細は、すでに次点の人に打診しています（打診するのは1人だけです）');
-    const next = runnerUp(l);
-    if (!next) throw new HttpError(409, '次点の人がいません');
-    if (next.blocked) throw new HttpError(409, '次点の人は参加を停止されているため、打診できません');
-    // 回答期限: 打診した日の翌日から数えて3日目まで。価格は、次点の人がその品で最後に入れた有効な入札額
-    const deadline = addDays(today(), 3);
-    db.prepare('INSERT INTO offers (line_id, participant_id, account_id, amount, offered_at, deadline) VALUES (?,?,?,?,?,?)').run(id, next.participant_id, next.account_id, next.amount, nowMs(), deadline);
-    const a = account(next.account_id);
-    notifier.email(a.email, 'offer', '繰り上げ落札のご案内', `${l.label} について、落札者の解除があったため、次点のお客様に繰り上げをご案内します。\n価格: ${yen(next.amount)}（税込）。このほかに、買歩銭（落札額の${premiumRate()}%）がかかります\n回答期限: ${deadline}\nマイページで、承諾か辞退をお選びください。期限までにご回答がなければ、辞退とさせていただきます。`);
-    audit(ctx, 'billing.offer', { target: `line:${id}`, after: { amount: next.amount, deadline } });
-    return { ok: true, amount: next.amount, deadline };
-  });
-  route('POST', '/api/billing/lines/:id/refund', (ctx, body, id) => {
-    const me = needStaff(ctx, 'admin');
-    const l = getLine(id);
-    const amount = Number(body.amount), on = text(body.date, 10), method = body.method === 'cash' ? 'cash' : body.method === 'transfer' ? 'transfer' : null, reason = text(body.reason);
-    if (!Number.isSafeInteger(amount) || amount < 1) throw bad('返金額を、1円以上の整数で入力してください');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(on)) throw bad('返金日を入力してください');
-    if (!method) throw bad('返金の方法（現金・振込）を選んでください');
-    if (!reason) throw bad('返金の理由を入力してください');
-    db.prepare('INSERT INTO refunds (line_id, amount, refunded_on, method, reason, staff_id, at) VALUES (?,?,?,?,?,?,?)').run(id, amount, on, method, reason, me.id, nowMs());
-    audit(ctx, 'billing.refund', { target: `line:${id}`, after: { amount, date: on, method }, reason });
-    return { ok: true, lineAmount: l.amount };
-  });
+  // ------------------------------------------------------------ 未払い: 督促・解除・違約金・繰り上げ・返金（unpaid.js）
+  createUnpaid({ HttpError, account, audit, bad, db, displayName, getLine, issueInvoice, jst, lineView, needStaff, notifier, nowMs, payable, premiumOf, premiumRate, route, setting, suspension, text, today, yen });
 
   // ------------------------------------------------------------ 未払いによる自動の停止（FR-AUTH-015）
   /** 支払期限を過ぎて消し込まれていない請求がある会員か。あれば、その請求書の番号を返す */
   const unpaidStmt = db.prepare(`SELECT i.number FROM bill_lines l JOIN invoices i ON i.id = l.invoice_id
-    WHERE l.account_id = ? AND l.cleared_at IS NULL AND l.cancelled_at IS NULL AND i.due_date IS NOT NULL AND i.due_date < ? LIMIT 1`);
+    WHERE l.account_id = ? AND l.cleared_at IS NULL AND l.cancelled_at IS NULL AND i.sent_at IS NOT NULL AND i.due_date IS NOT NULL AND i.due_date < ? LIMIT 1`);
   const manualStmt = db.prepare('SELECT suspended FROM member_accounts WHERE id = ?');
   /** 停止の種類: manual（手動）/ unpaid（未払いによる自動）/ null。どちらか一方でもかかっていれば停止中（FR-AUTH-009） */
   function suspension(accountId) {
@@ -526,164 +510,14 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     return unpaidStmt.get(accountId, today()) ? 'unpaid' : null;
   }
 
-  // ------------------------------------------------------------ 未引き取り（現地受け取り。FR-PAY-008）と、配送の一覧（FR-SHIP-005）
-  route('GET', '/api/billing/pickup', (ctx) => {
-    needStaff(ctx, 'admin', 'auctioneer', 'reception');
-    const rows = db.prepare("SELECT * FROM bill_lines WHERE receive = 'pickup' AND cleared_at IS NOT NULL AND delivered_at IS NULL AND cancelled_at IS NULL AND kind IN ('lot','promote') ORDER BY cleared_at").all();
-    return { today: today(), lines: rows.map(staffLineView) };
-  });
-  route('GET', '/api/billing/shipping.csv', (ctx) => {
-    needStaff(ctx, 'admin');
-    const rows = db.prepare("SELECT * FROM bill_lines WHERE receive = 'ship' AND cancelled_at IS NULL AND kind IN ('lot','promote') ORDER BY account_id, id").all();
-    const esc = csvCell;
-    const lines = [['氏名・会社名', '配送先', '電話番号', '品', '落札額', '消し込み', '引き渡し'].map(esc).join(',')];
-    for (const l of rows) {
-      const a = account(l.account_id);
-      lines.push([displayName(a), a.ship_to || a.address, a.phone, l.label, l.amount, l.cleared_at ? `済（${jst(l.cleared_at)}）` : '未', l.delivered_at ? '済' : '未'].map(esc).join(','));
-    }
-    audit(ctx, 'billing.shipping_export', { target: 'shipping.csv', after: { rows: rows.length } });
-    return { file: { body: Buffer.from('﻿' + lines.join('\r\n') + '\r\n'), type: 'text/csv; charset=utf-8', name: 'shipping.csv' } };
-  });
+  // ------------------------------------------------------------ 未引き取り（pickup.js）
+  createPickup({ account, audit, bad, db, displayName, invoiceAmounts, jst, needStaff, route, staffLineView, today, nowMs, getLine, notifier, setting, payable });
 
-  // 古物営業法16条の帳簿に使うための、取引の記録（FR-LEG-001）。引き渡した品を、日付・品目・数量・特徴・相手方で出す
-  route('GET', '/api/billing/ledger.csv', (ctx) => {
-    needStaff(ctx, 'admin');
-    const month = ctx.url.searchParams.get('month') ?? today().slice(0, 7);
-    const rows = db.prepare("SELECT * FROM bill_lines WHERE kind IN ('lot','promote') AND delivered_at IS NOT NULL ORDER BY delivered_at").all().filter((l) => jst(l.delivered_at).startsWith(month));
-    const esc = csvCell;
-    const out = [['引き渡しの日', '品目', '数量', '特徴', '代金（税込）', '相手方の氏名・名称', '相手方の住所', '相手方の電話番号'].map(esc).join(',')];
-    for (const l of rows) { const a = account(l.account_id); out.push([jst(l.delivered_at), l.label, 1, '', l.amount, displayName(a), a.address, a.withdrawn_phone ?? a.phone].map(esc).join(',')); }
-    audit(ctx, 'billing.ledger_export', { target: `ledger:${month}`, after: { rows: rows.length } });
-    return { file: { body: Buffer.from('\ufeff' + out.join('\r\n') + '\r\n'), type: 'text/csv; charset=utf-8', name: `ledger-${month}.csv` } };
-  });
-  // 月ごとに、全請求書を1つの Excel にまとめた一覧（FR-INV-007）
-  route('GET', '/api/billing/invoices.xlsx', async (ctx) => {
-    needStaff(ctx, 'admin');
-    const month = ctx.url.searchParams.get('month') ?? today().slice(0, 7);
-    const list = db.prepare('SELECT * FROM invoices ORDER BY id').all().filter((i) => jst(i.issued_at).startsWith(month));
-    const KIND = { cash: '現金の精算', transfer: '振込', promote: '繰り上げ', penalty: '違約金など' };
-    const rows = list.map((i) => {
-      const lines = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ?').all(i.id);
-      const paid = lines.filter((l) => l.cleared_at).reduce((s, l) => s + payable(l), 0);
-      return [i.number, KIND[i.kind], displayName(account(i.account_id)), jst(i.issued_at), i.sent_at ? jst(i.sent_at) : '', i.due_date ?? '', i.total, paid, paid === i.total ? '支払済み' : paid > 0 ? '一部支払済み' : '未払い'];
-    });
-    return { file: { body: await makeInvoiceList(month, rows), type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: `invoices-${month}.xlsx` } };
-  });
+  // ------------------------------------------------------------ 手数料の集計（fees.js）
+  const { feeSummary } = createFees({ HttpError, audit, bad, db, jst, needStaff, nowMs, route, setting, staffLineView, today });
 
-  // ------------------------------------------------------------ 手数料の集計（FR-FEE-001〜010）
-  const ceilFee = (amount) => Math.ceil(amount * FEE_RATE / 100);
-  function feeSummary(month) {
-    if (!/^\d{4}-\d{2}$/.test(month)) throw bad('月を、2026-12 の形で指定してください');
-    const monthOf = (ms) => jst(ms).slice(0, 7);
-    const all = db.prepare("SELECT c.*, l.label, l.kind, l.event_id FROM clearings c JOIN bill_lines l ON l.id = c.line_id WHERE l.kind IN ('lot','promote') ORDER BY c.cleared_at").all();
-    // 対象: その月に消し込んだ明細（月の区切りは、消し込みの日。日本時間）。同じ月のうちに取り消したものは、数えない
-    const counted = all.filter((c) => monthOf(c.cleared_at) === month && !(c.reversed_at && monthOf(c.reversed_at) === month));
-    const base = counted.reduce((s, c) => s + c.amount, 0);
-    // 差し引き: 前の月までに数えた消し込みを、この月に取り消したもの。この月に返金した明細。1件ごとに切り上げる
-    const reversed = all.filter((c) => c.reversed_at && monthOf(c.reversed_at) === month && monthOf(c.cleared_at) < month);
-    const refunded = db.prepare("SELECT r.*, l.label, l.amount AS line_amount FROM refunds r JOIN bill_lines l ON l.id = r.line_id WHERE substr(r.refunded_on, 1, 7) = ? AND l.kind IN ('lot','promote')").all(month);
-    const deduction = reversed.reduce((s, c) => s + ceilFee(c.amount), 0) + refunded.reduce((s, r) => s + ceilFee(r.line_amount), 0);
-    // 手数料 = 落札額の合計 × 5%（1円未満は切り捨て。合計に対して1回だけ丸める）。買歩銭は、対象に含めていない【前提】
-    const fee = Math.max(0, Math.floor(base * FEE_RATE / 100) - deduction);
-    const minimum = Number(setting('fee_minimum')) || 0;         // 最低保証額（未決。OQ-19）
-    const charge = Math.max(fee, minimum);
-    const taxMode = setting('fee_tax_mode') === 'inclusive' ? 'inclusive' : 'exclusive'; // 外税 / 内税（FR-FEE-009）
-    const tax = taxMode === 'exclusive' ? Math.floor(charge * 10 / 100) : 0;
-    const confirm = db.prepare('SELECT * FROM fee_confirms WHERE month = ?').get(month);
-    return {
-      month, base, rate: FEE_RATE, deduction, fee, minimum, charge, taxMode, tax, total: charge + tax,
-      confirmedOn: confirm ? jst(confirm.confirmed_at) : null,
-      // 根拠になる明細ごとの一覧（FR-FEE-006）
-      details: [
-        ...counted.map((c) => ({ label: c.label, amount: c.amount, method: PAY[c.method], clearedOn: jst(c.cleared_at), note: '' })),
-        ...reversed.map((c) => ({ label: c.label, amount: -c.amount, method: PAY[c.method], clearedOn: jst(c.cleared_at), note: `消し込みの取り消し（${jst(c.reversed_at)}）` })),
-        ...refunded.map((r) => ({ label: r.label, amount: -r.line_amount, method: PAY[r.method], clearedOn: '', note: `返金（${r.refunded_on}）` })),
-      ],
-    };
-  }
-  route('GET', '/api/billing/fees', (ctx) => {
-    needStaff(ctx, 'admin', 'operator'); // 手数料の集計と明細は、開発・運営者も見られる（8.14）
-    return feeSummary(ctx.url.searchParams.get('month') ?? today().slice(0, 7));
-  });
-  route('POST', '/api/billing/fees/confirm', (ctx, body) => {
-    const me = needStaff(ctx, 'admin');
-    const s = feeSummary(String(body.month ?? ''));
-    if (s.month >= today().slice(0, 7)) throw new HttpError(409, '確認済みにできるのは、締めた月（先月まで）の明細です');
-    db.prepare('INSERT OR IGNORE INTO fee_confirms (month, confirmed_at, staff_id) VALUES (?,?,?)').run(s.month, nowMs(), me.id);
-    audit(ctx, 'fee.confirm', { target: `month:${s.month}`, after: { total: s.total } });
-    return { ok: true };
-  });
-  // 長く未払いのままの明細: 支払期限の翌日から30日以上、消し込みも解除もされていない（FR-FEE-007）
-  route('GET', '/api/billing/long-unpaid', (ctx) => {
-    needStaff(ctx, 'admin', 'operator');
-    const limit = addDays(today(), -30);
-    const rows = db.prepare(`SELECT l.* FROM bill_lines l JOIN invoices i ON i.id = l.invoice_id
-      WHERE l.cleared_at IS NULL AND l.cancelled_at IS NULL AND i.due_date IS NOT NULL AND i.due_date <= ? AND l.kind IN ('lot','promote') ORDER BY i.due_date`).all(limit);
-    return { lines: rows.map(staffLineView) };
-  });
-
-  // ------------------------------------------------------------ 会員のマイページ（FR-INV-001、FR-PAY-008・009、FR-SHIP-008）
-  route('GET', '/api/my/billing', (ctx) => {
-    const me = needMember(ctx);
-    syncLines();
-    expireOffers();
-    const offers = db.prepare("SELECT o.id, o.amount, o.deadline, o.state, l.label FROM offers o JOIN bill_lines l ON l.id = o.line_id WHERE o.account_id = ? ORDER BY o.id DESC").all(me.id);
-    return {
-      suspension: suspension(me.id),
-      lines: db.prepare('SELECT * FROM bill_lines WHERE account_id = ? ORDER BY id DESC').all(me.id).map(lineView),
-      offers,
-      // 請求書の一覧（マイページの「請求書」）。状態: paid（すべて消し込み済み）/ overdue（期限を過ぎている）/ billed（お支払い前）
-      invoices: db.prepare('SELECT * FROM invoices WHERE account_id = ? ORDER BY id DESC').all(me.id).map((i) => {
-        const open = db.prepare('SELECT COUNT(*) AS n FROM bill_lines WHERE invoice_id = ? AND cleared_at IS NULL AND cancelled_at IS NULL').get(i.id).n;
-        return { id: i.id, number: i.number, kind: i.kind, issuedOn: jst(i.issued_at), total: i.total, dueDate: i.due_date,
-          state: open === 0 ? 'paid' : i.due_date && i.due_date < today() ? 'overdue' : 'billed' };
-      }),
-    };
-  });
-  // その日に、何をいくらで落札したかの一覧（開催が終わったあと、トップページに出す）。
-  // いちばん最近に終わった開催（7日以内）で、自分が落札した品。解除された落札は出さない
-  route('GET', '/api/my/wins', (ctx) => {
-    const me = needMember(ctx);
-    syncLines();
-    const ev = db.prepare(`SELECT e.id, e.title, e.starts_at FROM events e WHERE e.phase = 'ended' AND substr(e.starts_at, 1, 10) >= ?
-      AND EXISTS (SELECT 1 FROM bill_lines l WHERE l.event_id = e.id AND l.account_id = ? AND l.kind = 'lot' AND l.cancelled_at IS NULL)
-      ORDER BY e.starts_at DESC, e.id DESC LIMIT 1`).get(addDays(today(), -7), me.id);
-    if (!ev) return { event: null, lines: [], total: null };
-    const rows = db.prepare("SELECT * FROM bill_lines WHERE event_id = ? AND account_id = ? AND kind = 'lot' AND cancelled_at IS NULL ORDER BY id").all(ev.id, me.id);
-    const sum = (f) => rows.reduce((n, l) => n + f(l), 0);
-    return {
-      event: { title: ev.title, date: ev.starts_at.slice(0, 10) },
-      lines: rows.map((l) => ({ label: l.label, amount: l.amount, premium: l.premium ?? 0, payable: payable(l) })),
-      total: { amount: sum((l) => l.amount), premium: sum((l) => l.premium ?? 0), payable: sum(payable) },
-    };
-  });
-  route('POST', '/api/my/offers/:id', async (ctx, body, id) => {
-    const me = needMember(ctx);
-    expireOffers();
-    const o = db.prepare('SELECT * FROM offers WHERE id = ? AND account_id = ?').get(id, me.id);
-    if (!o) throw new HttpError(404, '繰り上げのご案内が見つかりません');
-    if (o.state !== 'open') throw new HttpError(409, 'このご案内は、すでに回答済みか、期限が切れています');
-    if (body.answer !== 'accept' && body.answer !== 'decline') throw bad('承諾か辞退かを選んでください');
-    if (body.answer === 'decline') {
-      db.prepare("UPDATE offers SET state = 'declined', answered_at = ? WHERE id = ?").run(nowMs(), id);
-      audit(ctx, 'offer.decline', { target: `offer:${id}` });
-      return { ok: true };
-    }
-    // 承諾: 繰り上げの請求書を、別に1通発行する。受け取り方法は、その人がその開催で選んだもの
-    const src = getLine(o.line_id);
-    const p = db.prepare('SELECT receive FROM members WHERE id = ?').get(o.participant_id);
-    const r = db.prepare("INSERT INTO bill_lines (kind, event_id, lot_id, participant_id, account_id, label, amount, premium, receive, parent_line_id, created_at) VALUES ('promote',?,?,?,?,?,?,?,?,?,?)")
-      .run(src.event_id, src.lot_id, o.participant_id, o.account_id, `${src.label}（繰り上げ）`, o.amount, premiumOf(o.amount), p?.receive ?? null, src.id, nowMs());
-    db.prepare("UPDATE offers SET state = 'accepted', answered_at = ?, new_line_id = ? WHERE id = ?").run(nowMs(), r.lastInsertRowid, id);
-    const inv = issueInvoice('promote', [Number(r.lastInsertRowid)], { dueDays: 5, shiftHoliday: true, draft: true });
-    await inv.done;
-    audit(ctx, 'offer.accept', { target: `offer:${id}`, after: { invoice: inv.number, amount: o.amount } });
-    return { ok: true, invoice: inv.number };
-  });
-  // 回答期限までに回答がなければ、辞退とみなす
-  function expireOffers() {
-    db.prepare("UPDATE offers SET state = 'expired' WHERE state = 'open' AND deadline < ?").run(today());
-  }
+  // ------------------------------------------------------------ 会員のマイページ（billing-mypage.js）
+  const { expireOffers } = createBillingMypage({ HttpError, audit, bad, db, getLine, invoiceAmounts, issueInvoice, jst, lineView, needMember, nowMs, offerPremiumOf, payable, route, setting, suspension, syncLines, today });
 
   // ------------------------------------------------------------ 定期の見回り（期限を過ぎた知らせ、受け取り期限の前日の知らせ）
   function sweep() {
@@ -692,10 +526,20 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const t = today();
     // 支払期限を過ぎた請求書: 自動で停止になる。理由を、メールで知らせる（マイページにも出る。AC-FR-AUTH-015-1）
     const overdue = db.prepare(`SELECT DISTINCT i.* FROM invoices i JOIN bill_lines l ON l.invoice_id = i.id
-      WHERE i.due_date IS NOT NULL AND i.due_date < ? AND i.overdue_notified = 0 AND l.cleared_at IS NULL AND l.cancelled_at IS NULL`).all(t);
+      WHERE i.sent_at IS NOT NULL AND i.due_date IS NOT NULL AND i.due_date < ? AND i.overdue_notified = 0 AND l.cleared_at IS NULL AND l.cancelled_at IS NULL`).all(t);
     for (const i of overdue) {
       const a = account(i.account_id);
-      notifier.email(a.email, 'overdue', 'お支払いの確認が取れていません', `請求書 ${i.number}（${yen(i.total)}）のお支払期限（${i.due_date}）を過ぎました。\nお支払いの確認が取れるまで、競りへの参加を停止しています。`);
+      const bank = setting('bank_account');
+      notifier.email(a.email, 'overdue', subjectOf(`お支払いの確認が取れていません（請求書 ${i.number}）`), compose(setting, { name: displayName(a), lines: [
+        `請求書 ${i.number} のお支払い期限（${jpDay(i.due_date)}）を過ぎましたが、まだお支払いの確認が取れていません。`,
+        '',
+        ...kv([['ご請求額', yen(invoiceAmounts(i).due)], ['請求書番号', i.number]]), // 解除した明細を除いた金額
+        '',
+        'お支払いの確認が取れるまで、競りへの参加を停止しています。確認が取れると、自動で解除されます。',
+        '', '【お振込先】', bank || '（振込先は、お送りした請求書をご覧ください）', `ご依頼人名の前に、請求書番号「${i.number}」を入れてください。`,
+        '',
+        'すでにお支払い済みの場合は、行き違いですので、ご容赦ください。ご不明な点は、このメールにご返信ください。',
+      ] }));
       db.prepare('UPDATE invoices SET overdue_notified = 1 WHERE id = ?').run(i.id);
     }
     // 現地受け取りの期限の前日に、落札者に知らせる
@@ -706,12 +550,26 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
       // 前日に動いていなかった日（だれも開かず、サーバーが休んでいた日）があっても、期限までは知らせる
       if (t < addDays(by, -1) || t > by) continue;
       const a = account(l.account_id);
-      notifier.email(a.email, 'pickup', '受け取り期限のお知らせ', `${l.label} の受け取り期限は、${by} までです。会場の営業時間内に、お受け取りください。`);
+      const ev = l.event_id && db.prepare('SELECT venue_name, venue_address FROM events WHERE id = ?').get(l.event_id);
+      notifier.email(a.email, 'pickup', subjectOf(`お受け取りの期限は${jpDay(by)}です`), compose(setting, { name: displayName(a), lines: [
+        `${l.label} の、お受け取りの期限が近づいています。`,
+        '',
+        ...kv([['期限', `${jpDay(by)}まで`], ['場所', ev && `${ev.venue_name}（${ev.venue_address}）`]]),
+        '',
+        '会場の営業時間内に、お受け取りください。期限に間に合わない場合は、このメールにご返信ください。',
+      ] }));
       db.prepare('INSERT INTO pickup_notices (line_id, at) VALUES (?, ?)').run(l.id, nowMs());
       pickup++;
     }
     return { overdue: overdue.length, pickup };
   }
 
-  return { syncLines, onEventEnd, suspension, sweep, feeSummary, premiumRate };
+  // 発行者の情報（名称・住所・登録番号・振込先）を変えたとき: まだ送っていない振込の請求書を、新しい内容で作り直す
+  // （振込先が未設定のまま発行した請求書に、「（未設定）」が残り続けないように）。送付済みのものは、送ったときのままにする
+  function rerenderUnsent() {
+    const ids = db.prepare("SELECT id FROM invoices WHERE kind <> 'cash' AND sent_at IS NULL").all().map((r) => r.id);
+    for (const id of ids) renderInvoice(id).done.catch((err) => console.error('[invoice] 作り直しに失敗しました', id, err?.message ?? err));
+    return ids.length;
+  }
+  return { syncLines, onEventEnd, suspension, sweep, feeSummary, premiumRate, fixedKeys, sealFixed, rerenderUnsent, filesIdle };
 }

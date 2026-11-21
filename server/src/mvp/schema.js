@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS member_accounts (
   id INTEGER PRIMARY KEY,                 -- 会員番号（登録の順。画面には出さない。FR-NUM-001）
   kind TEXT NOT NULL CHECK (kind IN ('b2b','b2c')),
   name TEXT NOT NULL,
-  phone TEXT NOT NULL UNIQUE,             -- 1つの電話番号で登録できる会員は1人（FR-AUTH-001）
+  phone TEXT NOT NULL,                    -- 1つの電話番号で登録できる会員は1人（FR-AUTH-001）。重なりを禁じるのは、本人のものと確かめた番号だけ（索引 member_accounts_phone_verified）
   email TEXT NOT NULL,
   email_verified INTEGER NOT NULL DEFAULT 0,
   address TEXT NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS staff_accounts (
   id INTEGER PRIMARY KEY,
   login_id TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin','auctioneer','reception','operator')),  -- 主催者管理者・進行役・受付係・開発運営者
+  role TEXT NOT NULL CHECK (role IN ('admin','auctioneer','caller','reception','operator')),  -- 主催者管理者・進行役・オークショニア・受付係・開発運営者
   phone TEXT,                             -- この番号では会員登録できない（FR-AUTH-013）
   password_hash TEXT NOT NULL,
   totp_secret TEXT NOT NULL,
@@ -69,7 +69,11 @@ CREATE TABLE IF NOT EXISTS audit_log (
   actor_kind TEXT NOT NULL, actor_id INTEGER, actor_role TEXT,   -- システムが自動で行ったものは 'system'
   target TEXT NOT NULL DEFAULT '', before TEXT, after TEXT, reason TEXT, ip TEXT
 );
-CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log BEGIN SELECT RAISE(ABORT, 'audit_log は追記だけ'); END;
+-- 書き換えは、保存期間を過ぎた接続元（ip）を消すことだけを許す（ほかの列は変えられない。本番運用の評価 C）
+CREATE TRIGGER IF NOT EXISTS audit_no_update_v2 BEFORE UPDATE ON audit_log
+  WHEN NOT (NEW.ip IS NULL AND NEW.id IS OLD.id AND NEW.type IS OLD.type AND NEW.at IS OLD.at AND NEW.actor_kind IS OLD.actor_kind AND NEW.actor_id IS OLD.actor_id
+    AND NEW.actor_role IS OLD.actor_role AND NEW.target IS OLD.target AND NEW.before IS OLD.before AND NEW.after IS OLD.after AND NEW.reason IS OLD.reason)
+  BEGIN SELECT RAISE(ABORT, 'audit_log は追記だけ'); END;
 CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log BEGIN SELECT RAISE(ABORT, 'audit_log は追記だけ'); END;
 `;
 
@@ -77,6 +81,6 @@ CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log BEGIN SE
 export const DEFAULT_SETTINGS = {
   org_name: '株式会社レイワ',
   return_policy: '【仮の文言。弁護士の確認前】中古品のため、現状でのお渡しとなります。落札後の返品・交換はお受けできません。',
-  shipping_notice: '落札価格に送料は含まれません。配送の場合、送料は後日、別にご請求します。',
+  shipping_notice: '落札額に送料は含まれません。配送の場合、送料は後日、別にご請求します。',
   buyer_premium_rate: '10', // 買歩銭（落札者が、落札額に上乗せして払う手数料）の割合。発注者の決定で 10%
 };

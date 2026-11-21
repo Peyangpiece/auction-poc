@@ -19,6 +19,9 @@ export class StreamControl extends EventEmitter {
     this.cmdId = 0;
     this.obsActive = null; // エージェントが最後に報告した OBS の配信の状態（不明なら null）
     this.desired = null; // サーバーが望む配信の状態（'on' / 'off' / null=まだ指示していない）
+    this.cameras = []; // OBS のカメラ（名前が「カメラ」で始まるシーン）。エージェントが知らせてくる（報告書 92 章）
+    this.camera = null; // いま映しているシーン
+    this.video = null; // OBS の解像度 { base, output, want, state }（報告書 93 章）
 
     this.live = { poll: false, event: false, mock: false }; // 方法ごとの「LIVE かどうか」
     this.eventLiveAt = 0;
@@ -45,6 +48,9 @@ export class StreamControl extends EventEmitter {
       liveBy: { ...this.live },
       agentConnected: !!this.agent,
       obsActive: this.obsActive,
+      cameras: this.cameras,
+      camera: this.camera,
+      video: this.video,
       desired: this.desired,
       waiting: !!this.waiting,
       autoStopMs: this.autoStopMs,
@@ -178,11 +184,14 @@ export class StreamControl extends EventEmitter {
       try { msg = JSON.parse(raw); } catch { return; }
       if (msg.type === 'agent_result') this.#onAgentResult(msg);
       else if (msg.type === 'agent_state') this.#setObsActive(msg.obsActive, 'agent_state', msg);
+      else if (msg.type === 'agent_cameras') this.#setCameras(msg);
+      else if (msg.type === 'agent_video') this.#setVideo(msg);
       else if (msg.type === 'time') ws.send(JSON.stringify({ type: 'time', t0: msg.t0, ts: nowMs() }));
     });
     ws.on('close', () => {
       if (this.agent !== ws) return;
       this.agent = null;
+      this.cameras = []; this.camera = null; this.video = null; // 切れている間は、切り替えられない・分からない
       this.metrics.write('agent_disconnected', { name });
       for (const [id, p] of this.pending) {
         clearTimeout(p.timer);
@@ -199,13 +208,40 @@ export class StreamControl extends EventEmitter {
     this.#publish();
   }
 
+  // ------------------------------------------------------------ カメラの切り替え（報告書 92 章）
+  #setCameras(msg) {
+    const cameras = Array.isArray(msg.cameras) ? msg.cameras.filter((n) => typeof n === 'string').slice(0, 20) : [];
+    const camera = typeof msg.current === 'string' ? msg.current : null;
+    if (JSON.stringify([cameras, camera]) === JSON.stringify([this.cameras, this.camera])) return;
+    this.cameras = cameras; this.camera = camera;
+    this.metrics.write('camera_state', { cameras, camera });
+    this.#publish();
+  }
+
+  #setVideo(msg) {
+    const pair = (a) => (Array.isArray(a) && a.length === 2 && a.every(Number.isFinite) ? [a[0], a[1]] : null);
+    const video = { base: pair(msg.base), output: pair(msg.output), want: pair(msg.want), state: ['ok', 'streaming', 'base_aspect'].includes(msg.state) ? msg.state : 'ok' };
+    if (JSON.stringify(video) === JSON.stringify(this.video)) return;
+    this.video = video;
+    this.metrics.write('obs_video', video);
+    this.#publish();
+  }
+
+  /** 映すカメラを切り替える。配信は止めない。結果 { ok, error } を返す */
+  async setCamera(name, cause = 'manual') {
+    if (!this.cameras.includes(name)) return { ok: false, error: 'unknown_camera' };
+    const res = await this.#send('camera', cause, { camera: name });
+    if (res?.ok) { this.camera = name; this.#publish(); }
+    return res;
+  }
+
   #command(action, cause) {
     if (action === 'start') this.desired = 'on';
     if (action === 'stop') this.desired = 'off';
     return this.#send(action, cause);
   }
 
-  #send(action, cause) {
+  #send(action, cause, args = {}) {
     const id = ++this.cmdId;
     const sentAt = nowMs();
     if (!this.agent || this.agent.readyState !== 1) {
@@ -219,7 +255,7 @@ export class StreamControl extends EventEmitter {
         resolve({ ok: false, error: 'timeout' });
       }, this.config.agentCmdTimeoutMs);
       this.pending.set(id, { resolve, timer, action, cause, sentAt });
-      this.agent.send(JSON.stringify({ type: 'agent_cmd', id, action, sentAt }));
+      this.agent.send(JSON.stringify({ type: 'agent_cmd', id, action, sentAt, ...args }));
     });
   }
 

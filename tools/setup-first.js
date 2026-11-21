@@ -27,7 +27,7 @@ const adminEmail = (process.env.POC_ADMIN_EMAIL || '').trim().toLowerCase();
 if (adminEmail && !store.db.prepare('SELECT 1 FROM staff_accounts WHERE lower(email) = ?').get(adminEmail)) {
   const s = api.inviteStaff({ email: adminEmail, name: '管理者', role: 'admin' });
   api.audit({ system: true }, 'staff.create', { target: `staff:${s.id}`, after: { role: 'admin', by: 'tools/setup-first.js' } });
-  console.log('主催者管理者を、メールアドレスで登録しました。「はじめての方」から、パスワードを決めてください（7日以内）。');
+  console.log('主催者管理者を、メールアドレスで登録しました。スタッフのログインの画面の「はじめての方」から、パスワードを決めるためのメールを受け取ってください。');
 }
 if (process.argv.includes('--with-event') && !store.db.prepare('SELECT 1 FROM events LIMIT 1').get()) {
   const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);

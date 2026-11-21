@@ -31,6 +31,9 @@ test('画面を配るときに、ブラウザに守らせる制限を付ける�
   assert.equal((await fetch(`${srv.httpUrl}/%2e%2e%2fserver%2fsrc%2findex.js`)).status, 404);
   const health = await (await fetch(`${srv.httpUrl}/healthz`)).json();
   assert.deepEqual([health.ok, health.db], [true, true]);
+  // だれでも見られるので、保存や控えの細かい状態（通し番号・最後に保存した時刻）は、出さない
+  assert.equal(health.persist, undefined);
+  assert.ok(!JSON.stringify(health).includes('"seq"') && !JSON.stringify(health).includes('lastSavedAt'));
   await srv.stop(); cleanup(ctx);
 });
 
@@ -178,4 +181,15 @@ test('ログインしていない人がトップページを開くと、ログ�
     assert.equal((await fetch(`${srv.httpUrl}/login.html`)).status, 200);
     assert.equal((await fetch(`${srv.httpUrl}/legal.html`)).status, 200, '規約は、ログインなしで読める');
   } finally { await srv.stop(); cleanup(ctx); }
+});
+
+test('名乗る前の接続が同じ接続元から多すぎるときは、混雑（4503）で切る。画面は、少し待ってつなぎ直す（報告書 81 章）', async () => {
+  const ctx = makeEnv({ POC_HELLO_TIMEOUT_MS: '3000' });
+  const srv = await startServer(ctx);
+  const socks = [];
+  for (let i = 0; i < 20; i++) { const s = new WebSocket(srv.url); socks.push(s); await new Promise((r) => s.on('open', r)); }
+  const extra = new WebSocket(srv.url);
+  assert.equal(await closed(extra), 4503, '21本目は、混雑として切る（利用者の送りすぎ 4429 とは分ける）');
+  for (const s of socks) s.close();
+  await srv.stop(); cleanup(ctx);
 });

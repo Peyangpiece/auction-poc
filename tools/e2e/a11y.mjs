@@ -31,14 +31,14 @@ const scan = async (page, name, scheme) => {
 for (const scheme of ['light', 'dark']) {
   const mk = (vp) => br.newContext({ viewport: vp, colorScheme: scheme, bypassCSP: true });
   // ログイン前
-  let c = await mk({ width: 390, height: 844 });
-  for (const [n, u] of [['home', '/'], ['register', '/register.html'], ['login', '/login.html'], ['legal', '/legal.html'], ['404', '/nai.html']]) { const p = await c.newPage(); await p.goto(B + u); await p.waitForTimeout(700); await scan(p, n, scheme); await p.close(); }
+  const c = await mk({ width: 390, height: 844 });
+  for (const [n, u] of [['home', '/'], ['register', '/register.html'], ['login', '/login.html'], ['legal', '/legal.html'], ['unsubscribe', '/unsubscribe.html?t=xxxxxxxxxxxxxxxxxxxxxxxx'], ['404', '/nai.html']]) { const p = await c.newPage(); await p.goto(B + u); await p.waitForTimeout(700); await scan(p, n, scheme); await p.close(); }
   // 会員
   const phone = scheme === 'light' ? '09012340001' : '09012340002';
   const s = await post(c, '/api/register/start', { id: phone });
   await post(c, '/api/register/verify', { id: phone, code: s.devCode });
   let p = await c.newPage(); await p.goto(B + '/register.html'); await p.waitForSelector('#stepProfile:not([hidden])'); await p.click('#stepProfile button[type=submit]'); await p.waitForTimeout(500); await scan(p, 'register-profile(errors)', scheme); await p.close();
-  await post(c, '/api/register/complete', { kind: 'b2c', name: '確認 太郎', email: `${phone}@example.com`, address: '（例）住所1-1', adult: true });
+  await post(c, '/api/register/complete', { kind: 'b2c', name: '確認 太郎', email: `${phone}@example.com`, address: '（例）住所1-1', adult: true, agreed: true });
   p = await c.newPage(); await p.goto(B + '/'); await p.waitForTimeout(700); await scan(p, 'home-member', scheme); await p.close();
   p = await c.newPage(); await p.goto(B + '/mypage.html'); await p.waitForTimeout(800); await scan(p, 'mypage-bills', scheme); await p.evaluate(() => { location.hash = '#profile'; }); await p.waitForTimeout(300); await scan(p, 'mypage-profile', scheme); await p.click('#editBtn'); await p.waitForTimeout(400); await scan(p, 'mypage-edit-dialog', scheme); await p.close();
   p = await c.newPage(); await p.goto(B + '/bidder.html'); await p.waitForTimeout(900); await scan(p, 'bidder-gate-pick', scheme);
@@ -56,14 +56,36 @@ for (const scheme of ['light', 'dark']) {
   await sp.close();
   const con = await sc.newPage(); await con.goto(B + '/console.html'); await con.waitForTimeout(1200);
   await con.fill('#newTitle', '（例）防水シート'); await con.fill('#newPrice', '9500'); await con.click('#addLot button[type=submit]'); await con.waitForTimeout(500);
+  await scan(con, 'console-before-start', scheme);
+  if (await con.isVisible('#b_evstart')) { await con.click('#b_evstart'); await con.click('#dlgOk'); await con.waitForFunction(() => !document.getElementById('b_next').disabled); }
   for (const id of ['#b_next', '#b_nv']) if (await con.isVisible(id) && await con.isEnabled(id)) { await con.click(id); await con.waitForTimeout(700); }
   await scan(con, 'console-open', scheme);
   await p.waitForTimeout(500); await scan(p, 'bidder-open-bidmode', scheme);
   await p.click('#bid'); await p.waitForTimeout(600); await scan(p, 'bidder-leading', scheme);
+  // オークショニアの画面（主催者管理者も開ける）。入札がある受付中の品で、確かめのダイアログも
+  const cl = await sc.newPage(); await cl.goto(B + '/caller.html'); await cl.waitForTimeout(1000); await scan(cl, 'caller-open', scheme);
+  { const b = (await cl.isEnabled('#pass')) ? '#pass' : '#close'; if (await cl.isEnabled(b)) { await cl.click(b); await cl.waitForTimeout(300); await scan(cl, 'caller-dialog', scheme); await cl.click('#dlgCancel'); } }
+  await cl.close();
   const mon = await sc.newPage(); await mon.goto(B + '/monitor.html'); await mon.waitForTimeout(1200); await scan(mon, 'monitor', scheme);
+  if (await con.isVisible('#b_urikiri')) { await con.click('#b_urikiri'); await con.click('#dlgOk'); await con.waitForTimeout(300); }
   await con.click('#b_close'); await con.waitForTimeout(800); if (await con.isVisible('dialog[open]')) { await scan(con, 'console-dialog', scheme); await con.click('#dlgOk'); } await con.waitForTimeout(800);
   if (await con.isVisible('#b_close') && await con.isEnabled('#b_close')) { await con.click('#b_close'); await con.waitForTimeout(600); if (await con.isVisible('dialog[open]')) await con.click('#dlgOk'); }
-  await p.waitForTimeout(700); await scan(p, 'bidder-won', scheme);
+  // 落札の知らせの札は、出入りの途中（半透明）だと、文字の色の検査が正しく測れない。札が消えてから、板を検査する
+  await p.waitForTimeout(700); await p.waitForFunction(() => document.getElementById('winFx').hidden, null, { timeout: 5000 }).catch(() => {}); await scan(p, 'bidder-won', scheme);
+  // 品名だけの品を登録すると、オークショニアの画面に、開始価格の入力のシートが出る
+  await con.evaluate(() => document.querySelectorAll('dialog[open]').forEach((d) => d.close())); // 開いたままのダイアログがあると、ほかの所が押せない
+  await con.fill('#newTitle', '名前だけの品'); await con.click('#create'); await con.waitForTimeout(600);
+  const cs = await sc.newPage(); await cs.goto(B + '/caller.html');
+  if (await cs.waitForSelector('#startSheet[open]', { timeout: 5000 }).catch(() => null)) {
+    await cs.waitForTimeout(400); await scan(cs, 'caller-start-sheet', scheme);
+    // 次の配色の回のために、この品を始めて締めておく（待機のまま残すと、次の回の品が始められない。入札がないので流札になる）
+    await cs.fill('#sheetInput', '1000'); await cs.click('#sheetGo');
+    await cs.waitForFunction(() => ['open', 'preparing', 'preparing_warn'].includes(document.getElementById('status').dataset.st), null, { timeout: 15000 }).catch(() => {});
+    await cs.waitForFunction(() => document.getElementById('status').dataset.st === 'open', null, { timeout: 15000 }).catch(() => {});
+    if (await cs.isEnabled('#close')) { await cs.click('#close'); await cs.click('#dlgOk'); await cs.waitForTimeout(500); }
+  }
+  else out.push({ id: 'caller-start-sheet-missing', impact: 'test', n: 1, ex: ['開始価格のシートが出ませんでした'], page: 'caller', scheme });
+  await cs.close();
   await c.close(); await sc.close();
 }
 const by = {};

@@ -62,3 +62,28 @@ test('CSV: 式として動く文字で始まる文字列は、ただの文字に
   assert.equal(csvCell(-500), '"-500"');
   assert.equal(csvCell(null), '""');
 });
+
+test('宛先の検査は、送信の入口と同じ。入口が断った宛先は、送り直さない（列を止めない）', async () => {
+  const { isEmail, clientIp } = await import('../src/mvp/security.js');
+  for (const bad of ['x,1@a.bb', 'a;b@example.com', '<a@example.com>', 'a@b', 'a b@example.com', 'a@example.c']) assert.equal(isEmail(bad), false, bad);
+  for (const good of ['taro@example.com', 'taro.yamada+seri@mail.example.co.jp']) assert.equal(isEmail(good), true, good);
+  // 入口が 400 を返したら、1回でやめる。混雑（429）や、入口の故障（502）は、送り直す
+  let calls = 0, status = 400;
+  const server = http.createServer((req, res) => { calls++; req.resume(); res.writeHead(status, { 'content-type': 'application/json' }); res.end('{"error":"bad message"}'); });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const gaveUp = [];
+  const n = new Notifier(httpMailSender(`http://127.0.0.1:${server.address().port}`, async () => {}), (f) => gaveUp.push(f), { waitMs: 5 });
+  assert.equal(await n.email('taro@example.com', 'otp', '件名', '本文'), false);
+  assert.equal(calls, 1, '400 は、送り直さない');
+  calls = 0; status = 429;
+  assert.equal(await n.email('taro@example.com', 'otp', '件名', '本文'), false);
+  assert.equal(calls, 4, '429 は、送り直す');
+  assert.equal(gaveUp.length, 2);
+  server.close();
+  // 接続元: IPv6 は、先頭の 64 ビットでまとめる（アドレスを変えながら、制限をすり抜けられないように）
+  const req = (ip) => ({ headers: { 'x-real-ip': ip }, socket: { remoteAddress: '10.0.0.1' } });
+  const cfg = { trustProxy: true };
+  assert.equal(clientIp(req('2001:db8:1:2:aaaa:bbbb:cccc:dddd'), cfg), clientIp(req('2001:db8:1:2::1'), cfg));
+  assert.notEqual(clientIp(req('2001:db8:1:2::1'), cfg), clientIp(req('2001:db8:1:3::1'), cfg));
+  assert.equal(clientIp(req('203.0.113.7'), cfg), '203.0.113.7');
+});

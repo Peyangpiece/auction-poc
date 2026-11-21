@@ -2,33 +2,47 @@
 /* スマホ: 上から 品名 → 映像(4:3) → 履歴 → コメント。表示板は画面の下に固定する（価格・ランプ・入札が常に見える） */
 body { padding-bottom: calc(var(--board-h, 256px) + 24px + env(safe-area-inset-bottom)); transition: background-color .2s var(--ease); }
 .brandbar { padding-top: env(safe-area-inset-top); position: static; }
+/* スマホでは、上の帯はロゴではなく「‹ ホーム」の戻るリンク（品名が、このページの見出し）。広い画面では、ロゴ */
+.backlink { display: none; align-items: center; gap: 4px; font-size: 1.0625rem; font-weight: 500; color: var(--action); }
+.backlink svg { width: 12px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 640px) {
+  .brandbar .brand picture { display: none; }
+  .backlink { display: inline-flex; min-height: 44px; }
+  .brandbar > div { min-height: 44px; }
+}
 .brandbar > div, .top, main { max-width: 560px; margin: 0 auto; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
 .top { padding-top: 12px; padding-bottom: 10px; }
-.top h1 { font-size: 18px; min-width: 0; overflow-wrap: anywhere; letter-spacing: .02em; }
-#lotNo { font-size: 18px; margin-right: 8px; color: var(--action); }
+.top h1 { font-size: 1.125rem; min-width: 0; overflow-wrap: anywhere; letter-spacing: 0; }
+#lotNo { font-size: 1.125rem; margin-right: 8px; color: var(--ink-2); }
 #lotNo:empty { display: none; }
 main { display: grid; gap: 24px; }
 .side { display: contents; }
-#videoBox { order: 1; } .board { order: 2; } .hist { order: 3; } .cmt { order: 4; } .fine { order: 5; }
+#videoBox { order: 1; } .board { order: 2; } .hist { order: 3; } .cmt { order: 4; } .finewrap { order: 5; min-width: 0; }
+/* 履歴・コメントの欄は、キーボードでもスクロールできる（tabindex=0）。フォーカスの輪は、全体の決まりのまま */
 
-/* 上回られたら、画面全体の色を変える（FR-UI-004） */
-body.outbid { background: var(--alarm); }
-body.outbid .top h1, body.outbid #lotNo, body.outbid h2, body.outbid main h2, body.outbid .fine, body.outbid .fine summary, body.outbid .hist .count,
-body.outbid #history .who, body.outbid #history .amt, body.outbid #history .at, body.outbid #comments, body.outbid #comments .who, body.outbid .switch,
-body.outbid .note, body.outbid .fine a, body.outbid .fine .textbtn, body.outbid details summary, body.outbid details dt, body.outbid details dd, body.outbid #cmtCount, body.outbid #cmtMsg, body.outbid .check { color: #fff; }
-body.outbid #history li { border-color: rgba(255, 255, 255, .45); }
-body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #fff; }
+/* 上回られたら（FR-UI-004）: 画面の上から赤い帯の知らせが下りてきて、表示板の縁と価格が赤くなる。振動と音も。
+   画面全体は塗らない（全面の赤は警報のように見え、ほかの情報も読みにくくなる。Apple のアプリは、知らせの帯と、該当する所だけの色で伝える） */
+.outbidbar { position: fixed; z-index: 35; left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); top: calc(8px + env(safe-area-inset-top));
+  max-width: 520px; margin: 0 auto; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: var(--r-lg);
+  background: var(--alarm); color: #fff; box-shadow: var(--shadow-2); pointer-events: none; opacity: 0; transform: translateY(-120%); transition: transform .38s var(--ease), opacity .2s; }
+.outbidbar b { display: block; font-size: 1rem; font-weight: 700; line-height: 1.3; }
+.outbidbar span { display: block; font-size: 0.875rem; line-height: 1.35; opacity: .92; }
+.outbidbar svg { flex: none; width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+body.outbid .outbidbar { opacity: 1; transform: none; }
+body.outbid .board { box-shadow: inset 0 0 0 2px var(--board-ng); }
+body.outbid .price { color: var(--board-ng); }
+@media (prefers-reduced-motion: reduce) { .outbidbar { transition: opacity .2s; transform: none; } }
 
 /* 応札／観戦 */
 
 /* ライブ画面は常に 4:3（停止中も同じ大きさ）。映像は元の比率のまま収め、切り取らない */
 #videoBox { display: none; position: relative; aspect-ratio: 4 / 3; width: 100%; background: #000; border-radius: var(--r-lg); overflow: hidden; }
 #videoBox video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
-/* 映像のない間は、真っ黒ではなく、表示板と同じ紺にする（黒と紺の2つの暗い面が並ぶのを避ける）。飾りは置かない */
-#break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 22px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: var(--board); color: #fff; }
-#break strong { font-size: 18px; font-weight: 600; }
+/* 映像のない間は、暗い灰色の面に、状態の文字だけ（飾りは置かない） */
+#break { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 16px; align-items: center; justify-content: center; text-align: center; padding: 16px; background: #1c1c1e; color: rgba(255, 255, 255, .86); }
+#break strong { font-size: 1.0625rem; font-weight: 600; }
 /* 音声の切り替え。映像の右下に置く。音は、押してから出す（ブラウザは、操作なしに音を出させない） */
-#sound { position: absolute; right: 8px; bottom: 8px; z-index: 2; min-height: 44px; padding: 6px 14px; font-size: 14px; background: rgba(0, 0, 0, .72); border-color: rgba(255, 255, 255, .6); color: #fff; }
+#sound { position: absolute; right: 8px; bottom: 8px; z-index: 2; min-height: 44px; padding: 6px 14px; font-size: 0.875rem; background: rgba(0, 0, 0, .72); border-color: rgba(255, 255, 255, .6); color: #fff; }
 #sound:hover:not(:disabled) { background: #000; color: #fff; }
 #sound[hidden] { display: none; }
 
@@ -43,91 +57,96 @@ body.outbid #history li.mine .who, body.outbid #comments li.mine .who { color: #
 .brandbar > div { min-height: 56px; }
 .board > * { width: 100%; max-width: 520px; margin-inline: auto; }
 .board-main { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 4px 12px; }
-.plabel { font-size: 12px; color: var(--board-ink-2); line-height: 1.3; }
-.price { font-size: 44px; }
+.plabel { font-size: 0.75rem; color: var(--board-ink-2); line-height: 1.3; }
+.price { font-size: 2.75rem; }
 /* 買歩銭込みの金額は、価格のすぐ下に置く */
-.ptotal { font-size: 13px; color: var(--board-ink-2); margin-top: 2px; line-height: 1.3; }
+.ptotal { font-size: 0.8125rem; color: var(--board-ink-2); margin-top: 2px; line-height: 1.3; }
 .ptotal:empty { display: none; }
-/* 最高入札者のあいだは、金の枠。落札したら、金の帯と、お支払いへの入口 */
+/* 最高入札者のあいだは、ボタンの場所に、チェックと「あなたが最高入札者です」。落札したら、その言葉と、お支払いへの入口 */
 .board { transition: box-shadow .2s var(--ease); }
-.board.lead { box-shadow: inset 0 0 0 3px var(--gold); }
-.board.lead #bid:disabled { border-color: var(--gold); color: #fff; }
-.board.won { box-shadow: inset 0 0 0 3px var(--gold); }
-.board.won .board-result { font-size: 22px; padding: 10px 12px; background: var(--gold); color: var(--navy); border-radius: var(--r); text-align: center; }
+.board.lead #bid[aria-disabled="true"] { color: var(--board-ink); gap: 8px; }
+.board.lead #bid[aria-disabled="true"]::after { content: ''; order: -1; flex: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--action) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 10.5l3 3 6-7' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 20px no-repeat; }
+.board.won .board-result { font-size: 1.25rem; color: var(--board-ink); }
+/* 落札したあとは、ランプ（うりきり・最高入札）を出さない。「あなたが落札しました」と状態の札で伝わっているため（報告書 86 章） */
+.board.won .lamps { display: none; }
 .board.won:has(#msg:not(:empty)) #result { display: block; }
-.paylink { background: #fff; border-color: #fff; color: var(--navy); width: 100%; justify-content: center; text-align: center; font-size: 16px; font-weight: 700; min-height: 48px; display: flex; align-items: center; text-decoration: none; }
+.paylink { background: var(--action); border-color: var(--action); color: var(--action-ink); width: 100%; justify-content: center; text-align: center; font-size: 1.0625rem; font-weight: 600; min-height: 48px; display: flex; align-items: center; text-decoration: none; }
 .paylink[hidden] { display: none; }
-.board-meta { display: grid; justify-items: end; gap: 2px; font-size: 13px; color: var(--board-ink-2); text-align: right; white-space: nowrap; }
-.board-meta .state { color: var(--board-ink); font-size: 14px; }
-.board-meta b { color: var(--board-ink); font-size: 22px; line-height: 1; }
-.board-result { font-size: 14px; line-height: 1.4; }
-#msg { font-size: 14px; font-weight: 600; color: var(--board-ink); min-height: 0; }
+.board-meta { display: grid; justify-items: end; gap: 2px; font-size: 0.8125rem; color: var(--board-ink-2); text-align: right; white-space: nowrap; }
+.board-meta .state { color: var(--board-ink); font-size: 0.875rem; }
+.board-meta b { color: var(--board-ink); font-size: 1.375rem; line-height: 1; }
+.board-result { font-size: 0.875rem; line-height: 1.4; }
+#msg { font-size: 0.875rem; font-weight: 600; color: var(--board-ink); min-height: 0; }
 #msg:empty { display: none; }
 #msg[data-kind="ng"] { color: var(--board-ng); }
-/* 板の上の入札ボタンは、板の文字色で塗る（暗い板の上でいちばん明るい面＝押すところ） */
-#bid { width: 100%; background: #fff; border-color: #fff; color: var(--navy); white-space: normal; min-width: 0; }
-#bid:hover:not(:disabled) { background: #e9edf3; border-color: #e9edf3; color: var(--navy); }
-#bid:disabled { opacity: 1; background: transparent; border-color: var(--board-line); color: var(--board-ink-2); font-size: 16px; font-weight: 600; }
-#bid:focus-visible { outline-color: var(--board-ng); }
+#msg[data-kind="hint"] { color: var(--board-ink-2); font-weight: 500; }
+/* 入札ボタンは、主のボタン（紺の塗り）。画面でいちばん押すところ */
+#bid { width: 100%; background: var(--action); border-color: var(--action); color: var(--action-ink); font-weight: 600; white-space: normal; min-width: 0; }
+#bid:hover:not([aria-disabled="true"]) { background: var(--action-hover); border-color: var(--action-hover); color: var(--action-ink); }
+/* 押せないあいだ（最高入札者・待機・中断・送信中）は、ボタンの形をやめて、状態の文字として出す */
+#bid[aria-disabled="true"] { opacity: 1; cursor: default; transform: none; background: transparent; border-color: transparent; box-shadow: none; color: var(--board-ink-2); font-size: 1rem; font-weight: 600; }
+#bid:focus-visible { outline-color: var(--action); }
 
 /* 入札の履歴・コメント: 面で囲まず、細い線の行だけ */
+.sechead h2 { font-size: 1.0625rem; } /* 本文（13〜14px）との差を 1.25 倍以上に（見出しの段の差。AI チェッカーの指摘） */
 .sechead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
-.count { font-size: 14px; color: var(--ink-2); }
+.count { font-size: 0.875rem; color: var(--ink-2); }
 #history { max-height: 248px; overflow: auto; overscroll-behavior: contain; }
 #history li { display: grid; grid-template-columns: minmax(6em, auto) 1fr auto; align-items: baseline; gap: 12px; padding: 10px 0; }
-#history .who { color: var(--ink-2); white-space: nowrap; font-size: 15px; }
-#history .amt { font-size: 20px; line-height: 1; }
-#history .at { font-size: 13px; color: var(--ink-2); }
+#history .who { color: var(--ink-2); white-space: nowrap; font-size: 0.9375rem; }
+#history .amt { font-size: 1.25rem; line-height: 1; }
+#history .at { font-size: 0.8125rem; color: var(--ink-2); }
 #history li.mine .who { color: var(--ink); font-weight: 700; }
 #history li.void .amt, #history li.void .who { text-decoration: line-through; color: var(--ink-3); }
 #history li.new { animation: rowin .3s var(--ease); }
 @keyframes rowin { from { opacity: 0; transform: translateY(4px); } }
 
-.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); cursor: pointer; min-height: 44px; }
+.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; font-weight: 600; color: var(--ink-2); cursor: pointer; min-height: 44px; }
 .switch input { appearance: none; width: 44px; height: 26px; border-radius: 13px; background: var(--ink-3); position: relative; cursor: pointer; margin: 0; transition: background-color .15s var(--ease); }
 .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .15s var(--ease); }
 .switch input:checked { background: var(--action); }
 .switch input:checked::after { transform: translateX(18px); }
 #cmtBody { display: grid; gap: 8px; }
 #comments { list-style: none; padding: 0; max-height: 160px; overflow: auto; overscroll-behavior: contain; display: grid; gap: 6px; }
-#comments li { display: grid; grid-template-columns: 3.5em 1fr; gap: 8px; align-items: baseline; font-size: 15px; overflow-wrap: anywhere; }
-#comments .who { font-size: 13px; color: var(--ink-3); white-space: nowrap; }
+#comments li { display: grid; grid-template-columns: 3.5em 1fr; gap: 8px; align-items: baseline; font-size: 0.9375rem; overflow-wrap: anywhere; }
+#comments .who { font-size: 0.8125rem; color: var(--ink-3); white-space: nowrap; }
 #comments li.mine .who { color: var(--ink); font-weight: 700; }
 #cmtForm { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-#cmtMsg { font-size: 13px; color: var(--danger); }
+#cmtMsg { font-size: 0.8125rem; color: var(--danger); }
 #cmtMsg:empty { display: none; }
 
 .fine { display: grid; gap: 8px; }
 /* 注意書きは、小さく薄くしすぎない */
-.fine .note { font-size: 14px; color: var(--ink-2); line-height: 1.7; }
+.fine .note { font-size: 0.875rem; color: var(--ink-2); line-height: 1.7; }
 .links { display: flex; gap: 4px 24px; flex-wrap: wrap; }
 .links a { color: var(--action); font-weight: 700; text-underline-offset: 4px; padding: 10px 0; }
 .links[hidden] { display: none; }
 #contact:empty { display: none; }
-details summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-3); min-height: 44px; display: flex; align-items: center; }
-details dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 13px; }
+details summary { cursor: pointer; font-size: 0.8125rem; font-weight: 600; color: var(--ink-3); min-height: 44px; display: flex; align-items: center; }
+details dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 0.8125rem; }
 details dt { color: var(--ink-3); }
 details dd { overflow-wrap: anywhere; }
-.check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; cursor: pointer; }
+.check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 0.875rem; cursor: pointer; }
 .check input { width: 20px; height: 20px; }
 
 /* 入場 */
 /* 低い画面（横向きなど）でも「参加する」に必ず届くよう、入場画面は中でスクロールできるようにする */
 #gate { position: fixed; inset: 0; z-index: 40; display: flex; overflow-y: auto; overscroll-behavior: contain; padding: 24px; background: var(--ground); }
 #gate > div { width: min(400px, 100%); display: grid; gap: 20px; margin: auto; }
-@media (max-height: 520px) { #gate .mark { width: 56px; height: 56px; } #gate > div { gap: 12px; } }
-#gate .mark { width: 96px; height: 96px; }
-#gate .co { font-weight: 700; letter-spacing: .04em; }
+@media (max-height: 520px) { #gate > div { gap: 12px; } }
+#gate .co { font-size: 0.9375rem; font-weight: 400; color: var(--ink-2); letter-spacing: 0; margin-top: -8px; }
 #gate h1 { margin: 0; }
-#gate .gatelogo { display: block; width: 100%; height: auto; }
-@media (max-height: 520px) { #gate .gatelogo { width: 240px; } }
-#gateMsg { color: var(--danger); font-size: 14px; font-weight: 600; }
+#gate .gatelogo { display: block; width: 220px; max-width: 70%; height: auto; }
+@media (max-height: 520px) { #gate .gatelogo { width: 180px; } }
+#gateMsg { color: var(--danger); font-size: 0.875rem; font-weight: 600; }
 #gateMsg:empty { display: none; }
+#gateMsg[data-kind="info"] { color: var(--ink); font-weight: 400; font-size: 1rem; line-height: 1.8; }
 
 /* PC と、横向きのスマホ: 左に映像とコメント、右に表示板と履歴。表示板は固定しない（横向きでは画面が低く、固定すると映像が隠れる） */
 /* 低くて幅も狭い画面（PC の拡大表示など）: 板を固定せず、映像のすぐ下に置く（固定すると映像が隠れる） */
 @media (max-height: 520px) and (max-width: 699px) {
-  .board { position: static; border-radius: var(--r-lg); }
+  .board { position: relative; border-radius: var(--r-lg); }
   .board > * { max-width: none; }
 }
 @media (min-width: 960px), (min-width: 700px) and (orientation: landscape) {
@@ -137,7 +156,12 @@ details dd { overflow-wrap: anywhere; }
   #videoBox { grid-column: 1; grid-row: 1; }
   .side { display: grid; gap: 24px; min-width: 0; align-content: start; grid-column: 2; grid-row: 1 / span 2; }
   .cmt { grid-column: 1; grid-row: 2; }
-  .board { position: static; padding: 16px; gap: 12px; border-radius: var(--r-lg); }
+  .finewrap { grid-column: 1; grid-row: 3; }
+  /* 映像の枠がないとき: 左の列は、コメントから始める（上に空きを残さない） */
+  main.novideo { grid-template-rows: auto 1fr; }
+  main.novideo .cmt { grid-row: 1; }
+  main.novideo .finewrap { grid-row: 2; align-self: start; } /* パソコン: 注意書きは、コメントの欄の下（Tab で進む順と同じ） */
+  .board { position: relative; padding: 16px; gap: 12px; border-radius: var(--r-lg); }
   .board > * { max-width: none; }
   .board:has(#msg:not(:empty)) #result { display: block; }
 }
@@ -145,18 +169,18 @@ details dd { overflow-wrap: anywhere; }
   .brandbar > div, .top, main { max-width: 1168px; padding-left: 24px; padding-right: 24px; }
   .brandbar > div { min-height: 80px; }
   .brand__logo { height: 52px; }
-  .brand__name { font-size: 20px; }
+  .brand__name { font-size: 1.25rem; }
   .top { padding-top: 24px; padding-bottom: 16px; }
-  .top h1 { font-size: 22px; }
-  #lotNo { font-size: 22px; }
+  .top h1 { font-size: 1.375rem; }
+  #lotNo { font-size: 1.375rem; }
   .board { padding: 24px; gap: 16px; border-radius: 24px; }
   .board .lamps { padding-top: 16px; }
   #bid { min-height: 60px; }
-  .plabel { font-size: 13px; }
-  .price { font-size: 72px; }
+  .plabel { font-size: 0.8125rem; }
+  .price { font-size: 4.5rem; }
   .board-main { flex-wrap: nowrap; }
-  .board-result { font-size: 18px; }
-  .ptotal { font-size: 15px; }
+  .board-result { font-size: 1.125rem; }
+  .ptotal { font-size: 0.9375rem; }
   #history { max-height: 420px; }
 }
 /* 幅の狭い端末: 社名と「応札／観戦」がぶつからないように詰める */
@@ -164,35 +188,40 @@ details dd { overflow-wrap: anywhere; }
 @media (max-width: 359px) {
   .brandbar > div, .top, main { padding-left: 16px; padding-right: 16px; }
   .brand { gap: 8px; }
-  .brand__name { font-size: 15px; letter-spacing: .02em; }
-  .brand__service { letter-spacing: .04em; }
+  .brand__name { font-size: 0.9375rem; letter-spacing: 0; }
+  .brand__service { letter-spacing: 0; }
 }
-#cmtCount { font-size: 12px; color: var(--ink-3); justify-self: end; }
+#cmtCount { font-size: 0.75rem; color: var(--ink-3); justify-self: end; }
 #bid.locked { opacity: .6; }
 
 /* ---- 参加手続き（受け取り方法と支払方法。両方に答えるまで、入札画面に進めない） */
 #gateEvent { font-weight: 700; }
 #gateEvent:empty { display: none; }
-#gateEvent b { font-family: var(--digits); font-size: 28px; color: var(--action); margin-left: 8px; }
+#gateEvent b { font-family: var(--digits); font-size: 1.75rem; color: var(--ink); margin-left: 8px; }
 #join { display: grid; gap: 16px; text-align: left; }
 #join[hidden], #enter[hidden] { display: none; }
 /* 参加のしかた（オンライン・会場）を選ぶ、大きな2つのボタン */
-.pickhead { font-size: 16px; letter-spacing: .02em; color: var(--ink); margin: 0 0 12px; }
+.pickhead { font-size: 1rem; letter-spacing: 0; color: var(--ink); margin: 0 0 12px; }
 .modes { display: grid; gap: 12px; }
-.mode { display: grid; gap: 6px; text-align: left; padding: 18px 20px; min-height: 96px; border: 1px solid var(--edge); border-radius: var(--r-lg); background: var(--ground); color: var(--ink); font: inherit; cursor: pointer; }
-.mode b { font-size: 20px; color: var(--action); letter-spacing: .04em; }
-.mode span { font-size: 14px; color: var(--ink-2); line-height: 1.6; }
-.mode:hover { border-color: var(--action); background: var(--ground-alt); }
-.mode:active { border-width: 2px; padding: 17px 19px; }
-#join .textbtn, #gate .textbtn, .fine .textbtn { background: none; border: 0; padding: 12px 4px; font: inherit; font-size: 14px; color: var(--ink-2); text-decoration: underline; text-underline-offset: 4px; cursor: pointer; justify-self: center; }
+/* Apple の設定画面の行と同じ形: 灰色の面に、名前と説明、右に「›」 */
+.mode { position: relative; display: grid; gap: 2px; text-align: left; padding: 14px 44px 14px 16px; min-height: 72px; border: 0; border-radius: var(--r); background: var(--ground-alt); color: var(--ink); font: inherit; cursor: pointer; transition: background-color .15s var(--ease), transform .12s var(--ease); }
+.mode::after { content: ''; position: absolute; right: 16px; top: 50%; width: 10px; height: 16px; transform: translateY(-50%);
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 16'%3E%3Cpath d='M2 2l6 6-6 6' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+.mode b { font-size: 1.0625rem; font-weight: 600; color: var(--ink); letter-spacing: 0; }
+.mode span { font-size: 0.875rem; color: var(--ink-2); line-height: 1.5; }
+.mode:hover { background: var(--ground-3); }
+.mode:active { transform: scale(.98); }
+#join .textbtn, #gate .textbtn, .fine .textbtn { background: none; border: 0; padding: 12px 4px; font: inherit; font-size: 0.875rem; color: var(--ink-2); text-decoration: underline; text-underline-offset: 4px; cursor: pointer; justify-self: center; }
 .pick { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.pick legend { font-size: 13px; font-weight: 700; padding: 0; margin-bottom: 4px; }
+.pick legend { font-size: 0.9375rem; font-weight: 600; color: var(--ink); padding: 0; margin-bottom: 4px; }
+.pickerr { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: 0.875rem; font-weight: 600; }
+.pick:has(.pickerr) label:not(.off) { border-color: var(--danger); }
 .pick label { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; min-height: 48px; padding: 8px 12px; border: 1px solid var(--edge); border-radius: var(--r); font-weight: 700; cursor: pointer; }
 .pick label:has(input:checked) { border-color: var(--action); border-width: 2px; padding: 7px 11px; color: var(--action); }
 .pick label.off { color: var(--ink-2); cursor: not-allowed; border-style: dashed; }
-.pick small { font-size: 12px; font-weight: 400; flex-basis: 100%; padding-left: 24px; }
-#joinTerms { white-space: pre-line; }
-#gateWait { font-weight: 700; color: var(--action); }
+.pick small { font-size: 0.75rem; font-weight: 400; flex-basis: 100%; padding-left: 24px; }
+#joinTerms { white-space: pre-line; font-size: 0.8125rem; line-height: 1.6; color: var(--ink-2); }
+#gateWait { font-weight: 600; color: var(--ink); }
 #gateWait:empty { display: none; }
 .pick small[hidden] { display: none; }
 #eventNote { background: var(--ground-alt); padding: 12px 16px; font-weight: 700; border-radius: var(--r); }
@@ -204,7 +233,7 @@ details dd { overflow-wrap: anywhere; }
 /* 幅の狭い端末では、「の番号」を省く（板の行が増えて、映像を隠さないように） */
 @media (max-width: 420px) { .board-meta .wide { display: none; } }
 /* 幅の狭い端末（320px 級）: 価格と番号を少し小さくして、価格の横に番号を収める（行が増えると、板が映像を隠す） */
-@media (max-width: 359px) { .price { font-size: 38px; } .board-meta b { font-size: 18px; } .board-meta { font-size: 12px; } }
+@media (max-width: 359px) { .price { font-size: 2.375rem; } .board-meta b { font-size: 1.125rem; } .board-meta { font-size: 0.75rem; } }
 /* 品が出ていない間は、押すものも見るものもないので、価格・ランプ・入札ボタンを出さない（「待機中」と自分の番号だけ） */
 .board.idle .pricewrap, .board.idle .lamps, .board.idle #bid { display: none; }
 .board.idle .board-main { justify-content: flex-end; }
@@ -215,74 +244,29 @@ details dd { overflow-wrap: anywhere; }
 .bidrow #bid { width: auto; min-width: 112px; }
 .bidrow #amountBox[hidden] { display: none; }
 .bidrow #amountBox[hidden] + #bid { grid-column: 1 / -1; width: 100%; }
-.amount { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 14px; background: #fff; border: 2px solid #fff; border-radius: var(--r); color: var(--navy); cursor: text; }
-.amount:focus-within { border-color: var(--gold); }
-.amount .yen { font-family: var(--digits); font-size: 20px; font-weight: 600; }
-.amount input { flex: 1; min-width: 0; width: 100%; border: 0; outline: 0; background: none; padding: 0; color: var(--navy); font-size: 24px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; min-height: 48px; }
-@media (min-width: 960px) { .amount input { font-size: 28px; min-height: 56px; } }
+.amount { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 14px; background: var(--field); border: 1px solid var(--edge); border-radius: var(--r); color: var(--ink); cursor: text; }
+.amount:focus-within { border-color: var(--action); box-shadow: 0 0 0 3px var(--ring); }
+@media (prefers-color-scheme: dark) { .amount { background: var(--ground-3); } }
+.amount .yen { font-family: var(--digits); font-size: 1.25rem; font-weight: 600; }
+.amount input { flex: 1; min-width: 0; width: 100%; border: 0; outline: 0; background: none; padding: 0; color: var(--ink); caret-color: var(--action); font-size: 1.5rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; min-height: 48px; }
+@media (min-width: 960px) { .amount input { font-size: 1.75rem; min-height: 56px; } }
 
-/* ---- 映像のない間（準備中・停止中・休憩中）の、待機のアニメーション（発注者の指示）
-   シンボルのバッジが、跳ね上がりながら、地球の自転と同じ向き（縦の軸のまわり。手前の面が左から右へ）に1回転して、着地する。
-   1回の動きは約1秒。そのあと1秒ほど休む（隣の入札の邪魔にならないように、動き続けにしない）。
-   動かすのは transform と opacity だけ（描き直しが起きず、端末に負担をかけない）。 */
-/* コインのように厚みを持たせる: 表の面・裏の面・側面（細い板を円く並べたもの）を、立体として組む。大きさ（--s）と厚み（--t）は、ここで決める */
-#break { --s: 92px; --t: calc(var(--s) * .1); }
-@media (min-width: 960px) { #break { --s: 148px; } }
-@media (max-width: 359px) { #break { --s: 76px; } }
-/* メダルは、映像の枠のちょうど中央に置く（止まっているときの位置が中央。そこから跳ね上がる）。文字は、その下に置く */
-.waitbadge { position: absolute; left: calc(50% - var(--s) / 2); top: calc(50% - var(--s) / 2); width: var(--s); height: var(--s); perspective: 700px; }
-#break strong { position: absolute; left: 12px; right: 12px; top: calc(50% + var(--s) / 2 + 26px); }
-.waitbadge .hop { width: 100%; height: 100%; transform-origin: 50% 100%; animation: badge-hop 2.2s infinite both; will-change: transform; }
-.waitbadge .spin { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; animation: badge-spin 2.2s infinite both; will-change: transform; }
-.waitbadge .face { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border-radius: 50%; backface-visibility: hidden; }
-.waitbadge .front { transform: translateZ(calc(var(--t) / 2)); }
-.waitbadge .back { transform: rotateY(180deg) translateZ(calc(var(--t) / 2)); }
-/* 側面の板（bidder.js が円く並べる）。金の濃淡を交互にして、コインのふちの刻みに見せる */
-.waitbadge .rim { position: absolute; left: 50%; top: 50%; width: calc(var(--s) * .0825); height: var(--t); margin: calc(var(--t) / -2) 0 0 calc(var(--s) * -.04125); background: #c99a06; backface-visibility: hidden; }
-.waitbadge .rim:nth-child(even) { background: #e9c53a; }
-.waitbadge .ground { position: absolute; left: 18%; right: 18%; bottom: -9%; height: 8%; border-radius: 50%; background: #000; opacity: .34; animation: badge-ground 2.2s infinite both; }
-/* 跳ねる: ためる（沈む）→ 伸びながら飛び上がる（上へ行くほど遅く）→ 落ちる（下へ行くほど速く）→ 着地でつぶれる → 小さく戻る → 休む */
-@keyframes badge-hop {
-  0% { transform: translateY(0) scale(1, 1); animation-timing-function: cubic-bezier(0.455, 0.03, 0.515, 0.955); }
-  7% { transform: translateY(0) scale(1.07, .9); animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); }
-  13% { transform: translateY(-10%) scale(.95, 1.07); animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); }
-  30% { transform: translateY(-58%) scale(1, 1); animation-timing-function: cubic-bezier(0.55, 0.055, 0.675, 0.19); }
-  47% { transform: translateY(0) scale(.96, 1.06); animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); }
-  52% { transform: translateY(0) scale(1.09, .88); animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); }
-  59% { transform: translateY(-5%) scale(.98, 1.03); animation-timing-function: cubic-bezier(0.455, 0.03, 0.515, 0.955); }
-  66%, 100% { transform: translateY(0) scale(1, 1); }
-}
-/* 回る: 空中にいる間に、縦の軸のまわりを1回転（rotateY の正の向き＝手前の面が左から右へ＝地球の自転の向き） */
-@keyframes badge-spin {
-  0%, 9% { transform: rotateY(0deg); animation-timing-function: cubic-bezier(0.455, 0.03, 0.515, 0.955); }
-  50%, 100% { transform: rotateY(360deg); }
-}
-/* 影: 高く上がるほど、小さく薄く */
-@keyframes badge-ground {
-  0%, 9% { transform: scale(1); opacity: .34; animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); }
-  30% { transform: scale(.55); opacity: .14; animation-timing-function: cubic-bezier(0.55, 0.055, 0.675, 0.19); }
-  47% { transform: scale(1); opacity: .34; }
-  52% { transform: scale(1.12); opacity: .4; }
-  66%, 100% { transform: scale(1); opacity: .34; }
-}
-/* 「動きを減らす」設定の端末では、動かさない（止まったバッジだけを出す） */
-@media (prefers-reduced-motion: reduce) {
-  .waitbadge .hop, .waitbadge .spin, .waitbadge .ground { animation: none; }
-}
+/* 映像のない間は、コメントを下の3分の1に収める */
+#videoBox:has(#break[style*="flex"]) .cmtlayer { max-height: 34%; }
 
 /* ---- コメントを、映像の枠の中に重ねて出す（ライブ配信のアプリと同じ見せ方）。枠をタップすると、表示と非表示が切り替わる */
 .tapzone { position: absolute; inset: 0; z-index: 1; appearance: none; border: 0; padding: 0; margin: 0; background: none; cursor: pointer; border-radius: inherit; }
-.tapzone:focus-visible { outline: 3px solid var(--gold); outline-offset: -3px; }
+.tapzone:focus-visible { outline: 3px solid #fff; outline-offset: -3px; }
 .cmtlayer { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; max-height: 62%; padding: 12px 30% 12px 12px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; pointer-events: none;
   -webkit-mask-image: linear-gradient(to top, #000 72%, transparent); mask-image: linear-gradient(to top, #000 72%, transparent); }
 .cmtlayer[hidden] { display: none; }
 .cmtlayer #comments { max-height: none; overflow: hidden; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 6px; min-height: 0; }
-.cmtlayer #comments li { display: inline-flex; gap: 8px; align-items: baseline; max-width: 100%; padding: 5px 12px; border-radius: 14px; background: rgba(0, 1, 40, .84); color: #fff; font-size: 14px; line-height: 1.4; flex: none; }
+.cmtlayer #comments li { display: inline-flex; gap: 8px; align-items: baseline; max-width: 100%; padding: 5px 12px; border-radius: 14px; background: rgba(0, 0, 0, .6); color: #fff; font-size: 0.875rem; line-height: 1.4; flex: none; }
 .cmtlayer #comments li.new { animation: cmtin .25s var(--ease) both; }
-.cmtlayer #comments .who { color: rgba(255, 255, 255, .78); font-size: 12px; }
+.cmtlayer #comments .who { color: rgba(255, 255, 255, .78); font-size: 0.75rem; }
 .cmtlayer #comments li.mine .who { color: #fff; font-weight: 700; }
 @keyframes cmtin { from { opacity: 0; transform: translateY(8px); } }
-.cmttoast { position: absolute; left: 50%; top: 12px; z-index: 2; transform: translateX(-50%); padding: 6px 14px; border-radius: 14px; background: rgba(0, 1, 40, .72); color: #fff; font-size: 13px; font-weight: 700; white-space: nowrap; opacity: 0; transition: opacity .2s var(--ease); pointer-events: none; }
+.cmttoast { position: absolute; left: 50%; top: 12px; z-index: 2; transform: translateX(-50%); padding: 6px 14px; border-radius: 14px; background: rgba(0, 0, 0, .6); color: #fff; font-size: 0.8125rem; font-weight: 700; white-space: nowrap; opacity: 0; transition: opacity .2s var(--ease); pointer-events: none; }
 .cmttoast.on { opacity: 1; }
 .cmttoast:empty { display: none; }
 
@@ -290,18 +274,142 @@ details dd { overflow-wrap: anywhere; }
    スマホ: 画面の上の行（No. と品名）を、スクロールしても上に残す。
    パソコン・横向き: 表示板の中、価格の上に、品番と品名を大きく出す（上の行は、読み上げ用にだけ残す） */
 .top { position: sticky; top: 0; z-index: 5; background: var(--ground); }
-body.outbid .top { background: var(--alarm); }
 .lotline { display: none; }
 @media (min-width: 960px), (min-width: 700px) and (orientation: landscape) {
   .top { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .lotline { display: grid; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--board-line); min-width: 0; }
-  .lotline #boardNo { font-size: 20px; font-weight: 600; color: var(--board-ink-2); }
+  .lotline #boardNo { font-size: 1.25rem; font-weight: 600; color: var(--board-ink-2); }
   .lotline #boardNo:empty { display: none; }
-  .lotname { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 22px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
-  .lotlabel { font-size: 13px; font-weight: 600; color: var(--board-ink-2); letter-spacing: .3em; }
-  .board:not(.haslot) .lotlabel { display: none; }
+  .lotname { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 1.375rem; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
   .board.idle .lotline { border-bottom: 0; padding-bottom: 0; }
 }
-@media (min-width: 960px) { .lotline #boardNo { font-size: 24px; } .lotname { font-size: 26px; } }
+@media (min-width: 960px) { .lotline #boardNo { font-size: 1.5rem; } .lotname { font-size: 1.625rem; } }
 
-.paylink:hover:not(:disabled) { background: #e9edf3; border-color: #e9edf3; color: var(--navy); }
+.paylink:hover:not(:disabled) { background: var(--action-hover); border-color: var(--action-hover); color: var(--action-ink); }
+
+/* ---- 入札と落札の演出（控えめにした。動きは bidder.js）。自分が落札したときだけ、画面の中央に知らせの札を出す */
+.price { position: relative; transform-origin: left bottom; }
+.winfx { position: fixed; inset: 0; z-index: 30; pointer-events: none; display: grid; place-items: center; padding: 24px; }
+.winfx[hidden] { display: none; }
+.wincard { display: grid; justify-items: center; gap: 6px; min-width: min(280px, calc(100vw - 48px)); max-width: 360px; padding: 28px 28px 24px; border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--ground) 92%, transparent); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); color: var(--ink); box-shadow: var(--shadow-2); text-align: center; }
+.wincheck { width: 56px; height: 56px; margin-bottom: 6px; }
+.wincheck circle { fill: var(--action); }
+.wincheck path { fill: none; stroke: var(--action-ink); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.wintitle { font-size: 1.25rem; font-weight: 700; }
+.wincard b { font-size: 0.9375rem; font-weight: 400; color: var(--ink-2); max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.winprice { font-size: 2rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+
+/* ==== リキッドグラス（報告書 77 章） ==== */
+/* スマホ: 下に固定した表示板は、濃いめのガラス（後ろの履歴・コメントが、ぼけて透ける）。価格の数字が読めるよう、透けすぎない */
+.board { background: color-mix(in srgb, var(--board) 86%, transparent); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-edge), 0 -8px 30px -18px rgb(0 0 0 / .25); }
+body.outbid .board { box-shadow: var(--glass-edge), inset 0 0 0 2px var(--board-ng); }
+/* 広い画面・低い画面: 表示板は中身の一部（固定しない）なので、不透明の面に戻す */
+@media (max-height: 520px) and (max-width: 699px) {
+  .board { background: var(--board); -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+  body.outbid .board { box-shadow: inset 0 0 0 2px var(--board-ng); }
+}
+@media (min-width: 960px), (min-width: 700px) and (orientation: landscape) {
+  .board { background: var(--board); -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+  body.outbid .board { box-shadow: inset 0 0 0 2px var(--board-ng); }
+}
+/* 表示板の中の部品は、ぼかしなし（ガラスの中にガラスを重ねない） */
+.board .state[data-st] { background: color-mix(in srgb, var(--ground) 72%, transparent); box-shadow: inset 0 1px 0 rgb(255 255 255 / .5); }
+
+/* 映像の上のコメント・音声・知らせ: 暗いガラスの札（映像が、ぼけて透ける） */
+.cmtlayer #comments li, .cmttoast, #sound {
+  background: rgb(20 20 22 / .72); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .18), inset 0 0 0 1px rgb(255 255 255 / .08); border-color: transparent;
+}
+#sound { border-radius: 999px; }
+#sound:hover:not(:disabled) { background: rgb(20 20 22 / .55); }
+/* 上回られたときの帯: 赤い面は残し、上の縁に光を足す */
+.outbidbar { box-shadow: inset 0 1px 0 rgb(255 255 255 / .3), var(--shadow-2); }
+/* 落札の知らせの札 */
+.wincard { background: var(--glass-tint-strong); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-edge), var(--shadow-2); }
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .board, .wincard { background: var(--board); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .cmtlayer #comments li, .cmttoast, #sound { background: rgb(0 0 0 / .8); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+/* 来場確認の QR コード。暗い画面でも読み取れるよう、白地のまま出す（報告書 91 章） */
+#gate .checkinqr { display: block; justify-self: center; width: min(240px, 70vw); height: auto; aspect-ratio: 1; background: #fff; border-radius: 12px; padding: 8px; box-shadow: 0 0 0 1px var(--line, rgba(0, 0, 0, .12)); }
+#gate .checkinqr[hidden] { display: none; }
+
+/* ==== 低い画面（スマホの横向き・文字を大きくしたとき。本番運用の評価 B17） ====
+   表示板は固定できない（画面より高くなる）ので、入札のボタンと金額の欄だけを、画面の下に固定する。
+   価格は、ボタンの上の細い帯にも出す（スクロールしても、いくらで入札するかが分かる） */
+@media (max-height: 520px) {
+  body { padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important; }
+  .bidrow { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; margin: 0;
+    padding: 8px max(16px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    background: var(--board); box-shadow: 0 -1px 0 var(--board-line), 0 -8px 24px -16px rgb(0 0 0 / .3); }
+  .bidrow #bid { min-height: 52px; }
+}
+
+/* 入場: いまの参加のしかたの印。終わった日の案内のボタン */
+.mode .modenow { display: block; font-size: 0.8125rem; font-weight: 400; color: var(--ink-2); margin-top: 2px; }
+#gateMsg .gatebtn { display: flex; justify-content: center; margin-top: 12px; text-decoration: none; }
+
+/* ---- 結果の下の、ひとこと（落札した人には払う金額とこのあとのこと、流札には理由） */
+.board-resultsub { margin: 0; font-size: 0.875rem; line-height: 1.6; color: var(--board-ink-2); }
+.board-resultsub:empty { display: none; }
+/* 入札ボタン: 「入札」の下に、送る金額を小さく書く */
+#bid .bidword { display: block; line-height: 1.2; }
+#bid .bidamt { display: block; font-size: 0.8125rem; font-weight: 500; line-height: 1.2; opacity: .92; }
+#bid .bidamt:empty { display: none; }
+#bid:has(.bidword) { display: grid; align-content: center; justify-items: center; gap: 2px; }
+/* 文字を2倍にした・とても狭い画面: 金額の欄と入札ボタンを、縦に並べる（金額の欄が「¥」だけにつぶれないように） */
+@media (max-width: 280px) {
+  .bidrow { grid-template-columns: minmax(0, 1fr); }
+  .bidrow #bid { width: 100%; }
+  .lamps { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .lamp + .lamp { border-left: 0; padding-left: 0; }
+}
+
+/* 本日の競りが終わったあと: コメントを書く欄と、参加のしかたの切り替えは、しまう */
+body.ended #cmtForm, body.ended #cmtCount, body.ended #modeLine { display: none; }
+/* 再接続中の、補足 */
+.overlay small { display: block; font-size: 0.9375rem; font-weight: 400; line-height: 1.7; margin: 12px auto 0; max-width: 22em; opacity: .9; }
+
+/* ==== スマートフォンの横向き（幅は2列ぶんあるが、とても低い画面。報告書 120 章） ====
+   これまでは、右の列の表示板が画面より高くなり、下に固定した入札の帯が、受付中の印・自分の番号・ランプを隠していた。
+   表示板を詰めて、上の帯と入札の帯のあいだに、全部が収まるようにする。右の列は、左の列（映像・コメント）を動かしても、その場に残す */
+@media (min-width: 700px) and (max-height: 520px) and (orientation: landscape) {
+  .brandbar > div { min-height: 44px; }
+  .brandbar .brand__logo { height: 30px; }
+  main { gap: 12px 20px; padding-top: 8px; }
+  .side { position: sticky; top: 8px; gap: 12px; }
+  .board { padding: 10px 14px; gap: 6px; }
+  .lotline { display: flex; align-items: baseline; gap: 8px; padding-bottom: 6px; }
+  .lotline #boardNo { font-size: 0.9375rem; flex: none; }
+  .lotname { display: block; font-size: 1rem; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .price { font-size: 2.125rem; }
+  .board-meta b { font-size: 1.125rem; }
+  .lamps { padding-top: 6px; }
+  .lamp b { font-size: 0.875rem; }
+  .lamp small { font-size: 0.75rem; }
+  .lamp .bulb { transform: scale(.8); }
+  .board-result { font-size: 1rem; }
+  .board-resultsub { font-size: 0.8125rem; line-height: 1.4; }
+  #msg { font-size: 0.875rem; }
+}
+
+/* 待機中の画面の見た目は、進行コンソールと共通なので app.css にある（報告書 132 章） */
+/* 待機中は、映像の上のコメント・音声のボタンを、待機中の画面より上に出す */
+#videoBox .tapzone, #videoBox .cmtlayer, #videoBox .cmttoast, #videoBox #sound { z-index: 2; }
+@media (max-height: 520px) { #standby { gap: 6px; padding: 12px; } .standby__logo { width: min(30%, 140px); } }
+
+/* ==== 画面の幅いっぱいに使う（発注者の指示。報告書 127 章） ==== */
+@media (min-width: 960px), (min-width: 700px) and (orientation: landscape) {
+  .brandbar > div, .top, main { max-width: none; }
+  /* 映像の枠は、広い画面でも、画面の高さからはみ出さない（はみ出す分は、枠を横長にして、映像の左右を黒くする） */
+  #videoBox { max-height: calc(100dvh - 128px); }
+}
+@media (min-width: 960px) { .brandbar > div, .top, main { padding-left: 32px; padding-right: 32px; } }
+/* スマホ・縦向きのタブレット（1列）: 映像を、画面の幅いっぱい（左右の余白なし・角の丸みなし）に大きく出す（発注者の指示。報告書 132 章）。
+   2列の画面（パソコン・横向き）は、これまでどおり */
+@media (max-width: 699.98px), (max-width: 959.98px) and (orientation: portrait) {
+  html { overflow-x: clip; }
+  #videoBox { width: 100vw; margin-inline: calc(50% - 50vw); border-radius: 0; }
+}

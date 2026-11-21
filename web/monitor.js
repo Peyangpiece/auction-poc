@@ -3,14 +3,28 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const S = { lots: new Map(), focus: null, history: [] };
+const S = { lots: new Map(), focus: null, history: [], event: null, ended: false };
 
 function render() {
   const lot = S.lots.get(S.focus);
+  // 待機（品がない）・休憩・終了は、中央の大きな知らせにする。次の品が決まっていれば、予告する
+  const next = [...S.lots.values()].find((l) => l.status === 'waiting');
+  const idle = S.ended ? ['本日の競りは終了しました', 'ご参加ありがとうございました']
+    : S.event?.phase === 'break' ? ['休憩中', `再開の予定 ${S.event.resumeAt}${next ? `　次は No.${next.lotNo} ${next.title}` : ''}`]
+    : S.event && !S.event.phase ? ['まもなく始まります', `開始の予定 ${S.event.startsAt}`]
+    : !lot ? ['次の品をお待ちください', next ? `次は No.${next.lotNo} ${next.title}` : '']
+    : null;
+  $('idle').hidden = !idle;
+  $('now').hidden = !!idle;
+  document.querySelector('.hist').hidden = !!idle || S.history.length === 0;
+  if (idle) { $('idleTitle').textContent = idle[0]; $('idleSub').textContent = idle[1]; }
+  // いま入札できるか（受付中・中断など）を、色の付いた札で出す
+  $('state').textContent = lot ? STATE_LABEL[lot.status] ?? '' : '';
+  $('state').dataset.st = lot?.status ?? '';
   $('lotNo').textContent = lot ? `No.${lot.lotNo}` : '';
   $('title').textContent = lot ? lot.title : '次の品をお待ちください';
   const closed = lot && (lot.status === 'sold' || lot.status === 'unsold');
-  $('priceLabel').textContent = !lot ? '' : lot.status === 'sold' ? '落札価格' : lot.currentPrice === null ? '開始価格' : '現在価格';
+  $('priceLabel').textContent = !lot ? '' : lot.status === 'sold' ? '落札額' : lot.currentPrice === null ? '開始価格' : '現在価格';
   $('price').textContent = lot ? yen(lot.currentPrice ?? lot.startPrice) : '';
   $('who').className = lot?.status === 'sold' ? 'who sold' : 'who';
   $('who').textContent = !lot ? '' : lot.status === 'sold' ? `${lot.highestPaddle}番 落札`
@@ -26,12 +40,16 @@ function render() {
   }));
 }
 function showEvent(event, ended = false) {
-  $('event').textContent = ended ? '本日の競りは終了しました' : !event ? '' : event.phase === 'break' ? `休憩中　再開の予定 ${event.resumeAt}` : event.title;
+  S.event = event; S.ended = ended;
+  // 休憩・終了の知らせは、画面の中央に大きく出すので、右上は開催の名前だけ
+  $('event').textContent = !event ? '' : event.title;
 }
 function onMessage(msg) {
   switch (msg.type) {
     case 'welcome': case 'snapshot':
-      S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history; showEvent(msg.event ?? null); break;
+      // 開催が切り替わっていたら（前の開催の画面を開いたままだった）、読み込み直して、最初からにする
+      if (reloadOnNewEvent(S, msg)) return;
+      S.lots = new Map(msg.lots.map((l) => [l.id, l])); S.focus = msg.focusLotId; S.history = msg.history; showEvent(msg.event ?? null, !msg.event && !!msg.ended); render(); break;
     case 'lot': {
       const prev = S.lots.get(msg.lot.id);
       S.lots.set(msg.lot.id, msg.lot);
@@ -54,5 +72,5 @@ function onMessage(msg) {
 }
 fetch('/api/me', { credentials: 'same-origin' }).then((r) => r.json()).then((me) => {
   if (!me.staff) return location.replace('/staff.html?next=monitor');
-  new Link({ token: null, as: 'monitor', label: 'monitor', onMessage, onStatus: (up, why) => { $('overlay').style.display = up ? 'none' : 'flex'; $('overlayText').textContent = why ?? '再接続中…'; } });
+  new Link({ token: null, as: 'monitor', label: 'monitor', onMessage, onStatus: (up, why, _r, code) => showOverlay(up, why, code, 'monitor') });
 }).catch(() => { $('overlayText').textContent = 'サーバーにつながりません'; });

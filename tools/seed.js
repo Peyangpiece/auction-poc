@@ -11,7 +11,7 @@ import { openDb, hashToken } from '../server/src/db.js';
 const args = Object.fromEntries(process.argv.slice(2).join(' ').split('--').filter(Boolean).map((a) => { const [k, v] = a.trim().split(/[ =]/); return [k, v ?? true]; }));
 const members = Number(args.members ?? 100);
 const config = loadConfig();
-const tokensPath = args.out ?? path.join(config.dataDir, 'tokens.json');
+const tokensPath = typeof args.out === 'string' ? args.out : path.join(config.dataDir, 'tokens.json');
 
 if (fs.existsSync(tokensPath) && !args.force) {
   console.error(`${tokensPath} がすでにあります。作り直すときは --force を付けてください（データベースも空にしてから）。`);

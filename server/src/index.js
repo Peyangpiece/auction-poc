@@ -4,22 +4,45 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { loadConfig } from './config.js';
 import { openDb, hashToken } from './db.js';
-import { createSaver } from './persist.js';
+import { createSaver, storePut, storeDel, RESTORE_NOTE } from './persist.js';
+import { createJournal } from './journal.js';
 import { Metrics } from './metrics.js';
 import { StreamControl } from './stream.js';
 import { Auction } from './auction.js';
+import { parseJson } from './mvp/shared.js';
 import { nowMs } from './clock.js';
 import { createApi } from './mvp/api.js';
 import { clientIp } from './mvp/security.js';
 
 const config = loadConfig();
 const store = openDb(config.dbPath);
+// 配信エージェントの合言葉（報告書 94 章）。本番では GitHub の Secrets から渡す。
+// 入っていれば、これだけを配信エージェントとして登録し、ほかの合言葉（前の値・開発用）は使えなくする
+if (config.agentToken) {
+  if (config.agentToken.length < 32) console.error('[agent] POC_AGENT_TOKEN が短すぎます（32文字以上）。登録しません');
+  else store.db.transaction(() => {
+    const hash = hashToken(config.agentToken);
+    store.db.prepare("DELETE FROM staff WHERE role = 'agent' AND token_hash <> ?").run(hash);
+    if (!store.q.staffByToken.get(hash)) store.q.insertStaff.run('agent', '配信エージェント', hash);
+  })();
+}
 // 外の保存先への保存（Cloudflare など、置き場が消える環境だけ）
-const saver = config.persistUrl ? createSaver({ db: store.db, config }) : null;
+// 書き込みの控え: 受理した入札や落札を、返事の前に、外の保存先にも書く（データの置き場が消える環境で、失わないため）
+let journalAlert = null; // 保存先に届かなくなったときの知らせ（api ができてから入れる）
+const journal = config.persistUrl && config.journal
+  ? createJournal({ db: store.db, put: (rel, body) => storePut(config, rel, body), del: (rel) => storeDel(config, rel), maxWaitMs: config.journalMaxWaitMs, onDegraded: (on, why) => journalAlert?.(on, why) })
+  : null;
+const saver = config.persistUrl ? createSaver({ db: store.db, config, journal }) : null;
+// 利用者へ送る: 書き込みの控えが保存先に届いてから送る（届いていれば、すぐ送る）。順番は、変わらない
+const out = (ws, text) => {
+  if (!journal || journal.clean()) return ws.send(text);
+  journal.after(() => { if (ws.readyState === 1) ws.send(text); });
+};
 const metrics = new Metrics(config.metricsDir, { level: config.metricsLevel, fileMb: config.metricsFileMb, maxMb: config.metricsMaxMb });
 
 // ---------------------------------------------------------------- 接続の管理
@@ -55,7 +78,7 @@ function broadcast(msg) {
       c.ws.terminate();
       continue;
     }
-    c.ws.send(c.role === 'auctioneer' ? staffText : memberText);
+    out(c.ws, c.role === 'auctioneer' ? staffText : memberText);
   }
   return nowMs();
 }
@@ -102,9 +125,13 @@ const lastCommentAt = new Map(); // member id -> 最後に書き込んだ時刻
 function onComment(conn, msg, send) {
   const fail = (message) => send({ type: 'comment_result', reqId: msg.reqId ?? null, ok: false, message });
   if (conn.role !== 'member') return fail('コメントは会員だけが書き込めます');
+  // 参加を停止された会員は、コメントも書き込めない（本番運用の評価 S-6）
+  if (conn.member.account_id && api.billing.suspension(conn.member.account_id)) return fail('参加が停止されているため、コメントは書き込めません');
   // 制御文字を除き、前後の空白を落とす。長さは文字（書記素ではなくコードポイント）で数える
   const text = String(msg.text ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
   if (!text) return fail('コメントを入力してください');
+  // 開催を終えたあとは、書き込めない（画面では欄を消しているが、ここでも断る。報告書 124 章）。始める前は、書き込める（発注者の決定）
+  if (api.endedToday()) return fail('本日の競りは終了しました。コメントは書き込めません');
   if ([...text].length > config.commentMaxLength) return fail(`コメントは${config.commentMaxLength}文字までです`);
   const now = nowMs();
   const wait = config.commentIntervalMs - (now - (lastCommentAt.get(conn.member.id) ?? 0));
@@ -119,13 +146,30 @@ function onComment(conn, msg, send) {
 
 const stream = new StreamControl({ config, metrics, broadcast });
 // 会員登録・ログイン・スタッフ・開催・参加手続き。商品は、進行コンソールからその場で登録する
-const api = createApi({ store, config, nowMs, persistStatus: () => saver?.status() ?? null });
-const auction = new Auction({ store, config, metrics, broadcast, stream, crashPoint, eventId: api.eventId, bidGate: api.bidGate });
+const api = createApi({ store, config, nowMs, persistStatus: () => saver?.status() ?? null, durable: () => journal?.durable(), healthDetail: () => ({ persist: saver?.status() ?? null, journal: journal?.status() ?? null, journalStarted: journal?.started ?? null }) });
+// 本日の開催を終えたあとは、品の登録・開始を断る（開催に属さない品が残り、次の開催を止めないように。本番運用の評価 A6）
+// 開催を始める前（進行役が「開催を始める」を押す前）は、品の登録はできるが、競りの開始はできない（発注者の決定。報告書 124 章）。
+// 開催の日なら、開始の予定時刻の前でも、競りを始められて、入札まで進んでいた
+const lotGate = (what) => (api.endedToday() ? '本日の開催は終了しています。品の登録・開始はできません'
+  : what === 'start' && api.eventState() && !api.eventState().phase ? '開催を、まだ始めていません。進行コンソールの「開催を始める」を押してから、品を開始してください' : null);
+const auction = new Auction({ store, config, metrics, broadcast, stream, crashPoint, eventId: api.eventId, bidGate: api.bidGate, lotGate });
+// 管理画面からの開催終了（本番運用の評価 A5）
+api.hooks.closeOut = (eventId, { current, actor }) => {
+  if (current) {
+    if (auction.hasActiveLot()) return { error: '進行中の品があるあいだは、開催を終了できません。進行コンソールで締めるか中断してから、やり直してください' };
+    return { notHeld: auction.closeOutWaiting(actor) };
+  }
+  return { notHeld: auction.closeOutEvent(eventId, actor) };
+};
+api.hooks.afterEnd = (current) => { if (current) { stream.manual('stop'); broadcast({ type: 'event', event: null, ended: true }); } };
 const recovered = auction.recover();
 if (recovered.length) console.log('[recovery]', JSON.stringify(recovered));
 
 // 起動のときと1時間ごとに、請求の見回りをする（落札の明細の作り漏れ、期限を過ぎた知らせ、受け取り期限の前日の知らせ）
 try { api.billing.sweep(); } catch (err) { console.error('[billing]', err); }
+// 開催のお知らせメール（前日から当日の開始まで）。送るのに時間がかかるので、待たずに進める
+const eventMails = () => api.sendEventMails().catch((err) => console.error('[event-mail]', err));
+eventMails();
 // 期限の切れた記録（ログイン・認証番号・確認のリンク）を捨てる。たまり続けて、保存のたびに送る量が増えるのを防ぐ
 function prune() {
   const now = nowMs(), day = 86400000;
@@ -136,7 +180,10 @@ function prune() {
   store.db.prepare('DELETE FROM email_tokens WHERE expires_at < ?').run(now - day);
 }
 try { prune(); } catch (err) { console.error('[prune]', err); }
-setInterval(() => { try { api.billing.sweep(); prune(); } catch (err) { console.error('[billing]', err); } }, 3600000).unref();
+// 保存期間を過ぎた個人情報を消す（退会・却下の会員、監査ログの接続元。本番運用の評価 C）
+const purgePii = () => { try { api.purgeExpiredPii(); } catch (err) { console.error('[privacy]', err); } };
+purgePii();
+setInterval(() => { try { api.billing.sweep(); prune(); } catch (err) { console.error('[billing]', err); } purgePii(); eventMails(); }, 3600000).unref();
 
 // ---------------------------------------------------------------- HTTP
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.webp': 'image/webp', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
@@ -161,10 +208,19 @@ const SECURITY_HEADERS = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer', // 参加用の URL が、よそのサイトに伝わらないようにする
   'x-frame-options': 'DENY',
+  // HTTPS で配っているときは、次からも HTTPS だけで開かせる（HSTS）
+  ...(config.cookieSecure ? { 'strict-transport-security': 'max-age=31536000; includeSubDomains' } : {}),
   'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
   ...(config.csp === 'off' ? {} : { 'content-security-policy': CSP }),
 };
 const startedAt = nowMs();
+const CAMERA_FAIL = {
+  unknown_camera: 'そのカメラは、OBS にありません。OBS のシーンの名前を確かめてください',
+  agent_not_connected: '配信エージェントがつながっていないため、切り替えられません',
+  timeout: '配信用PCから応答がありません。OBS の画面で確かめてください',
+  obs_not_connected: 'OBS につながっていません。配信用PCで OBS が起動しているか確かめてください',
+};
+const JSQR_FILE = createRequire(import.meta.url).resolve('jsqr/dist/jsQR.js');
 
 const server = http.createServer((req, res) => {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
@@ -174,7 +230,12 @@ const server = http.createServer((req, res) => {
     let db = true;
     try { store.db.prepare('SELECT 1').get(); } catch { db = false; }
     res.statusCode = db ? 200 : 503;
-    return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, busy: auction.snapshot().lots.some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status)), errors: errorCount, agent: stream.view().agentConnected, ...(saver ? { persist: saver.status() } : {}) }));
+    // だれでも見られるので、出すのは、死活と、配ってよいか（busy）と、警告の名前だけ。
+    // 保存や控えの細かい状態（通し番号・最後に保存した時刻）は、出さない（書き込みがあったかどうかから、登録の有無が分かってしまうため）。
+    // 細かい状態は、主催者管理者だけが /api/staff/health で見られる
+    return res.end(JSON.stringify({ ok: db, db, now: nowMs(), uptimeSec: Math.round((nowMs() - startedAt) / 1000), connections: clients.size, busy: auction.snapshot().lots.some((l) => ['preparing', 'preparing_warn', 'open', 'suspended'].includes(l.status)) || ['running', 'break'].includes(api.eventState()?.phase), errors: errorCount, agent: stream.view().agentConnected,
+      alerts: [...(saver && saver.status().failingSince && nowMs() - saver.status().failingSince > 60000 ? ['persist_failing'] : []), ...(journal?.status().degraded ? ['journal_degraded'] : []), ...(journal && !journal.started ? ['journal_not_started'] : []), ...(config.persistUrl && config.journalReplay === false ? ['journal_replay_off'] : []), ...(restoreNotes.length ? ['restore_incomplete'] : [])],
+      ...(journal ? { journal: { degraded: journal.status().degraded, putMs: journal.status().putMs } } : {}) }));
   }
   if (url.pathname === '/hooks/ivs' && req.method === 'POST') return handleEventBridge(req, res);
   if (url.pathname.startsWith('/api/')) return api.handle(req, res, url);
@@ -185,7 +246,10 @@ const server = http.createServer((req, res) => {
     return res.writeHead(302, { location: '/login.html', 'cache-control': 'no-store' }).end();
   }
   const name = url.pathname === '/' ? 'index.html' : path.basename(url.pathname);
-  const file = path.join(config.webDir, name);
+  // QR コードの読み取りの部品（jsQR）は、入れたパッケージから直接返す（受付の画面だけが、読み取るときに読み込む。報告書 91 章）
+  const file = name === 'jsqr.js' ? JSQR_FILE : path.join(config.webDir, name);
+  // カメラは、受付の画面（QR コードの読み取り）だけに許す。ほかの画面は、これまでどおり使わせない
+  if (name === 'staff.html') res.setHeader('permissions-policy', 'camera=(self), microphone=(), geolocation=(), payment=()');
   fs.readFile(file, (err, body) => {
     if (err) {
       // 画面を開こうとした場合（.html か、拡張子なし）は、案内のページを返す。部品（画像・スクリプトなど）は短い返事だけ
@@ -291,8 +355,10 @@ function onClient(ws, req) {
   const pendingKey = conn.ip;
   pending.set(pendingKey, (pending.get(pendingKey) ?? 0) + 1);
   const leavePending = () => { if (conn.pendingLeft) return; conn.pendingLeft = true; const n = (pending.get(pendingKey) ?? 1) - 1; if (n > 0) pending.set(pendingKey, n); else pending.delete(pendingKey); };
-  if (pending.get(pendingKey) > 20) { leavePending(); return ws.close(4429, 'too many pending connections'); }
-  const send = (msg) => ws.readyState === 1 && ws.send(JSON.stringify(msg));
+  // 会場の Wi-Fi のように、大勢が同じ接続元から一斉につなぎ直すこともある。利用者のせいではないので、4503（混雑）で切り、画面は少し待ってつなぎ直す（報告書 81 章）
+  if (pending.get(pendingKey) > 20) { leavePending(); return ws.close(4503, 'busy'); }
+  // 時刻合わせの返事は、待たせない（往復の時間を測るため）。ほかは、書き込みの控えが届いてから送る
+  const send = (msg) => { if (ws.readyState !== 1) return; if (msg.type === 'time') ws.send(JSON.stringify(msg)); else out(ws, JSON.stringify(msg)); };
   const allow = limiter(config.messageRate);
   // 名乗らないままの接続を残さない
   const helloTimer = config.helloTimeoutMs > 0 ? setTimeout(() => { if (!conn.role) ws.close(4408, 'hello timeout'); }, config.helloTimeoutMs) : null;
@@ -320,7 +386,7 @@ function onClient(ws, req) {
       return ws.close(4429, 'too many messages');
     }
     let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
+    try { msg = parseJson(String(raw)); } catch { return; }
     if (msg === null || typeof msg !== 'object') return;
 
     // 時刻合わせ（POC-SRV-006）: すぐにサーバーの時刻を返す。認証の前でも答える。
@@ -393,7 +459,7 @@ function onClient(ws, req) {
         type: 'welcome', role: conn.role, paddle: member?.paddle_no ?? null, mode: member?.mode ?? null, name: (member ?? staff).name,
         conn: conn.id, serverTime: nowMs(), stream: stream.view(), allowCrash: config.allowCrash, ladder: config.incrementTable,
         playerScriptUrl: config.ivsPlayerScriptUrl, venueContact: config.venueContact,
-        commentMaxLength: config.commentMaxLength, comments: store.q.recentComments.all(), ...auction.snapshot(), event: api.eventState(),
+        commentMaxLength: config.commentMaxLength, comments: store.q.recentComments.all(api.eventId()), ...auction.snapshot(), event: api.eventState(), ended: api.endedToday(),
         ...(conn.role === 'auctioneer' ? { sold: auction.soldList() } : {}),
       }));
       return presence();
@@ -402,7 +468,7 @@ function onClient(ws, req) {
 
     switch (msg.type) {
       case 'sync': // 再接続のあとなどに、最新の状態を取り直す（FR-UI-002）
-        return send((conn.role === 'auctioneer' ? (m) => m : forMember)({ type: 'snapshot', serverTime: nowMs(), stream: stream.view(), comments: store.q.recentComments.all(), ...auction.snapshot(), event: api.eventState() }));
+        return send((conn.role === 'auctioneer' ? (m) => m : forMember)({ type: 'snapshot', serverTime: nowMs(), stream: stream.view(), comments: store.q.recentComments.all(api.eventId()), ...auction.snapshot(), event: api.eventState(), ended: api.endedToday() }));
       case 'bid':
         // 主催者側のスタッフは入札できない（FR-CON-004）
         if (conn.role !== 'member') return send({ type: 'error', message: 'スタッフは入札できません' });
@@ -425,7 +491,7 @@ function onClient(ws, req) {
       case 'video_latency':
         return metrics.write('video_latency', { conn: conn.id, paddle: conn.member?.paddle_no ?? null, latencyMs: msg.latencyMs, clientAt: msg.at, net: msg.net ?? null });
       case 'client_event':
-        return metrics.write('client_event', { conn: conn.id, paddle: conn.member?.paddle_no ?? null, name: String(msg.name).slice(0, 64), data: msg.data ?? null, clientAt: msg.at ?? null });
+        return metrics.write('client_event', { conn: conn.id, paddle: conn.member?.paddle_no ?? null, name: String(msg.name).slice(0, 64), data: msg.data !== undefined && JSON.stringify(msg.data).length <= 2000 ? msg.data : null, clientAt: msg.at ?? null });
       case 'comment':
         if (!stillSignedIn()) return;
         return onComment(conn, msg, send);
@@ -456,28 +522,38 @@ function onClient(ws, req) {
 // 監査ログに残す操作者。ログインしたスタッフならその人、検証用の合言葉で入った進行役なら「システム」扱い
 const staffRef = (conn) => (conn.staff.account ? { id: conn.staff.id, role: conn.staff.role } : null);
 const PROXY_REJECT = {
-  LOT_NOT_OPEN: 'この品は入札を受け付けていません', AFTER_CLOSE: '締めに間に合いませんでした', BELOW_MINIMUM: '最低入札額より低い金額です',
+  LOT_NOT_OPEN: 'この品は入札を受け付けていません', AFTER_CLOSE: '締めに間に合いませんでした', TOO_HIGH: '一度に入れられる金額を超えています', BELOW_MINIMUM: '最低入札額より低い金額です',
   OFF_LADDER: '入札できる金額ではありません', ALREADY_HIGHEST: 'この参加者が、すでに最高入札者です', NOT_CHECKED_IN: '受付で、来場の確認を受けてください', SUSPENDED: 'この参加者は、参加が停止されています', NOT_JOINED: 'この参加者は、いまの開催の参加者ではありません',
 };
+const CALLER_ACTIONS = new Set(['start', 'set_start', 'urikiri', 'close', 'pass', 'suspend', 'resume', 'sold_list']);
 function onAuctioneer(conn, msg, send) {
   const sendSold = () => send({ type: 'sold', sold: auction.soldList() });
   const ok = (extra = {}) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: true, action: msg.action, ...extra });
   const ng = (message) => send({ type: 'cmd_result', reqId: msg.reqId ?? null, ok: false, action: msg.action, message });
+  // オークショニアは、次の品の開始・中断・再開と、競りの最中の4つの操作（開始価格・うりきり・締め・流札）だけができる（発注者の指示）
+  if (conn.staff?.role === 'caller' && !CALLER_ACTIONS.has(msg.action)) return ng('この操作は、オークショニアにはできません');
   try {
     switch (msg.action) {
       case 'start': case 'close': case 'suspend': case 'resume': case 'cancel': case 'exclude':
-      case 'start_without_video': case 'back_to_waiting':
+      case 'start_without_video': case 'back_to_waiting': case 'set_start': case 'urikiri': case 'pass':
         return auction.receiveCommand(conn.staff, msg, (res) => {
           send(res);
           if (!res.ok) return;
           // 競りを始めたら、開催は「進行中」になる（休憩も終わる。FR-EVT-003）
-          if (msg.action === 'start' && api.eventState() && api.eventState().phase !== 'running') broadcast({ type: 'event', event: api.setPhase(staffRef(conn), 'running') });
+          if (msg.action === 'start' && api.eventState()?.phase === 'break') broadcast({ type: 'event', event: api.setPhase(staffRef(conn), 'running') });
           // 落札の一覧を、進行役に送り直す（受け取り方法・支払方法つき。FR-CON-002）
           // 落札したら、明細を作って、落札者にメールで知らせる（FR-INV-001）
-          if (msg.action === 'close') { api.billing.syncLines(); sendSold(); }
+          if (msg.action === 'close' || msg.action === 'pass') { api.billing.syncLines(); sendSold(); }
         });
       case 'sold_list': return ok({ sold: auction.soldList() });
+      case 'event_start': { // 開催を始める（発注者の決定。報告書 124 章）: ここから、品を開始できる。経過時間は、ここから数える
+        if (!api.eventState()) return ng('本日の開催はありません');
+        if (api.eventState().phase) return ng('開催は、もう始まっています');
+        broadcast({ type: 'event', event: api.setPhase(staffRef(conn), 'running') });
+        return ok();
+      }
       case 'event_break': { // 休憩（FR-CON-003）: 進行中の品がないときだけ。次の開始予定時刻が要る
+        if (!api.eventState()?.phase) return ng('開催を、まだ始めていません');
         if (auction.hasActiveLot()) return ng('進行中の品があるあいだは、休憩に入れません');
         const at = String(msg.resumeAt ?? '');
         if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(at)) return ng('次の開始予定時刻を、入力してください');
@@ -487,6 +563,9 @@ function onAuctioneer(conn, msg, send) {
       case 'event_end': { // 開催終了（FR-EVT-003）: 取り消せない
         if (auction.hasActiveLot()) return ng('進行中の品があるあいだは、開催を終了できません');
         if (!api.eventState()) return ng('本日の開催はありません');
+        // 始める前の開催は、ここからは終えられない（押しまちがいで、その日の開催が終わるのを防ぐ。やめるときは、管理の「開催」で、公開を取り下げる）
+        // （きのうの、終了し忘れた開催は、始めていなくても終えられる）
+        if (!api.eventState().phase && !api.eventState().stale) return ng('開催を、まだ始めていません。開催をやめるときは、管理の「開催」で、公開を取り下げてください');
         const notHeld = auction.closeOutWaiting(conn.staff.name); // 待機の品は、未実施にする
         stream.manual('stop');                                    // 配信を停止する
         const sold = auction.soldList();
@@ -514,9 +593,15 @@ function onAuctioneer(conn, msg, send) {
           send({ ...res, action: msg.action });
         });
       }
-      case 'stream_start': stream.manual('start'); return ok();
-      case 'stream_stop': stream.manual('stop'); return ok();
+      // 配信の開始・停止・カメラの切り替え・コメントを消す操作は、だれがしたかを監査ログに残す（本番運用の評価 C）
+      case 'stream_start': stream.manual('start'); api.audit({ staff: staffRef(conn), system: true }, 'stream.start', { target: 'stream' }); return ok();
+      case 'stream_stop': stream.manual('stop'); api.audit({ staff: staffRef(conn), system: true }, 'stream.stop', { target: 'stream' }); return ok();
       case 'stream_status': stream.manual('status'); return ok();
+      case 'camera': { // 映すカメラの切り替え（OBS のシーン。報告書 92 章）。配信は止めない
+        const name = String(msg.camera ?? '');
+        return stream.setCamera(name).then((res) => (api.audit({ staff: staffRef(conn), system: true }, 'stream.camera', { target: 'stream', after: { camera: name, ok: !!res?.ok } }), send({ type: 'cmd_result', reqId: msg.reqId ?? null, action: 'camera', ok: !!res?.ok,
+          message: res?.ok ? undefined : CAMERA_FAIL[res?.error] ?? 'カメラを切り替えられませんでした。OBS の画面で確かめてください' })));
+      }
       case 'set_auto_stop': stream.setAutoStopMs(Number(msg.ms)); return ok();
       case 'create_lot': {
         // 商品は、競りの最中にその場で登録する（発注者の決定）。登録は記録に残す。
@@ -529,6 +614,7 @@ function onAuctioneer(conn, msg, send) {
         store.q.hideComment.run(Number(msg.id));
         broadcast({ type: 'comment_hidden', id: Number(msg.id) });
         metrics.write('comment_hidden', { id: Number(msg.id), actor: conn.staff.name });
+        api.audit({ staff: staffRef(conn), system: true }, 'comment.hide', { target: `comment:${Number(msg.id)}` });
         return ok();
       case 'mark': // 測定の区切り（どの検証の記録かを後で見分ける）
         metrics.write('mark', { label: String(msg.label), phase: msg.phase ?? null, data: msg.data ?? null });
@@ -571,15 +657,83 @@ const sysTimer = setInterval(() => {
 }, config.sysSampleMs);
 sysTimer.unref();
 
+// 保存先（R2）への保存が1分以上失敗し続けたら、主催者管理者へ知らせる（そのまま止まると、そのあいだの入札が失われるため。本番運用の評価 A7・A8）
+if (saver) setInterval(() => {
+  const st = saver.status();
+  if (st.failingSince && nowMs() - st.failingSince > 60000) {
+    api.alertAdmins('persist', '保存先にデータを保存できていません', [
+      `${new Date(st.failingSince + 9 * 3600000).toISOString().slice(11, 16)} から、保存先（Cloudflare R2）にデータを保存できていません。`,
+      'このあいだにサーバーが止まると、それまでの入札や操作が失われるおそれがあります。',
+      '競りの最中なら、新しい品を始めず、進行中の品を締めてから、開発の担当者に連絡してください。',
+      `理由: ${st.lastError ?? '不明'}`,
+    ]);
+  }
+}, 30000).unref();
+
+// 書き込みの控えを始める。その前に、いまのデータベース（起動のときの準備の書き込みを含む）の写しを、保存先へ送っておく
+if (journal) {
+  journalAlert = (on, why) => {
+    if (on) api.alertAdmins('journal', '入札の控えを、保存先に書けていません', [
+      '受理した入札や落札を、返事の前に、保存先（Cloudflare R2）へ書く処理が、失敗しています。',
+      '競りは続けられますが、このあいだにサーバーが止まると、直前の数秒の入札や落札が失われるおそれがあります。',
+      '競りの最中なら、進行中の品を締めてから、開発の担当者に連絡してください。',
+      `理由: ${why ?? '不明'}`,
+    ]);
+  };
+  // 新しい世代の印をデータベースに書き、その写しが保存先に届いてから、控えを始める（写しと控えが、必ず組になるように）。
+  // 写しを送れないあいだは、控えを始めずに、送れるまでやり直す（そのあいだの守りは、前と同じ、約2秒ごとの写しだけ）
+  journal.begin();
+  const startJournal = async () => {
+    await saver.flush();
+    if (saver.status().lastError) { setTimeout(startJournal, 2000).unref(); return; }
+    journal.start();
+  };
+  await startJournal();
+}
+// 復元のときに、知らせることがあった（古い控えから戻した・控えのやり直しが途中で止まった）: 主催者管理者へ知らせ、/healthz にも出す
+let restoreNotes = [];
+try {
+  const file = path.join(config.dataDir, RESTORE_NOTE);
+  if (fs.existsSync(file)) {
+    restoreNotes = JSON.parse(fs.readFileSync(file, 'utf8')).notes ?? [];
+    fs.rmSync(file, { force: true });
+    if (restoreNotes.length) {
+      console.error('[restore] ' + restoreNotes.join(' / '));
+      api.alertAdmins('restore', 'データを戻したときに、一部が戻りませんでした', [...restoreNotes, '競りの前に、直前の入札・落札・精算が正しく残っているかを、確かめてください。']);
+    }
+  }
+} catch (err) { console.error('[restore]', err); }
 server.listen(config.port, config.host, () => {
   saver?.start();
-  console.log(`[server] listening on ${config.host}:${server.address().port} ivsMode=${config.ivsMode} db=${config.dbPath}`);
+  console.log(`[server] listening on ${config.host}:${/** @type {import('node:net').AddressInfo} */ (server.address()).port} ivsMode=${config.ivsMode} db=${config.dbPath}`);
   console.log(`[server] metrics -> ${metrics.file ?? '（記録しない）'}`);
 });
 
+// ログインが切れた人（ログアウト・停止・パスワードの変更・期限切れ）の、開いたままの画面を、10秒ごとに見つけて切る。
+// 操作のたびにも確かめているが、何もしない画面にも、価格や（スタッフには）最低落札額が届き続けるのを止める
+setInterval(() => {
+  for (const c of clients) {
+    if (!c.recheck || c.ws.readyState !== 1) continue;
+    let ok = false;
+    try { ok = c.recheck(); } catch { ok = false; }
+    if (!ok) { try { c.ws.send(JSON.stringify({ type: 'error', code: 'SIGNED_OUT', message: 'ログインが切れました。ログインし直してください' })); } catch { /* 切れている */ } c.ws.close(4403, 'signed out'); }
+  }
+}, config.sessionRecheckMs).unref();
+
 // 思いがけないエラーで、サーバーごと止まらないようにする（競りの最中に、全員の接続が切れるのを防ぐ）。記録して、続ける
-process.on('uncaughtException', (err) => { if (err?.syscall === 'listen') { console.error(err); process.exit(1); } errorCount++; console.error('[uncaught]', err); });
-process.on('unhandledRejection', (err) => { errorCount++; console.error('[unhandled]', err); });
+// 思いがけないエラーは、主催者管理者へも知らせる（1時間に1回まで。中身は、エラーの種類と1行目だけ。本番運用の評価 C3）
+function alertUnexpected(label, err) {
+  try {
+    const first = String(err?.message ?? err).split('\n')[0].slice(0, 200);
+    api.alertAdmins('unexpected', 'サーバーで思いがけないエラーが起きました', [
+      'サーバーで、思いがけないエラーが起きました。サーバーは止めずに、動かし続けています。',
+      '競りの画面と、管理画面の「記録」で、おかしな動きがないかを確かめてください。続くときは、開発の担当者に知らせてください。',
+      '', `種類: ${label}（${err?.name ?? 'Error'}）`, `内容: ${first}`, `これまでの件数: ${errorCount}`,
+    ]);
+  } catch { /* 知らせられなくても、続ける */ }
+}
+process.on('uncaughtException', (err) => { if (/** @type {any} */ (err)?.syscall === 'listen') { console.error(err); process.exit(1); } errorCount++; console.error('[uncaught]', err); alertUnexpected('uncaughtException', err); });
+process.on('unhandledRejection', (err) => { errorCount++; console.error('[unhandled]', err); alertUnexpected('unhandledRejection', err); });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, async () => {
@@ -589,6 +743,9 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
     await metrics.close();
     // 止まる前に、まだ送っていない分を保存先へ送る
     // 1回で送れなければ、送れるまで（50秒まで）くり返す
+    // 作っている最中の請求書があれば、書き終わりを待つ（最後の保存に入るように）
+    await Promise.race([api.billing.filesIdle(), new Promise((r) => setTimeout(r, 5000))]);
+    if (journal) { await journal.flush(10000); journal.stop(); }
     if (saver) {
       saver.stop();
       const until = Date.now() + 50000;

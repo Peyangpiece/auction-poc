@@ -5,11 +5,31 @@ const yenFmt = new Intl.NumberFormat('ja-JP');
 const yen = (n) => (n === null || n === undefined ? '' : '¥' + yenFmt.format(n));
 const dateFmt = new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 const $ = (sel, root = document) => root.querySelector(sel);
+// 2026-11-23 → 11月23日（月）。年が今年でなければ、年も付ける
+/** 入力中に区切り（, や -）を付け直しても、カーソルを、同じ数字のあとに戻す（末尾へ飛ばない。報告書 82 章） */
+function setKeepCaret(input, text) {
+  const at = input.selectionStart ?? input.value.length;
+  const digitsBefore = input.value.slice(0, at).replace(/[^0-9０-９]/g, '').length;
+  input.value = text;
+  if (document.activeElement !== input) return;
+  let pos = 0, seen = 0;
+  while (pos < text.length && seen < digitsBefore) { if (/[0-9]/.test(text[pos])) seen++; pos++; }
+  try { input.setSelectionRange(pos, pos); } catch { /* 選べない種類の欄 */ }
+}
+const jpDay = (d) => {
+  if (!d) return '';
+  const [y, m, dd] = d.slice(0, 10).split('-').map(Number);
+  const w = '日月火水木金土'[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()];
+  return `${y !== new Date().getFullYear() ? `${y}年` : ''}${m}月${dd}日（${w}）`;
+};
+// 携帯の 11 桁は 3-4-4 に区切る。それ以外は、そのまま
+const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.slice(3, 7)}-${p.slice(7)}` : p);
 
 /** 要素を作る。文字は必ず textContent で入れる（入力された文字を HTML として解釈させない） */
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
+    if (v === false && k in node && typeof node[k] === 'boolean') { node[k] = false; continue; } // spellcheck: false など
     if (v === null || v === undefined || v === false) continue;
     if (k === 'class') node.className = v;
     else if (k === 'text') node.textContent = v;
@@ -59,7 +79,8 @@ function onSubmit(form, handler) {
         if (!target) continue;
         target.setAttribute('aria-invalid', 'true');
         const err = target.closest('.field, fieldset, .check')?.querySelector('.err');
-        if (err) err.textContent = text;
+        // 欄ごとの誤りは、読み上げの知らせ（alert）にせず、欄の説明としてつなぐ。知らせは、フォームの1行だけ（一度に何個も鳴らない。報告書 82 章）
+        if (err) { err.textContent = text; err.id ||= `err-${Math.random().toString(36).slice(2, 8)}`; if (!(target.getAttribute('aria-describedby') ?? '').includes(err.id)) target.setAttribute('aria-describedby', `${target.getAttribute('aria-describedby') ?? ''} ${err.id}`.trim()); }
         first ??= target;
       }
       if (msg) msg.textContent = res.message ?? 'うまくいきませんでした。やり直してください';
@@ -74,7 +95,9 @@ function field(label, name, props = {}, hint = '') {
   const { options, ...rest } = props;
   const input = el(tag, { class: 'input', name, ...rest }, (options ?? []).map(([value, text]) => el('option', { value, text })));
   if (props.value !== undefined && props.value !== null) input.value = props.value;
-  return el('label', { class: 'field' }, label, hint && el('small', { text: hint }), input, el('span', { class: 'err', role: 'alert' }));
+  // 説明の小さな文字は出さない（発注者の指示。報告書 78 章）。短い書き方の見本だけ、入力欄の中の薄い文字にする
+  if (hint && !input.placeholder && !input.value && hint.length <= 24 && !/[。、]/.test(hint)) input.placeholder = hint;
+  return el('label', { class: 'field' }, label, input, el('span', { class: 'err' }));
 }
 
 const PREFECTURES = '北海道 青森県 岩手県 宮城県 秋田県 山形県 福島県 茨城県 栃木県 群馬県 埼玉県 千葉県 東京都 神奈川県 新潟県 富山県 石川県 福井県 山梨県 長野県 岐阜県 静岡県 愛知県 三重県 滋賀県 京都府 大阪府 兵庫県 奈良県 和歌山県 鳥取県 島根県 岡山県 広島県 山口県 徳島県 香川県 愛媛県 高知県 福岡県 佐賀県 長崎県 熊本県 大分県 宮崎県 鹿児島県 沖縄県'.split(' ');
@@ -83,7 +106,8 @@ const PREFECTURES = '北海道 青森県 岩手県 宮城県 秋田県 山形県
 const mark = (required) => el('span', { class: required ? 'req' : 'opt', text: required ? '必須' : '任意' });
 /** ラベル・印・補足・入力欄・エラーをまとめた1欄 */
 function labeled(label, required, input, hint = '') {
-  return el('label', { class: 'field' }, el('span', { class: 'field__label' }, label, mark(required)), hint && el('small', { text: hint }), input, el('span', { class: 'err', role: 'alert' }));
+  if (hint && !input.placeholder && !input.value && hint.length <= 24 && !/[。、]/.test(hint)) input.placeholder = hint;
+  return el('label', { class: 'field' }, el('span', { class: 'field__label' }, label, mark(required)), input, el('span', { class: 'err' }));
 }
 
 /**
@@ -94,13 +118,13 @@ function personFields(m = {}) {
   const [last = '', first = ''] = String(m.name ?? '').split(/[\s　]+/);
   const [lastKana = '', firstKana = ''] = String(m.nameKana ?? '').split(/[\s　]+/);
   const input = (name, props) => el('input', { class: 'input', name, ...props });
-  const zip = input('postalCode', { value: m.postalCode ?? '', inputMode: 'numeric', autocomplete: 'postal-code', placeholder: '1000001', maxLength: 8, required: true });
+  const zip = input('postalCode', { value: m.postalCode ?? '', inputMode: 'numeric', autocomplete: 'postal-code', maxLength: 8, required: true });
   const pref = el('select', { class: 'input', name: 'prefecture', autocomplete: 'address-level1', required: true },
     el('option', { value: '', text: '選んでください' }), PREFECTURES.map((p) => el('option', { value: p, text: p })));
   pref.value = m.prefecture ?? '';
   const a1 = input('address1', { value: m.address1 ?? (m.postalCode ? '' : m.address ?? ''), // 前の版で登録した人は、まとめて書いた住所をここに出す
-    autocomplete: 'address-line1', placeholder: '千代田区千代田1-1', required: true });
-  const a2 = input('address2', { value: m.address2 ?? '', autocomplete: 'address-line2', placeholder: '○○マンション 101号室' });
+    autocomplete: 'address-line1', required: true });
+  const a2 = input('address2', { value: m.address2 ?? '', autocomplete: 'address-line2' });
   const zipNote = el('p', { class: 'note', role: 'status' });
   const picks = el('div', { class: 'picks' });
   let filled = ''; // 自動で入れた文字（利用者が書き足した分を、消さないため）
@@ -114,7 +138,7 @@ function personFields(m = {}) {
   let last7 = '';
   zip.addEventListener('input', async () => {
     const code = zip.value.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/\D/g, '').slice(0, 7);
-    zip.value = code.length > 3 ? `${code.slice(0, 3)}-${code.slice(3)}` : code;
+    setKeepCaret(zip, code.length > 3 ? `${code.slice(0, 3)}-${code.slice(3)}` : code);
     if (code.length !== 7 || code === last7) { if (code.length !== 7) last7 = ''; return; }
     last7 = code;
     zipNote.textContent = '住所を調べています…';
@@ -127,11 +151,11 @@ function personFields(m = {}) {
   });
   return [
     el('div', { class: 'pair' },
-      labeled('姓', true, input('lastName', { value: last, autocomplete: 'family-name', placeholder: '山田', required: true })),
-      labeled('名', true, input('firstName', { value: first, autocomplete: 'given-name', placeholder: '太郎', required: true }))),
+      labeled('姓', true, input('lastName', { value: last, autocomplete: 'family-name', required: true })),
+      labeled('名', true, input('firstName', { value: first, autocomplete: 'given-name', required: true }))),
     el('div', { class: 'pair' },
-      labeled('セイ', true, input('lastKana', { value: lastKana, autocomplete: 'off', placeholder: 'ヤマダ', required: true })),
-      labeled('メイ', true, input('firstKana', { value: firstKana, autocomplete: 'off', placeholder: 'タロウ', required: true }))),
+      labeled('セイ', true, input('lastKana', { value: lastKana, autocomplete: 'off', required: true })),
+      labeled('メイ', true, input('firstKana', { value: firstKana, autocomplete: 'off', required: true }))),
     el('h2', { class: 'formhead', text: 'ご住所' }),
     labeled('郵便番号', true, zip, '7桁の数字。入れると、住所を自動で入れます'),
     zipNote, picks,
@@ -190,24 +214,38 @@ async function setupNav() {
     nav.replaceChildren(...items);
   }
   if (me.member) tabBar();
+  fillFooter();
   return me;
+}
+// サイトの下に、主催者の名称と古物商の許可を出す（古物営業法。設定にあるときだけ。報告書 96 章）
+async function fillFooter() {
+  const foot = $('.sitefoot p');
+  if (!foot) return;
+  const legal = await api('GET', '/api/legal');
+  if (!legal.ok) return;
+  if (legal.orgName) foot.textContent = legal.orgName;
+  if (legal.kobutsuLicense) foot.after(el('p', { class: 'sitefoot__license', text: `古物商許可　${legal.kobutsuLicense}` }));
 }
 
 // ---- 下のタブバー（スマートフォン）。会員の行き先は4つだけなので、いつも画面の下に出しておく
+// 下のタブバーのアイコン。b は形（選んでいるタブでは塗りつぶす）、d は中の線（塗ったときは地の色で抜く）
 const ICONS = {
-  home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
-  bid: 'M14.5 3.5l6 6-2 2-6-6zM11 7l6 6-7.5 7.5a2 2 0 0 1-3 0l-3-3a2 2 0 0 1 0-3zM3 21h9',
-  bill: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6',
-  me: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
+  home: { b: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
+  // 木槌（頭・柄・台）。小さくても「競り」と分かる形
+  bid: { b: 'M13.6 2.4l6 6-3.6 3.6-6-6zM12.4 8.4l1.7 1.7-8.3 8.3a1.2 1.2 0 0 1-1.7-1.7zM11 19h10v2.5H11z' },
+  bill: { b: 'M6 3h12v18l-3-2-3 2-3-2-3 2z', d: 'M9 8h6M9 12h6' },
+  me: { b: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0z' },
 };
 const TABS = [['/', 'ホーム', 'home'], ['/bidder.html', '競り', 'bid'], ['/mypage.html#bills', '請求書', 'bill'], ['/mypage.html#profile', 'マイページ', 'me']];
 function icon(name) {
   const NS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
-  const path = document.createElementNS(NS, 'path');
-  path.setAttribute('d', ICONS[name]);
-  svg.append(path);
+  for (const [cls, d] of Object.entries(ICONS[name])) {
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', d); path.setAttribute('class', cls);
+    svg.append(path);
+  }
   return svg;
 }
 function markTab() {
@@ -222,6 +260,7 @@ function tabBar() {
   if ($('.tabbar')) return;
   document.body.append(el('nav', { class: 'tabbar', 'aria-label': 'おもなページ' }, TABS.map(([href, text, name]) => el('a', { href }, icon(name), el('span', { text })))));
   document.body.classList.add('has-tabbar');
+  if (location.pathname === '/' || location.pathname === '/index.html') document.body.classList.add('is-home');
   markTab();
 }
 
@@ -229,12 +268,17 @@ function tabBar() {
 function revealable(input) {
   if (input.dataset.reveal) return;
   input.dataset.reveal = '1';
-  const btn = el('button', { class: 'reveal', type: 'button', text: '表示', 'aria-pressed': 'false', 'aria-label': 'パスワードを表示する' });
+  // 文字ではなく、目のアイコン（見せている間は、斜線のない目）。名前は読み上げ用に付ける
+  const EYE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const EYE_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg>';
+  const btn = el('button', { class: 'reveal', type: 'button', 'aria-pressed': 'false', 'aria-label': 'パスワードを表示する' });
+  btn.innerHTML = EYE_OFF;
   btn.addEventListener('click', () => {
     const show = input.type === 'password';
     input.type = show ? 'text' : 'password';
-    btn.textContent = show ? '隠す' : '表示';
+    btn.innerHTML = show ? EYE : EYE_OFF;
     btn.setAttribute('aria-pressed', String(show));
+    btn.setAttribute('aria-label', show ? 'パスワードを隠す' : 'パスワードを表示する');
   });
   const wrap = el('span', { class: 'revealwrap' });
   input.replaceWith(wrap);
@@ -244,3 +288,60 @@ const revealAll = (root = document) => root.querySelectorAll('input[type=passwor
 revealAll();
 // あとから出る入力欄（ダイアログの中）にも付ける
 new MutationObserver((list) => { for (const m of list) for (const n of m.addedNodes) if (n.nodeType === 1) revealAll(n); }).observe(document.body, { childList: true, subtree: true });
+
+// ---- ホーム画面に追加の案内（発注者の指示）。#installSlot のあるページ（トップの下のほう）にだけ出す。
+// Android の Chrome などは、ブラウザが出す「インストール」の画面を、ボタンから呼ぶ。iPhone・iPad には、その仕組みが無いので、手順を出す。
+// ホーム画面から開いている間と、「閉じる」を押したあとは出さない（閉じたことは、この端末のブラウザにだけ覚える）。
+let installEvent = null;
+const INSTALL_KEY = 'installHidden';
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroid = () => /Android/.test(navigator.userAgent);
+function installHidden() { try { return localStorage.getItem(INSTALL_KEY) === '1'; } catch { return false; } }
+function hideInstall(remember) {
+  if (remember) { try { localStorage.setItem(INSTALL_KEY, '1'); } catch { /* 覚えられなくても、閉じるだけはする */ } }
+  $('#installCard')?.remove();
+}
+function showInstall() {
+  const slot = $('#installSlot');
+  if (!slot || isStandalone() || installHidden()) return;
+  const how = installEvent ? 'prompt' : isIos() ? 'ios' : isAndroid() ? 'android' : null;
+  if (!how) return; // パソコンで、ブラウザに仕組みが無いときは出さない
+  const steps = how === 'ios'
+    ? ['「共有」ボタン（四角に上向きの矢印）を押す。無ければ「…」の中', '「ホーム画面に追加」を選ぶ（一覧の下のほう）', '「追加」を押す']
+    : how === 'android' ? ['ブラウザのメニュー（右上の「︙」）を押す', '「ホーム画面に追加」か「アプリをインストール」を選ぶ'] : [];
+  const close = el('button', { class: 'install__close', type: 'button', 'aria-label': '閉じる', onclick: () => hideInstall(true) });
+  close.innerHTML = '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2l10 10M12 2 2 12"/></svg>';
+  const card = el('section', { class: 'install card', id: 'installCard', 'aria-labelledby': 'installTitle' }, close,
+    el('img', { class: 'install__icon', src: 'icon-192.png', width: 56, height: 56, alt: '' }),
+    el('div', { class: 'install__body' },
+      el('h2', { id: 'installTitle', text: 'ホーム画面に追加' }),
+      steps.length ? el('ol', { class: 'install__steps' }, steps.map((text) => el('li', { text }))) : null,
+      how === 'prompt' ? el('div', { class: 'actions' },
+        el('button', { class: 'btn btn-primary', type: 'button', text: '追加する', onclick: async () => {
+          const ev = installEvent; installEvent = null;
+          if (!ev) return;
+          ev.prompt();
+          const { outcome } = await ev.userChoice.catch(() => ({ outcome: 'dismissed' }));
+          hideInstall(outcome === 'accepted');
+        } })) : null));
+  $('#installCard')?.remove();
+  slot.append(card);
+}
+addEventListener('beforeinstallprompt', (ev) => { ev.preventDefault(); installEvent = ev; showInstall(); });
+addEventListener('appinstalled', () => hideInstall(true));
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showInstall); else showInstall();
+
+/** タブの並び（role=tablist）を、矢印キー（横並びでも縦並びでも、上下左右）・Home・End で移れるようにする（選んだタブだけが Tab で止まる。報告書 81 章） */
+function tabKeys(list) {
+  list.addEventListener('keydown', (ev) => {
+    const tabs = [...list.querySelectorAll('[role=tab]')];
+    const i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = { ArrowRight: i + 1, ArrowLeft: i - 1, ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: tabs.length - 1 }[ev.key];
+    if (next === undefined) return;
+    ev.preventDefault();
+    const t = tabs[(next + tabs.length) % tabs.length];
+    t.focus(); t.click();
+  });
+}

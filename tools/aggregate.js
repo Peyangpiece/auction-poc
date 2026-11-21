@@ -95,7 +95,7 @@ out.close.judge = { 'P2-10 締めの操作から結果の表示まで p95 ≤ 10
 // ---------------------------------------------------------------- P1: 配信の自動制御
 const agentCmds = by('agent_cmd');
 const ivs = by('ivs_state');
-const after = (arr, t, pred = () => true) => arr.find((r) => r.at >= t && pred(r));
+const after = (arr, t, pred = (_r) => true) => arr.find((r) => r.at >= t && pred(r));
 out.streamStarts = by('stream_wait_start').map((w) => {
   const cmd = after(agentCmds, w.startedAt - 5, (c) => c.action === 'start');
   const livePoll = after(ivs, w.startedAt, (r) => r.method === 'poll' && r.live);

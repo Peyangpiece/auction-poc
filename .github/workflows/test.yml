@@ -17,6 +17,8 @@ jobs:
         run: |
           npm ci
           (cd agent && npm ci)
+      - name: コードの決まりと型の確かめ（ESLint・TypeScript の型検査）
+        run: npm run check
       - name: サーバーの自動テスト（入札・締め・復旧・配信の制御）
         run: npm test
       - name: ブラウザを入れる

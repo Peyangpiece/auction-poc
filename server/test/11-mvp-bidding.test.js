@@ -52,7 +52,7 @@ async function setup() {
     const b = browser(srv.httpUrl);
     await b.post('/api/register/start', { phone });
     await b.post('/api/register/verify', { phone, code: lastCode(phone) });
-    assert.equal((await b.post('/api/register/complete', { kind: 'b2c', name, email: 'a@example.com', address: '東京都千代田区1-1', adult: true })).status, 200);
+    assert.equal((await b.post('/api/register/complete', { kind: 'b2c', name, email: 'a@example.com', address: '東京都千代田区1-1', adult: true, agreed: true })).status, 200);
     return b;
   };
   // 参加できるのは開催の当日だけなので、開催日は今日（日本時間）にする
@@ -110,6 +110,7 @@ test('入札と締め: 会員が参加番号で入札し、締めで落札が確
     const auctioneer = await connect(t.srv, t.ctx.tokens.auctioneer);
     const lot = await createLot(auctioneer, 9500);
     assert.equal(lot.lotNo, 1, 'No. は、開催ごとに1から');
+    await auctioneer.cmd('event_start');
     await auctioneer.cmd('start', { lotId: lot.id });
     await until(() => wa.lots.get(lot.id)?.status === 'open');
 
@@ -145,6 +146,9 @@ test('開催が変わると、参加手続きも参加番号も No. も、その
     await b.post('/api/join', { receive: 'ship', payment: 'transfer' });
     const auctioneer = await connect(t.srv, t.ctx.tokens.auctioneer);
     const stale = await t.ws(a); // 前の開催の参加番号で、つないだままにしておく
+    assert.equal((await stale.comment('前の開催のコメント')).ok, true);
+    stale.send({ type: 'sync' });
+    assert.ok((await stale.waitFor((x) => x.type === 'snapshot')).comments.some((c) => c.text === '前の開催のコメント'));
     await createLot(auctioneer, 1000);
     assert.equal((await createLot(auctioneer, 1000)).lotNo, 2);
 
@@ -158,7 +162,12 @@ test('開催が変わると、参加手続きも参加番号も No. も、その
     assert.equal((await createLot(auctioneer, 1000)).lotNo, 1, 'No. も、開催ごとに1から');
     const wb = await t.ws(b);
     assert.equal(wb.lots.size, 1, '前の開催の品は、画面に出ない');
+    wb.send({ type: 'sync' });
+    const fresh = await wb.waitFor((x) => x.type === 'snapshot');
+    assert.deepEqual(fresh.comments, [], 'コメントも、開催ごとに最初から');
+    assert.ok(Number.isInteger(fresh.event.id), '開催の切り替わりを、画面が知るための番号');
     const lot = [...wb.lots.values()][0];
+    await auctioneer.cmd('event_start'); // 新しい開催も、始めてから
     await auctioneer.cmd('start', { lotId: lot.id });
     await until(() => wb.lots.get(lot.id)?.status === 'open');
     assert.equal((await stale.bid(lot.id, 1000)).code, 'NOT_JOINED', '前の開催の参加番号では、入札できない');
@@ -254,6 +263,46 @@ test('会場参加: QR コード → 参加手続き（当日現金も選べる�
   } finally { await t.end(); }
 });
 
+test('来場確認の QR コード: 本人の画面に出し、受付係が読み取って参加者を探す（報告書 91 章）', async () => {
+  const t = await setup();
+  try {
+    const a = await t.register('09055550001', '検証 一郎');
+    const b = await t.register('09055550002', '検証 二郎');
+    await t.publishEvent('本日の競り');
+    const made = (await t.staff.post('/api/staff/accounts', { loginId: 'uketsuke', name: '受付 三郎', role: 'reception' })).json;
+    const reception = browser(t.srv.httpUrl);
+    await reception.post('/api/staff/login', { loginId: 'uketsuke', password: made.initialPassword, code: totp(made.totpSecret) });
+    const venueCode = new URL((await reception.get('/api/reception')).json.event.venueUrl).searchParams.get('venue');
+
+    assert.equal((await a.get('/api/my/checkin-qr')).status, 409, '参加手続きの前は、出さない');
+    await a.post('/api/join', { receive: 'pickup', payment: 'cash', venueCode });
+    await b.post('/api/join', { receive: 'ship', payment: 'transfer' });
+    assert.equal((await b.get('/api/my/checkin-qr')).status, 409, 'オンライン参加には、出さない');
+    const qr = await a.get('/api/my/checkin-qr');
+    assert.equal(qr.status, 200);
+    assert.match(qr.json.qrSvg, /^<svg/);
+    assert.equal(qr.json.paddle, 1);
+    const again = await a.get('/api/my/checkin-qr');
+    assert.equal(again.json.qrSvg, qr.json.qrSvg, '同じ開催の中では、同じコード');
+
+    // QR の中身（読み取った文字）を、データベースから取り出して使う
+    const db = new Database(path.join(t.ctx.dataDir, 'auction.db'), { readonly: true });
+    const code = 'reiwa-checkin:' + db.prepare('SELECT checkin_code FROM members WHERE paddle_no = 1 AND account_id IS NOT NULL').get().checkin_code;
+    db.close();
+    assert.ok(code.length > 'reiwa-checkin:'.length + 10, '中身は、推し量れない長さの乱数');
+    assert.ok(!code.includes('検証') && !/:1$/.test(code), '名前や参加番号は入れない');
+    assert.equal((await a.post('/api/reception/scan', { code })).status, 401, '会員は、読み取りの窓口を使えない');
+    assert.equal((await reception.post('/api/reception/scan', { code: 'https://example.com/' })).status, 404, '来場確認のコードでなければ、断る');
+    assert.equal((await reception.post('/api/reception/scan', { code: 'reiwa-checkin:wrong' })).status, 404);
+    const hit = await reception.post('/api/reception/scan', { code });
+    assert.equal(hit.status, 200);
+    assert.deepEqual([hit.json.paddle, hit.json.name, hit.json.mode, hit.json.checkedIn, hit.json.payment], [1, '検証 一郎', 'venue', false, 'cash']);
+    assert.equal((await a.get('/api/participation')).json.checkedIn, false, '読み取っただけでは、来場確認にしない（受付係が名前を見てから押す）');
+    assert.equal((await reception.post(`/api/reception/${hit.json.id}/checkin`)).status, 200);
+    assert.equal((await reception.post('/api/reception/scan', { code })).json.checkedIn, true, '2回目に読むと、確認済みと分かる');
+  } finally { await t.end(); }
+});
+
 test('オンライン参加から会場参加への変更は、受付係が来場を確認したときだけ。支払方法を選び直す（FR-MODE-004、FR-PAY-002）', async () => {
   const t = await setup();
   try {
@@ -311,12 +360,53 @@ test('進行コンソールは、スタッフのログインでつなぐ。受�
   } finally { await t.end(); }
 });
 
+test('オークショニア: 主催者管理者が登録し、次の品の開始・中断・再開と、競りの最中の4つの操作（開始価格・うりきり・締め・流札）だけができる', async () => {
+  const t = await setup();
+  try {
+    const { online, con } = await venueSetup(t);
+    const made = (await t.staff.post('/api/staff/accounts', { loginId: 'hammer', name: '競り 太郎', role: 'caller' })).json;
+    assert.equal(made.role, 'caller');
+    const caller = browser(t.srv.httpUrl);
+    await caller.post('/api/staff/login', { loginId: 'hammer', password: made.initialPassword, code: totp(made.totpSecret) });
+    assert.equal((await caller.get('/api/me')).json.staff.roleLabel, 'オークショニア');
+    assert.equal((await caller.get('/api/settings')).status, 403, '管理の画面の操作はできない');
+    const c = new Client(t.srv.url, undefined, { ack: false, headers: { cookie: caller.cookie } });
+    c.hello = { as: 'console' };
+    await c.connect();
+    const lot = await createLot(con, 10000, null, '時計', 20000);
+    assert.match((await c.cmd('create_lot', { title: 'x', startPrice: 1000 })).message, /オークショニアにはできません/, '品の追加は、進行役が行う');
+    assert.match((await c.cmd('exclude', { lotId: lot.id, reason: 'x' })).message, /オークショニアにはできません/);
+    assert.match((await c.cmd('cancel', { lotId: lot.id, reason: 'x' })).message, /オークショニアにはできません/, '取りやめ（入札を無効にする）は、進行役が行う');
+    assert.equal((await c.cmd('set_start', { lotId: lot.id, amount: 9000 })).ok, true);
+    // 開催を始める前は、品を開始できない。開催を始めるのは、進行役（発注者の決定。報告書 124 章）
+    assert.match((await c.cmd('start', { lotId: lot.id })).message, /開催を、まだ始めていません/);
+    assert.match((await c.cmd('event_start')).message, /オークショニアにはできません/);
+    assert.equal((await con.cmd('event_start')).ok, true);
+    assert.equal((await c.cmd('start', { lotId: lot.id })).ok, true, '次の品の開始は、オークショニアもできる');
+    const w1 = await t.ws(online);
+    await until(() => w1.lots.get(lot.id)?.status === 'open');
+    assert.equal((await c.cmd('suspend', { lotId: lot.id })).ok, true, '中断できる');
+    await until(() => w1.lots.get(lot.id)?.status === 'suspended');
+    assert.equal((await w1.bid(lot.id, 9000)).code, 'LOT_NOT_OPEN', '中断中は、入札を受け付けない');
+    assert.equal((await c.cmd('resume', { lotId: lot.id })).ok, true, '再開できる');
+    await until(() => w1.lots.get(lot.id)?.status === 'open');
+    assert.equal((await w1.bid(lot.id, 9000)).accepted, true);
+    assert.equal((await c.cmd('urikiri', { lotId: lot.id })).ok, true);
+    assert.equal((await c.cmd('close', { lotId: lot.id })).status, 'sold');
+    const lot2 = await createLot(con, 5000, null, 'テスト品', 8000); // うりきりのランプが点いていない品だけ、流札にできる
+    await c.cmd('start', { lotId: lot2.id });
+    assert.equal((await c.cmd('pass', { lotId: lot2.id })).status, 'unsold');
+    c.close(); con.close();
+  } finally { await t.end(); }
+});
+
 test('代理入札（FR-CON-005）と取り消し（AC-FR-CON-006-1）', async () => {
   const t = await setup();
   try {
     const { online, con } = await venueSetup(t);
     const w1 = await t.ws(online);
     const lot = await createLot(con, 10000);
+    await con.cmd('event_start');
     await con.cmd('start', { lotId: lot.id });
     await until(() => w1.lots.get(lot.id)?.status === 'open');
     assert.equal((await w1.bid(lot.id, 10000)).accepted, true);
@@ -372,12 +462,21 @@ test('休憩と開催終了（FR-CON-003、FR-EVT-003）', async () => {
     w1.handlers.add((m) => { if (m.type === 'event') events.push(m); });
     const a = await createLot(con, 1000);
     await createLot(con, 1000);
+    assert.equal((await w1.comment('始まる前のコメント')).ok, true, '開催を始める前も、コメントは書ける（発注者の決定）');
+    // 始める前は、休憩も終了もできない。始めると、時刻が残る（経過時間の起点）。2度は始められない
+    assert.match((await con.cmd('event_break', { resumeAt: '13:00' })).message, /まだ始めていません/);
+    assert.match((await con.cmd('event_end')).message, /まだ始めていません/);
+    assert.equal((await con.cmd('event_start')).ok, true);
+    await until(() => events.at(-1)?.event?.phase === 'running');
+    assert.ok(events.at(-1).event.startedAt > 0 && /^\d\d:\d\d$/.test(events.at(-1).event.startsAt));
+    assert.match((await con.cmd('event_start')).message, /もう始まっています/);
     assert.match((await con.cmd('event_break', {})).message, /次の開始予定時刻/);
     assert.equal((await con.cmd('event_break', { resumeAt: '13:00' })).ok, true);
     await until(() => events.at(-1)?.event?.phase === 'break');
     assert.equal(events.at(-1).event.resumeAt, '13:00', '次の開始予定時刻が、参加者に届く');
     await con.cmd('start', { lotId: a.id });
     await until(() => events.at(-1)?.event?.phase === 'running', 10000);
+    assert.equal((await (await fetch(t.srv.httpUrl + '/healthz')).json()).busy, true, '開催の進行中は、配る作業を止める印（busy）を出す（本番運用の評価 A2）');
     assert.match((await con.cmd('event_break', { resumeAt: '14:00' })).message, /進行中の品/);
     assert.match((await con.cmd('event_end')).message, /進行中の品/);
     await until(() => w1.lots.get(a.id)?.status === 'open');
@@ -391,6 +490,17 @@ test('休憩と開催終了（FR-CON-003、FR-EVT-003）', async () => {
     assert.equal((await online.get('/api/participation')).json.event, null, '終了した開催には、参加できない');
     assert.match((await con.cmd('event_end')).message, /本日の開催はありません/, '開催終了は、やり直せない');
     assert.equal((await w1.bid(a.id, 2000)).accepted, false);
+    // 終えたあとは、開いたままの画面からのコメントも断る（報告書 124 章）
+    { const r = await w1.comment('終わったあとのコメント'); assert.equal(r.ok, false); assert.match(r.message, /終了しました/); }
+    // 終えたあとは、品の登録も断る（開催に属さない品が残り、次の開催を止めないように。本番運用の評価 A6。報告書 103 章）
+    const late = await con.cmd('create_lot', { title: '終わったあとの品', startPrice: 1000 });
+    assert.equal(late.ok, false);
+    assert.match(late.message, /終了しています/);
+    // 終わったあとにつなぎ直したスタッフの画面（会場モニターなど）には、「本日は終了」を最初の状態で送る（報告書 80 章）
+    const con2 = new Client(t.srv.url, undefined, { ack: false, headers: { cookie: t.staff.cookie } });
+    con2.hello = { as: 'console' };
+    assert.equal((await con2.connect()).ended, true, 'つなぎ直しても、終了の表示を続けられる');
+    con2.close();
     w1.close(); con.close();
   } finally { await t.end(); }
 });
@@ -439,9 +549,10 @@ test('数でない金額の入札が届いても、サーバーは止まらな�
     const auctioneer = await connect(t.srv, t.ctx.tokens.auctioneer);
     const wa = await t.ws(a);
     const lot = await createLot(auctioneer, 1000);
+    await auctioneer.cmd('event_start');
     await auctioneer.cmd('start', { lotId: lot.id });
     await until(() => wa.lots.get(lot.id)?.status === 'open');
-    for (const bad of ['abc', null, {}, 1e400, 1000.5]) assert.equal((await wa.bid(lot.id, bad)).accepted, false);
+    for (const bad of ['abc', null, {}, Infinity, 1000.5]) assert.equal((await wa.bid(lot.id, bad)).accepted, false);
     wa.send({ type: 'bid' }); wa.send({ type: 'cmd' }); wa.send({ type: 'comment', text: { toString: 1 } });
     assert.equal((await wa.bid(lot.id, 1000)).accepted, true, 'そのあとの入札は、受ける');
     assert.equal((await fetch(t.srv.httpUrl + '/healthz')).status, 200);
@@ -458,6 +569,7 @@ test('ログアウトした会員は、開いたままの入札画面からは�
     const auctioneer = await connect(t.srv, t.ctx.tokens.auctioneer);
     const wa = await t.ws(a);
     const lot = await createLot(auctioneer, 1000);
+    await auctioneer.cmd('event_start');
     await auctioneer.cmd('start', { lotId: lot.id });
     await until(() => wa.lots.get(lot.id)?.status === 'open');
     assert.equal((await a.post('/api/logout')).status, 200);

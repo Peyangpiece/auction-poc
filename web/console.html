@@ -4,14 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#04052a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <title>進行コンソール｜令和の競り</title>
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-title" content="令和の競り">
-<!-- impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 -->
-<link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="console.css">
 </head>
@@ -25,25 +23,48 @@
     <span class="brand__service">進行コンソール</span>
   </h1>
   <div class="meta">
+    <!-- トップページへ戻る。競りの最中（配信準備中・受付中・中断）は、誤って押して画面を離れないように出さない（報告書 100 章） -->
+    <a class="homelink" id="homeLink" href="/"><svg viewBox="0 0 12 20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg>ホーム</a>
     <span>参加者 <b class="num" id="presence">0</b> 人<span id="presenceSplit"></span></span>
+    <!-- いまの時刻（予定の時刻・休憩の再開時刻と見比べる）と、開催を始めてからの経過時間（進み具合を見る）。両方出す（報告書 124 章） -->
+    <span id="elapsed" hidden>開始から <b class="num" id="elapsedTime"></b></span>
     <span id="clock"></span>
   </div>
   </div>
 </header>
 
-<main>
+<!-- 競りの時間外（本日の開催がない・終わった）: 進行の操作は出さず、そのことと次の開催だけを出す（発注者の指示） -->
+<section class="offhours" id="offhours" hidden aria-live="polite">
+  <p class="offhours__title" id="offTitle"></p>
+  <div class="offhours__next" id="offNext" hidden>
+    <span class="offhours__label">次の開催</span>
+    <b class="offhours__date" id="offDate"></b>
+    <span class="offhours__info dyn" id="offInfo"></span>
+  </div>
+  <p class="offhours__note">進行コンソールは、開催の当日（公開した開催があり、終了するまで）だけ開けます。</p>
+  <a class="btn" href="/staff.html">管理へ戻る</a>
+</section>
+<main id="consoleMain">
   <div class="col">
-    <section class="eventbar" id="eventBar" aria-label="開催" hidden>
-      <div>
-        <b class="dyn" id="evTitle"></b>
-        <span class="state" id="evPhase"></span>
-        <span id="evWarn" role="status"></span>
+    <!-- オンライン参加者と同じ映像（左の列のいちばん上、進行中の品（うりきり・最高入札者の板）の上。発注者の指示。IVS から再生。参加者と同じく数秒遅れて届く）。映像をつないでいる設定のときだけ出す（報告書 101 章） -->
+    <section class="viewbox" id="viewBox" aria-labelledby="viewTitle" hidden>
+      <!-- 見出しは画面に出さない（発注者の指示）。読み上げ用にだけ残す -->
+      <h2 class="sr-only" id="viewTitle">参加者に届いている映像</h2>
+      <div class="viewframe">
+        <video id="viewVideo" playsinline muted aria-label="オンライン参加者に届いている映像"></video>
+        <!-- 待機中の画面（参加者の画面と同じもの。発注者の指示。報告書 132 章） -->
+        <div id="viewStandby" class="standby" hidden aria-hidden="true">
+          <span class="standby__glow"></span>
+          <img class="standby__logo" src="logo-dark.svg" width="178" height="48" alt="">
+          <strong class="standby__title"></strong>
+          <span class="standby__event dyn"></span>
+          <span class="standby__sub"></span>
+          <span class="standby__dots"><i></i><i></i><i></i></span>
+        </div>
+        <p class="viewoff" id="viewOff">映像は停止中です</p>
+        <p class="sr-only" id="viewNote" role="status"></p>
+        <button class="btn viewsound" type="button" id="viewSound" aria-pressed="false">音声を出す</button>
       </div>
-      <form class="inline" id="breakForm">
-        <label class="field">次の開始予定<input class="input num" id="resumeAt" type="time" required></label>
-        <button class="btn" type="submit">休憩に入る</button>
-        <button class="btn btn-danger" id="b_end" type="button">開催終了…</button>
-      </form>
     </section>
     <section aria-label="進行中の品">
       <div class="board" id="board">
@@ -53,17 +74,18 @@
         </div>
         <div class="pricewrap">
           <div class="plabel" id="priceLabel">現在価格</div>
-          <div class="price" id="price" aria-live="polite"></div>
+          <div class="price" id="price"></div>
         </div>
-        <p class="board-result" id="result" role="status"></p>
+        <p class="board-result" id="result"></p>
         <div class="lamps">
-          <div class="lamp" id="urikiri" role="status"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub"></small></div>
-          <div class="lamp" id="right" role="status"><span class="bulb"></span><b id="rightLabel">最高入札者</b><small class="num" id="rightSub"></small></div>
+          <div class="lamp" id="urikiri"><span class="bulb"></span><b id="urikiriLabel">うりきり</b><small class="num" id="urikiriSub"></small></div>
+          <div class="lamp" id="right"><span class="bulb"></span><b id="rightLabel">最高入札者</b><small class="num" id="rightSub"></small></div>
         </div>
       </div>
       <div class="actions">
         <button class="btn btn-primary btn-lg" id="b_next" type="button" hidden>次を開始</button>
         <button class="btn btn-primary btn-lg" id="b_close" data-act="close" type="button">締め</button>
+        <button class="btn" id="b_urikiri" data-act="urikiri" type="button">うりきり</button>
         <button class="btn" id="b_suspend" data-act="suspend" type="button">中断</button>
         <button class="btn btn-primary" id="b_resume" data-act="resume" type="button">再開</button>
         <button class="btn btn-primary" id="b_nv" data-act="start_without_video" type="button">映像なしで開始</button>
@@ -76,14 +98,13 @@
     <section aria-labelledby="histTitle">
       <div class="sechead"><h2 id="histTitle">入札の履歴</h2><span class="count num" id="histCount">0件</span></div>
       <div class="tablewrap" id="histWrap" tabindex="0" aria-label="入札の履歴">
-        <table><thead><tr><th scope="col">受付連番</th><th scope="col">受付時刻</th><th scope="col">参加番号</th><th scope="col">入札額</th><th scope="col"><span class="sr-only">状態</span></th></tr></thead><tbody id="history"></tbody></table>
+        <table><thead><tr><th scope="col">受付時刻</th><th scope="col">参加番号</th><th scope="col">入札額</th><th scope="col"><span class="sr-only">状態</span></th></tr></thead><tbody id="history"></tbody></table>
       </div>
     </section>
 
     <section aria-labelledby="proxyTitle" id="proxySection">
       <details id="proxyBox">
         <summary><h2 id="proxyTitle">緊急用の代理入札</h2></summary>
-        <p class="note">会場参加で来場確認が済んでいる人に限ります。電池切れ・端末の故障のときに、本人に代わって入札します。</p>
         <form class="proxy" id="proxyForm">
           <label class="field">参加番号<input class="input num" id="pxPaddle" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" required></label>
           <label class="field">入札額（税込）<input class="input num" id="pxAmount" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" required></label>
@@ -92,6 +113,7 @@
           <label class="pxcheck"><input type="checkbox" id="pxCard">参加番号の札を確認した</label>
           <button class="btn btn-primary" type="submit">代理で入札する</button>
         </form>
+        <p class="pxmsg" id="pxMsg" role="alert"></p>
       </details>
     </section>
 
@@ -102,28 +124,54 @@
       </div>
     </section>
 
-    <section aria-labelledby="lotsTitle">
-      <h2 id="lotsTitle">出品一覧</h2>
-      <div class="tablewrap">
-        <table><thead><tr><th scope="col">No.</th><th scope="col">品名</th><th scope="col">開始価格</th><th scope="col">最低落札額</th><th scope="col">状態</th><th scope="col">結果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody id="lots"></tbody></table>
-      </div>
-      <form class="addlot" id="addLot">
-        <label class="field">品名<input class="input" id="newTitle" name="title" autocomplete="off" maxlength="60" placeholder="例: 未使用品／ブーツ 10.5R 1足" required></label>
-        <label class="field">開始価格（税込）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="例: 9500" required></label>
-        <label class="field">最低落札額（任意・非公開）<input class="input num" id="newReserve" name="reserve" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="なし"></label>
-        <button class="btn" id="create" type="submit">品を追加</button>
-      </form>
-    </section>
   </div>
 
   <div class="col">
+    <!-- 開催の帯（開催を始める・休憩に入る・開催終了）は、右の列のいちばん上（発注者の指示。報告書 132 章）。左の列は、映像をいちばん上に -->
+    <section class="eventbar" id="eventBar" aria-label="開催" hidden>
+      <div>
+        <b class="dyn" id="evTitle"></b>
+        <span class="state" id="evPhase"></span>
+        <span id="evWarn" role="status"></span>
+      </div>
+      <!-- 次の開始予定の時刻は、「休憩に入る」を押したときだけ聞く（ふだんは使わない欄を出さない）。開催終了は、離して置く（報告書 88 章） -->
+      <div class="evacts">
+        <!-- 開催を始める: 押すまでは、品を開始できない（発注者の決定。報告書 124 章）。始める前は、休憩・終了は出さない -->
+        <button class="btn btn-primary" id="b_evstart" type="button" hidden>開催を始める</button>
+        <button class="btn" id="b_break" type="button">休憩に入る…</button>
+        <button class="btn btn-danger" id="b_end" type="button">開催終了…</button>
+      </div>
+    </section>
+    <section aria-labelledby="lotsTitle">
+      <div class="sechead"><h2 id="lotsTitle">出品一覧</h2><span class="count num" id="lotsCount"></span></div>
+      <ul class="lotlist" id="lots"></ul>
+      <form class="addlot" id="addLot">
+        <h3 class="addlot__title">品を追加</h3>
+        <label class="field">品名<input class="input" id="newTitle" name="title" autocomplete="off" maxlength="60" placeholder="例: 未使用品／ブーツ 10.5R 1足" required></label>
+        <label class="field">開始価格（税込・任意）<input class="input num" id="newPrice" name="price" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="空欄でも可"></label>
+        <label class="field">最低落札額（任意・非公開）<input class="input num" id="newReserve" name="reserve" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" placeholder="なし"></label>
+        <p class="note" id="noEvent" hidden>本日の公開中の開催がありません。管理の「開催」で、本日の開催を公開してから追加してください。</p>
+        <p class="msg" id="addMsg" role="alert"></p>
+        <button class="btn" id="create" type="submit">品を追加</button>
+      </form>
+    </section>
     <section aria-labelledby="strTitle" id="streamBox">
       <div class="sechead"><h2 id="strTitle">配信</h2><span class="state" id="s_live">停止</span></div>
       <dl class="kv">
         <dt>配信エージェント</dt><dd><span class="state" id="s_agent">未接続</span></dd>
         <dt>OBS</dt><dd><span class="state" id="s_obs">不明</span></dd>
+        <dt>映像の大きさ</dt><dd id="s_video">—</dd>
       </dl>
+      <p class="msg" id="videoWarn" role="status"></p>
+      <!-- 映すカメラ（OBS の、名前が「カメラ」で始まるシーン）。押すと、配信を止めずに切り替わる（報告書 92 章） -->
+      <div class="cambox" id="cameraBox" hidden>
+        <h3 id="camTitle">カメラ</h3>
+        <div class="camgroup" id="cameras" role="group" aria-labelledby="camTitle"></div>
+        <p class="note" id="camNone" hidden>OBS に、名前が「カメラ」で始まるシーンがありません。カメラごとにシーンを作ると、ここで切り替えられます。</p>
+        <p class="msg" id="camMsg" role="alert"></p>
+      </div>
       <p id="idleWarn" role="status"></p>
+      <p class="sr-only" id="boardSay" role="status" aria-atomic="true"></p>
       <div class="actions">
         <button class="btn" data-cmd="stream_start" type="button">配信を開始</button>
         <button class="btn" data-cmd="stream_stop" type="button">配信を停止</button>
@@ -164,7 +212,7 @@
   <form method="dialog" id="dlgForm">
     <h2 id="dlgTitle"></h2>
     <p id="dlgBody"></p>
-    <label class="field" id="dlgReasonWrap" >理由（必須）<input class="input" id="dlgReason" name="reason" autocomplete="off" placeholder="例: 商品の取り違え"></label>
+    <label class="field" id="dlgReasonWrap"><span id="dlgReasonLabel">理由（必須）</span><input class="input" id="dlgReason" name="reason" autocomplete="off" placeholder="例: 商品の取り違え"></label>
     <p class="error" id="dlgError" role="alert"></p>
     <div class="actions">
       <button class="btn" type="button" id="dlgCancel">やめる</button>
@@ -174,5 +222,6 @@
 </dialog>
 <script src="common.js"></script>
 <script src="console.js"></script>
+<script src="ops-alert.js"></script>
 </body>
 </html>

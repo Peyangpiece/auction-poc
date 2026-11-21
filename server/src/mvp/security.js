@@ -23,6 +23,23 @@ export function verifyPassword(password, stored) {
   const actual = crypto.scryptSync(String(password), Buffer.from(salt, 'base64url'), 32, SCRYPT);
   return crypto.timingSafeEqual(actual, Buffer.from(hash, 'base64url'));
 }
+/**
+ * ログインのときの照合: 別のスレッドで計算する（報告書 121 章）。
+ * verifyPassword は、計算のあいだ（約30〜40ミリ秒）、入札の受け付けを含む、ほかの処理を止める。ログインが重なると、入札の返事が遅れていた。
+ * 同時に計算するのは2つまで（ファイルの読み書きに使うスレッドを、使い切らないように）。それより多いログインは、順番を待つ
+ */
+let verifying = 0;
+const verifyQueue = [];
+export async function verifyPasswordAsync(password, stored) {
+  const [scheme, salt, hash] = String(stored).split('$');
+  if (scheme !== 'scrypt' || !salt || !hash) return false;
+  if (verifying >= 2) await new Promise((resolve) => verifyQueue.push(resolve));
+  verifying++;
+  try {
+    const actual = await new Promise((resolve, reject) => crypto.scrypt(String(password), Buffer.from(salt, 'base64url'), 32, SCRYPT, (err, key) => (err ? reject(err) : resolve(key))));
+    return crypto.timingSafeEqual(actual, Buffer.from(hash, 'base64url'));
+  } finally { verifying--; verifyQueue.shift()?.(); }
+}
 
 // ---- 二段階認証（TOTP、RFC 6238。認証アプリと同じ: SHA-1・6桁・30秒）
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -91,7 +108,8 @@ export function normalizePhone(input) {
   if (!/^0\d{9,10}$/.test(digits)) return null;
   return digits;
 }
-export const isEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(text ?? '')) && String(text).length <= 254;
+// メールアドレスの形。送信の入口（cloudflare/mail.js）が断る字（, ; < >）は、ここでも断る（入口で必ず失敗する宛先を、送り直し続けないように）
+export const isEmail = (text) => /^[^\s@,;<>"()[\]\\]+@[^\s@,;<>"()[\]\\]+\.[^\s@,;<>"()[\]\\.]{2,}$/.test(String(text ?? '')) && String(text).length <= 254;
 
 /**
  * 利用者の接続元。手前にプロキシがあるとき（POC_TRUST_PROXY=1）は、プロキシが付けた x-real-ip を使う
@@ -100,5 +118,13 @@ export const isEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(tex
  */
 export function clientIp(req, config) {
   const real = config.trustProxy ? String(req.headers['x-real-ip'] ?? '').trim() : '';
-  return real && real.length <= 64 ? real : req.socket.remoteAddress;
+  const ip = real && real.length <= 64 ? real : String(req.socket.remoteAddress ?? '');
+  // IPv6 は、先頭の 64 ビット（1つの回線に配られるまとまり）で数える。1人が、アドレスを変えながら制限をすり抜けるのを防ぐ
+  if (ip.includes(':') && !ip.startsWith('::ffff:')) {
+    const [head, tail = ''] = ip.split('::');
+    const h = head ? head.split(':') : [], t = tail ? tail.split(':') : [];
+    const full = [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t];
+    return full.slice(0, 4).map((x) => x.replace(/^0+(?=.)/, '').toLowerCase()).join(':') + '::/64';
+  }
+  return ip;
 }

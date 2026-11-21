@@ -6,12 +6,12 @@ let profile = null;
 function showDevVerify(url) {
   $('#emailBanner').append(el('a', { class: 'btn', href: url, text: '【お試し用】確認のリンクを開く' }));
 }
-// 電話番号を、読みやすく区切る（携帯の 11 桁は 3-4-4。それ以外は、そのまま）
-const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.slice(3, 7)}-${p.slice(7)}` : p);
 (async () => {
   const me = await setupNav();
   const m = me.member;
   if (!m) return location.replace('/login.html');
+  // 「競りに参加する」は、開催の日だけ出す（開催のない日に押しても「本日の開催はありません」になるだけ。報告書 85 章）
+  api('GET', '/api/participation').then((p) => { $('#goBid').hidden = !p.ok || !p.event; });
   const q = new URLSearchParams(location.search);
   const notice = q.get('registered') ? '登録が済みました。確認のメールをお送りしました。'
     : q.get('email') === 'verified' ? 'メールアドレスを確認しました。'
@@ -34,14 +34,28 @@ const telFmt = (p) => (/^0[5789]0\d{8}$/.test(p ?? '') ? `${p.slice(0, 3)}-${p.s
   const dev = sessionStorage.getItem('devVerifyUrl'); sessionStorage.removeItem('devVerifyUrl');
   if (dev && !m.emailVerified) showDevVerify(dev);
   const rows = [
-    ['ログイン ID', m.loginId], ['区分', m.kind === 'b2b' ? '法人' : '個人'],
-    ['会社名', m.company], ['担当者名', m.contactName], ['氏名', m.name], ['フリガナ', m.nameKana], ['電話番号', telFmt(m.phone) + (m.phoneVerified ? '' : '（未確認。ログインには、メールアドレスをお使いください）')],
-    ['メールアドレス', m.email + (m.emailVerified ? '（確認済み）' : '（未確認）')],
+    // 書き添えは、本人が何かをする必要のあるときだけ（「個人」「確認済み」など、いつも同じ言葉は出さない。報告書 85 章）
+    ['ログイン ID', m.loginId], ['区分', m.kind === 'b2b' ? '法人' : null],
+    ['会社名', m.company], ['担当者名', m.contactName], ['氏名', m.name], ['フリガナ', m.nameKana], ['電話番号', telFmt(m.phone)],
+    ['メールアドレス', m.email + (m.emailVerified ? '' : '（未確認）')],
     ['住所', m.address], ['配送先', m.shipTo], ['請求先', m.billing],
   ];
   profile = m;
+  $('#eventMail').checked = m.eventMail;
   $('#facts').replaceChildren(...rows.filter(([, v]) => v).flatMap(([k, v]) => [el('dt', { text: k }), el('dd', { class: 'pre dyn', text: v })]));
 })();
+
+// 開催のお知らせメールの受け取り。切り替えたら、すぐ保存する（失敗したら、元に戻す）
+$('#eventMail').addEventListener('change', async (ev) => {
+  const box = ev.target;
+  // 保存中は aria-busy で示す（disabled にすると、キーボードのフォーカスが外れる。報告書 81 章）。続けて切り替えたら、保存が終わるまで戻す
+  if (box.getAttribute('aria-busy') === 'true') { box.checked = !box.checked; return; }
+  box.setAttribute('aria-busy', 'true');
+  const res = await api('POST', '/api/my/event-mail', { on: box.checked });
+  box.removeAttribute('aria-busy');
+  if (!res.ok) { box.checked = !box.checked; $('#accountMsg').textContent = res.message; return; }
+  $('#notice').textContent = res.eventMail ? '開催のお知らせメールを、お送りします。' : '開催のお知らせメールを、止めました。';
+});
 
 $('#resendEmail').addEventListener('click', async (ev) => {
   ev.target.disabled = true;
@@ -54,36 +68,91 @@ $('#resendEmail').addEventListener('click', async (ev) => {
 // ---- 落札した品とお支払い（請求書、支払期限、受け取り期限、繰り上げのご案内）
 const STATE_TEXT = { unsettled: 'お支払い前', billed: 'ご請求済み', unpaid: 'お支払いの期限を過ぎています', cleared: 'お支払い済み', delivered: 'お渡し済み', cancelled: '解除されました' };
 const RECEIVE_TEXT = { pickup: '現地受け取り', ship: '配送' };
-const INVOICE_STATE = { paid: 'お支払い済み', overdue: 'お支払いの期限を過ぎています', billed: 'お支払い前' };
+const INVOICE_STATE = { paid: 'お支払い済み', overdue: 'お支払いの期限を過ぎています', billed: 'お支払い前', cancelled: '落札の解除により、お支払いは不要です', void: '精算を取り消しました（この領収書は無効です）' };
 // 請求書の一覧: 請求番号・発行日・金額・お支払期限・状態と、PDF を開くボタン
-function showInvoices(list) {
+// 品は、その請求書の中に並べる（同じ品を「落札した品」に二度出さない。報告書 85 章）。
+// 品ごとの状態は、請求書の状態と違うとき（お渡し済み・解除など）と、受け取りの期限だけを書き添える
+const ITEM_NOTE = { delivered: 'お渡し済み', cancelled: '解除されました' };
+// 受け取り方: 配送の人には、送料が別にかかること。現地の人には、会場で受け取ること
+const RECEIVE_NOTE = { pickup: '受け取り: 会場で', ship: '受け取り: 配送（送料は、別にご請求します）' };
+function invoiceItems(lines) {
+  if (!lines.length) return null;
+  return el('ul', { class: 'invitems' }, lines.map((l) => {
+    const note = [l.premium ? `落札額 ${yen(l.amount)}＋買歩銭 ${yen(l.premium)}` : '', ITEM_NOTE[l.state], l.receive && l.state !== 'delivered' && l.state !== 'cancelled' && RECEIVE_NOTE[l.receive], l.pickupBy && l.state === 'cleared' ? `受け取り期限 ${jpDay(l.pickupBy)}` : ''].filter(Boolean).join('　');
+    return el('li', {}, el('span', { class: 'dyn', text: l.label }), el('span', { class: 'digits', text: yen(l.payable) }),
+      note ? el('span', { class: l.pickupLate ? 'warn' : 'note', text: note }) : null);
+  }));
+}
+function showInvoices(list, lines = [], bank = null) {
   if (!list.length) return;
-  $('#invoices').replaceChildren(el('ul', { class: 'rows invlist' }, list.map((i) => el('li', {},
+  // お支払い前の請求書があれば、振込先を一覧の上に出す（請求書の PDF を開かなくても振り込めるように。本番運用の評価 C）
+  const unpaid = list.filter((i) => i.state === 'billed' || i.state === 'overdue');
+  // 振込先がまだ設定されていないときは、そのことを書く（期限と金額だけが出て、払い方が分からない、を無くす）
+  const noBank = !bank && unpaid.length ? el('div', { class: 'banner bankbox', role: 'note' },
+    el('b', { text: 'お振込先' }), el('p', { text: 'お振込先は、準備中です。主催者からのご案内をお待ちください。お急ぎの場合は、主催者へお問い合わせください。' })) : null;
+  const bankBox = bank && unpaid.length ? el('div', { class: 'banner bankbox', role: 'note' },
+    el('b', { text: 'お振込先' }), el('p', { class: 'dyn bank', text: bank }),
+    el('p', { class: 'note', text: `ご依頼人名の前に、請求書番号（${unpaid.map((i) => i.number).join('・')}）を入れてください。` })) : null;
+  $('#invoices').replaceChildren(...[bankBox, noBank].filter(Boolean), el('ul', { class: 'rows invlist' }, list.map((i) => el('li', {},
     el('div', { class: 'invlist__main' },
-      el('b', { class: 'digits', text: i.number }),
-      el('span', { class: 'note', text: [`発行日 ${i.issuedOn}`, i.dueDate && i.state !== 'paid' ? `お支払期限 ${i.dueDate}` : ''].filter(Boolean).join('　') })),
+      el('b', { text: `${jpDay(i.issuedOn)}の請求書` }),
+      el('span', { class: 'note', text: [`No.${i.number}`, i.dueDate && !['paid', 'cancelled', 'void'].includes(i.state) ? `お支払期限 ${jpDay(i.dueDate)}` : ''].filter(Boolean).join('　') })),
     el('span', { class: 'digits invlist__total', text: yen(i.total) }),
+    // 一部を解除した請求書: PDF の金額と違うので、わけを書く（本番運用の評価 C）
+    i.state !== 'cancelled' && i.issuedTotal != null && i.issuedTotal !== i.total && el('span', { class: 'note', text: `請求書の金額 ${yen(i.issuedTotal)} から、解除した品を除いた金額です` }),
     el('span', { class: i.state === 'overdue' ? 'warn' : 'invlist__state', text: INVOICE_STATE[i.state] }),
-    el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: '請求書を開く（PDF）' })))));
+    invoiceItems(lines.filter((l) => l.invoice?.id === i.id)),
+    el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/pdf`, text: i.kind === 'cash' ? (i.state === 'void' ? '無効の領収書を開く（PDF）' : '請求書 兼 領収書を開く（PDF）') : '請求書を開く（PDF）' }),
+    // 振込などで払った人の領収書（お支払いの確認が済んだあと。当日現金の人は、上の請求書が領収書を兼ねる）
+    i.state === 'paid' && i.kind !== 'cash' && el('a', { class: 'btn', href: `/api/billing/invoices/${i.id}/receipt`, text: '領収書を開く（PDF）' })))));
+}
+// 繰り上げ落札の回答: どちらも取り消せないので、金額と結果を書いて確かめる。最初のフォーカスは「やめる」（報告書 80 章）
+function answerOffer(o, answer) {
+  const accept = answer === 'accept';
+  const msg = el('p', { class: 'msg', role: 'alert', tabIndex: -1 });
+  const cancel = el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() });
+  const ok = el('button', { class: accept ? 'btn btn-primary' : 'btn btn-danger', type: 'button', text: accept ? '承諾する' : '辞退する', onclick: async () => {
+    ok.disabled = true;
+    const res = await api('POST', `/api/my/offers/${o.id}`, { answer });
+    ok.disabled = false;
+    if (!res.ok) { msg.textContent = res.message; msg.focus(); return; }
+    dlg.close();
+    $('#notice').textContent = accept ? `${o.label} を承諾しました。請求書をお送りします。` : `${o.label} を辞退しました。`;
+    loadBilling();
+  } });
+  dlg.replaceChildren(el('h2', { id: 'dlgTitle', text: accept ? '繰り上げ落札を承諾しますか？' : '繰り上げ落札を辞退しますか？' }),
+    el('p', { text: o.label }),
+    accept
+      ? el('p', { text: `お支払い ${yen(o.payable)}（落札額 ${yen(o.amount)}＋買歩銭 ${yen(o.premium)}）。承諾すると、請求書をお送りします。取り消しはできません。` })
+      : el('p', { text: '辞退すると、この品は落札できません。取り消しはできません。' }),
+    msg, el('div', { class: 'actions' }, cancel, ok));
+  dlg.showModal();
+  cancel.focus();
 }
 async function loadBilling() {
   const res = await api('GET', '/api/my/billing');
-  if (res.ok) showInvoices(res.invoices ?? []);
-  if (!res.ok || (!res.lines.length && !res.offers.length)) return;
+  if (res.ok) showInvoices(res.invoices ?? [], res.lines ?? [], res.bank);
+  if (!res.ok) return;
+  // 「落札した品」には、まだ請求書になっていない品と、繰り上げのご案内だけを出す
+  res.lines = res.lines.filter((l) => !l.invoice);
+  $('#billing').hidden = !res.lines.length && !res.offers.some((o) => o.state === 'open');
+  if ($('#billing').hidden) return;
   $('#billing').hidden = false;
   $('#offers').replaceChildren(...res.offers.filter((o) => o.state === 'open').map((o) => el('div', { class: 'banner' },
-    el('span', { text: `繰り上げ落札のご案内: ${o.label} を ${yen(o.amount)}（税込）で。回答期限 ${o.deadline}` }),
+    el('span', { text: `繰り上げ落札のご案内: ${o.label}　お支払い ${yen(o.payable)}（落札額 ${yen(o.amount)}＋買歩銭 ${yen(o.premium)}）　回答期限 ${jpDay(o.deadline)}` }),
     el('span', {},
-      el('button', { class: 'btn btn-primary', type: 'button', text: '承諾する', onclick: async () => { await api('POST', `/api/my/offers/${o.id}`, { answer: 'accept' }); loadBilling(); } }), ' ',
-      el('button', { class: 'btn', type: 'button', text: '辞退する', onclick: async () => { await api('POST', `/api/my/offers/${o.id}`, { answer: 'decline' }); loadBilling(); } })))));
+      el('button', { class: 'btn btn-primary', type: 'button', text: '承諾する', onclick: () => answerOffer(o, 'accept') }), ' ',
+      el('button', { class: 'btn', type: 'button', text: '辞退する', onclick: () => answerOffer(o, 'decline') })))));
+  // まだ請求書になっていない品があるとき: いつ・どう払うかを書く
+  $('#payGuide').hidden = !res.lines.some((l) => l.state === 'unsettled');
   $('#myLines').replaceChildren(...res.lines.map((l) => el('li', {},
     el('b', { text: l.label }), el('span', { class: 'digits', text: yen(l.payable) }),
-    el('span', { class: l.state === 'unpaid' ? 'warn' : '', text: STATE_TEXT[l.state] }),
+    el('span', { class: 'tag', 'data-state': l.state, text: STATE_TEXT[l.state] }),
     el('span', { class: 'note', text: [
       l.premium ? `落札額 ${yen(l.amount)}＋買歩銭 ${yen(l.premium)}` : '',
       l.receive && l.kind !== 'penalty' && l.kind !== 'late' ? `受け取り: ${RECEIVE_TEXT[l.receive]}` : '',
-      l.invoice?.dueDate && l.state !== 'cleared' && l.state !== 'delivered' ? `お支払期限 ${l.invoice.dueDate}` : '',
-      l.pickupBy && l.state === 'cleared' ? `受け取り期限 ${l.pickupBy}` : '',
+      l.invoice?.dueDate && l.state !== 'cleared' && l.state !== 'delivered' ? `お支払期限 ${jpDay(l.invoice.dueDate)}` : '',
+      l.pickupBy && l.state === 'cleared' ? `受け取り期限 ${jpDay(l.pickupBy)}` : '',
     ].filter(Boolean).join('　') }))));
 }
 
@@ -94,16 +163,17 @@ $('#editBtn').addEventListener('click', () => {
   const corp = m.kind === 'b2b';
   const form = el('form', { class: 'form', novalidate: true },
     corp && field('会社名', 'company', { value: m.company, required: true }),
-    corp && field('担当者名', 'contactName', { value: m.contactName, required: true }),
-    corp && field('請求先', 'billing', { value: m.billing, rows: 2, required: true, autocomplete: 'off' }),
-    field('メールアドレス', 'email', { value: m.email, type: 'email', required: true, autocomplete: 'email' }, '変えると、新しいアドレスに確認のメールを送ります'),
+    corp && field('担当者名', 'contactName', { value: m.contactName, required: true, autocomplete: 'name' }),
+    corp && field('請求先', 'billing', { value: m.billing, rows: 2, required: true, autocomplete: 'billing street-address' }),
+    field('メールアドレス', 'email', { value: m.email, type: 'email', inputMode: 'email', spellcheck: false, required: true, autocomplete: 'email' }, '変えると、新しいアドレスに確認のメールを送ります'),
+    // メールアドレスを変えるときは、いまのパスワードで確かめ直す（パスワードのある人だけ。報告書 121 章）
+    m.hasPassword && field('いまのパスワード（メールアドレスを変えるときだけ）', 'currentPassword', { type: 'password', autocomplete: 'current-password' }),
     ...personFields(m),
-    field('配送先', 'shipTo', { value: m.shipTo ?? '', rows: 2, autocomplete: 'off' }, '住所と違う場合だけ'),
-    el('p', { class: 'note', text: '電話番号の変更は、本人の確認が要るため、会場の受付にお申し出ください。' }),
+    field('配送先', 'shipTo', { value: m.shipTo ?? '', rows: 2, autocomplete: 'shipping street-address' }, '住所と違う場合だけ'),
     el('p', { class: 'msg', role: 'alert', tabIndex: -1 }),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '保存する' }), el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() })));
   onSubmit(form, async (data) => { const res = await api('POST', '/api/my/profile', data); if (res.ok) location.reload(); return res; });
-  dlg.replaceChildren(el('h2', { text: '登録内容の変更' }), form);
+  dlg.replaceChildren(el('h2', { id: 'dlgTitle', text: '登録内容の変更' }), form);
   dlg.showModal();
 });
 // ---- パスワードの変更（ログイン ID は、発行されたものを使い続ける。まだ無い人は、ここで決める）
@@ -122,23 +192,24 @@ function openPassword(reset = false) {
     if (res.ok) { dlg.close(); profile = res.member; $('#notice').textContent = 'パスワードを保存しました。次からは、ログイン ID とこのパスワードで、ログインできます。'; $('#pwBtn').textContent = 'パスワードを変更する'; }
     return res;
   });
-  dlg.replaceChildren(el('h2', { text: m.hasPassword ? 'パスワードの変更' : 'ログイン ID とパスワードを決める' }), form);
+  dlg.replaceChildren(el('h2', { id: 'dlgTitle', text: m.hasPassword ? 'パスワードの変更' : 'ログイン ID とパスワードを決める' }), form);
   dlg.showModal();
 }
 $('#pwBtn').addEventListener('click', () => openPassword(false));
 $('#withdrawBtn').addEventListener('click', () => {
   const msg = el('p', { class: 'msg', role: 'alert' });
-  dlg.replaceChildren(el('h2', { text: '退会しますか？' }),
+  dlg.replaceChildren(el('h2', { id: 'dlgTitle', text: '退会しますか？' }),
     el('p', { text: '退会すると、ログインできなくなります。お取引の記録は、法令で定められた期間、保管します。' }), msg,
     el('div', { class: 'actions' },
-      el('button', { class: 'btn btn-danger', type: 'button', text: '退会する', onclick: async () => { const res = await api('POST', '/api/my/withdraw'); if (res.ok) location.href = '/'; else msg.textContent = res.message; } }),
-      el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() })));
+      el('button', { class: 'btn', type: 'button', text: 'やめる', onclick: () => dlg.close() }),
+      el('button', { class: 'btn btn-danger', type: 'button', text: '退会する', onclick: async () => { const res = await api('POST', '/api/my/withdraw'); if (res.ok) location.href = '/'; else msg.textContent = res.message; } })));
   dlg.showModal();
+  dlg.querySelector('.actions .btn').focus(); // 最初のフォーカスは「やめる」（Enter で退会しないように。報告書 81 章）
 });
 
 // ---- タブ（開いているタブを URL に載せる。#bills / #profile）
 function showTab(key) {
-  for (const b of $('#myTabs').children) b.setAttribute('aria-selected', String(b.dataset.tab === key));
+  for (const b of $('#myTabs').children) { b.setAttribute('aria-selected', String(b.dataset.tab === key)); b.tabIndex = b.dataset.tab === key ? 0 : -1; }
   $('#panel-bills').hidden = key !== 'bills';
   $('#panel-profile').hidden = key !== 'profile';
   if (location.hash.slice(1) !== key) history.replaceState(null, '', `#${key}`);
@@ -147,6 +218,7 @@ function showTab(key) {
   if (matchMedia('(max-width: 640px)').matches) $('.pagehead h1').textContent = key === 'bills' ? '請求書' : 'マイページ';
 }
 for (const b of $('#myTabs').children) b.addEventListener('click', () => showTab(b.dataset.tab));
+tabKeys($('#myTabs'));
 // 下のタブバー（請求書／マイページ）から来たときも、開くタブを切り替える
 addEventListener('hashchange', () => { if (location.hash === '#profile' || location.hash === '#bills') showTab(location.hash.slice(1)); });
 $('#logoutBtn').addEventListener('click', async () => { await api('POST', '/api/logout'); location.href = '/'; });

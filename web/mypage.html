@@ -4,15 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#04052a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="robots" content="noindex">
 <title>マイページ｜令和の競り</title>
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-title" content="令和の競り">
-<!-- impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 -->
-<link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="site.css">
 </head>
@@ -32,22 +30,29 @@
   <hr class="rule">
 </div>
 <div class="banner" id="suspended" role="alert" hidden><span>ご利用を停止しています。会場の受付にお問い合わせください。</span></div>
-<div class="banner" id="emailBanner" hidden>
+<div class="notice" id="emailBanner" hidden>
+  <span class="notice__icon" aria-hidden="true"></span>
   <span id="emailText">メールアドレスの確認が済んでいません。</span>
-  <button class="btn" type="button" id="resendEmail">確認メールを送り直す</button>
+  <button class="textlink" type="button" id="resendEmail">確認メールを送る</button>
 </div>
 <p class="msg ok" id="notice" role="status"></p>
-<div class="lead" id="goBid"><div class="actions"><a class="btn btn-primary btn-lg" href="/bidder.html">競りに参加する</a></div></div>
+<div class="lead" id="goBid" hidden><div class="actions"><a class="btn btn-primary btn-lg" href="/bidder.html">競りに参加する</a></div></div>
 <div class="tabs" role="tablist" aria-label="マイページ" id="myTabs">
   <button type="button" role="tab" id="tab-bills" data-tab="bills" aria-controls="panel-bills" aria-selected="true">請求書</button>
   <button type="button" role="tab" id="tab-profile" data-tab="profile" aria-controls="panel-profile" aria-selected="false">個人情報の設定</button>
 </div>
 <section id="panel-bills" role="tabpanel" aria-labelledby="tab-bills">
-  <div class="card" id="invoices"><p class="empty">請求書は、まだありません。</p></div>
+  <div class="card" id="invoices"><div class="emptystate"><span class="emptystate__icon" aria-hidden="true"></span><b>請求書は、まだありません</b></div></div>
   <section class="card" id="billing" hidden>
     <h2 class="subhead">落札した品</h2>
     <div id="offers"></div>
     <ul class="rows mylines dyn" id="myLines"></ul>
+    <div class="banner payguide" id="payGuide" role="note" hidden>
+      <b>お支払いについて</b>
+      <p>請求書は、その日の競りが終わったあとに発行します。発行すると、このページに、お振込先とお支払いの期限が出ます（メールでもお知らせします）。</p>
+      <p>当日現金・当日クレジットの方は、お帰りの前に、会場の受付で精算してください。</p>
+      <p>落札額に、送料は含まれません。配送の方には、送料を足した請求書をお送りします。</p>
+    </div>
   </section>
 </section>
 <section id="panel-profile" role="tabpanel" aria-labelledby="tab-profile" hidden>
@@ -57,15 +62,16 @@
     <li><button type="button" id="pwBtn">パスワードを変更する</button></li>
     <li><button type="button" id="logoutBtn">ログアウト</button></li>
   </ul>
-  <p class="msg" id="accountMsg" role="alert"></p>
   <ul class="menu card">
-    <li><a href="/legal.html#terms">利用規約</a></li>
-    <li><a href="/legal.html#privacy">プライバシーポリシー</a></li>
-    <li><a href="/legal.html#tokushoho">特定商取引法に基づく表示</a></li>
+    <li><label class="menu__switch" for="eventMail"><span>開催のお知らせメール</span><input type="checkbox" role="switch" id="eventMail"></label></li>
+  </ul>
+  <p class="msg" id="accountMsg" role="alert"></p>
+  <!-- 規約類へのリンクは、どの画面でも下の帯にあるので、ここには置かない（報告書 85 章） -->
+  <ul class="menu card">
     <li><button type="button" class="menu__quiet" id="withdrawBtn">退会の手続き</button></li>
   </ul>
 </section>
-<dialog class="wide" id="dlg"></dialog>
+<dialog class="wide" id="dlg" aria-labelledby="dlgTitle"></dialog>
 </main>
 <footer class="sitefoot">
   <p translate="no">株式会社レイワ</p>

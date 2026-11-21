@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#04052a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <title>令和の競り｜株式会社レイワのライブオークション</title>
 <meta name="description" content="株式会社レイワのライブオークション「令和の競り」。会場でも、オンラインでも参加できます。開催の予定と、参加の方法をご案内します。">
 <meta property="og:title" content="令和の競り｜株式会社レイワのライブオークション">
@@ -15,8 +15,6 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-title" content="令和の競り">
-<!-- impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 -->
-<link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="site.css">
 </head>
@@ -46,29 +44,14 @@
 
 <section class="wins card" id="wins" hidden aria-labelledby="winsTitle">
   <h2 id="winsTitle"></h2>
-  <div class="tablewrap"><table>
-    <thead><tr><th scope="col">品</th><th scope="col" class="n">落札額</th><th scope="col" class="n">買歩銭</th><th scope="col" class="n">お支払い額</th></tr></thead>
-    <tbody class="dyn" id="winsRows"></tbody>
-    <tfoot><tr><th scope="row" id="winsCount"></th><td class="n digits" id="winsAmount"></td><td class="n digits" id="winsPremium"></td><td class="n digits total" id="winsPayable"></td></tr></tfoot>
-  </table></div>
-  <p class="note">送料は含みません。請求書は、マイページでご覧になれます。</p>
+  <ul class="winlist dyn" id="winsRows"></ul>
+  <p class="wintotal"><span id="winsCount"></span><span class="wintotal__sub num"><span id="winsAmount"></span><span id="winsPremium"></span></span><b class="digits" id="winsPayable"></b></p>
+  <p class="note">送料は含みません。</p>
   <div class="actions"><a class="btn" href="/mypage.html#bills">請求書を見る</a></div>
 </section>
-<section class="cal card" aria-labelledby="calTitle">
-  <div class="cal__head">
-    <h2 id="calTitle">開催カレンダー</h2>
-    <div class="cal__nav">
-      <button class="btn" type="button" id="calPrev" aria-label="前の月">前の月</button>
-      <p class="digits" id="calMonth" aria-live="polite"></p>
-      <button class="btn" type="button" id="calNext" aria-label="次の月">次の月</button>
-    </div>
-  </div>
-  <table class="cal__grid">
-    <thead><tr><th scope="col">日</th><th scope="col">月</th><th scope="col">火</th><th scope="col">水</th><th scope="col">木</th><th scope="col">金</th><th scope="col">土</th></tr></thead>
-    <tbody id="calBody"></tbody>
-  </table>
-  <p class="cal__legend"><span class="cal__key"></span>開催日</p>
-  <ul class="rows cal__list dyn" id="calList"></ul>
+<section class="next card" aria-labelledby="nextTitle">
+  <h2 id="nextTitle">次の開催</h2>
+  <ul class="nextlist dyn" id="nextList"></ul>
 </section>
 
 <div class="lead" id="lead" hidden>
@@ -83,6 +66,7 @@
   <div><h2>送料</h2><p class="pre dyn" id="shipping"></p></div>
   <div><h2>返品</h2><p class="pre dyn" id="returns"></p></div>
 </section>
+<div id="installSlot"></div>
 </main>
 <footer class="sitefoot">
   <p translate="no">株式会社レイワ</p>

@@ -53,21 +53,34 @@ try {
   await con.waitForSelector('#b_next:not([hidden])');
   check((await text(con, 'b_next')).includes('No.1'), '板の下に「No.1 を開始」が出る');
   await shot(con, 'console-waiting');
+  check(await con.isVisible('#homeLink'), '競りの前は、進行コンソールに「ホーム」が出る');
   await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('配信準備中'));
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
   check((await text(con, 's_obs')) === '配信中', '競りを始めると、配信が自動で始まる');
-  check((await con.isHidden('#b_next')) && (await con.isVisible('#b_close')), '受付中は「締め」と「中断」だけが出る');
+  check(await con.isHidden('#homeLink'), '競りの最中は、「ホーム」を出さない（誤って画面を離れないように）');
+  check((await con.isHidden('#b_next')) && (await con.isVisible('#b_close')) && (await con.isVisible('#b_urikiri')), '受付中は「締め」「うりきり」「中断」が出る（うりきりは、ランプが消えている品だけ）');
+
+  console.log('カメラの切り替え');
+  await con.waitForFunction(() => document.querySelectorAll('#cameras .camopt').length === 3);
+  check((await con.$$eval('#cameras .camopt', (bs) => bs.map((b) => b.textContent).join(','))) === 'スマホ,無線,USB', '進行コンソールに、OBS のカメラ（スマホ・無線・USB）が並ぶ。カメラでないシーンは出ない');
+  check((await con.getAttribute('#cameras [data-camera="カメラ: スマホ"]', 'aria-pressed')) === 'true', 'いま映しているカメラが分かる');
+  await con.click('#cameras [data-camera="カメラ: USB"]');
+  await con.waitForFunction(() => document.querySelector('#cameras [data-camera="カメラ: USB"]')?.getAttribute('aria-pressed') === 'true');
+  check((await text(con, 's_obs')) === '配信中' && (await text(con, 'status')).includes('受付中'), 'カメラを切り替えても、配信と競りは止まらない');
+  await con.waitForFunction(() => document.getElementById('s_video').textContent === '960×720');
+  check(true, 'OBS の出力解像度は、配信が止まっていたときに 960×720 にそろえてあり、進行コンソールに出る');
+  await shot(con, 'console-camera');
 
   console.log('入札');
-  await b1.waitForFunction(() => document.getElementById('bid').textContent === '入札');
+  await b1.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');
   check(true, '入ってすぐ、入札できる（切り替えは要らない）');
   await b1.click('#bid');
   await b1.waitForFunction(() => document.getElementById('right').classList.contains('on'));
   check(!(await b1.evaluate(() => document.getElementById('urikiri').classList.contains('on'))), '最低落札額に届く前は、「うりきり」は消えている');
   check(!(await b1.content()).includes('11,000'), '最低落札額の金額は、参加者の画面のどこにも出ない');
   await shot(b1, 'bidder-urikiri-before');
-  await b2.waitForFunction(() => document.getElementById('bid').textContent === '入札');
+  await b2.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');
   await shot(b2, 'bidder-joined');
   await b2.waitForTimeout(700); // 金額が変わった直後は押せない時間がある
   await b2.click('#bid');
@@ -97,7 +110,12 @@ try {
   await shot(pc, 'bidder-pc');
 
   console.log('締め');
+  if (await con.isVisible('#b_urikiri')) { await con.click('#b_urikiri'); await con.click('#dlgOk'); await con.waitForTimeout(300); } // 最低落札額のない品は、うりきりを押してから締める（報告書 89 章）
   await con.click('#b_close');
+  await con.waitForSelector('#dlg[open]');
+  check((await con.textContent('#dlgBody')).includes('1番') && (await con.textContent('#dlgBody')).includes('落札'), '締めは、結果（だれが・いくらで落札か）を書いて確かめる');
+  check(await con.evaluate(() => document.activeElement?.id === 'dlgCancel'), '締めの確かめは、最初のフォーカスが「やめる」');
+  await con.click('#dlgOk');
   await b1.waitForFunction(() => document.getElementById('result').textContent.includes('あなたが落札'));
   await b2.waitForFunction(() => document.getElementById('result').textContent.includes('1番 落札'));
   check(true, '落札した本人には「あなたが落札しました」、ほかの人には番号が出る');
@@ -110,6 +128,9 @@ try {
   check(true, '競りがないまま配信が続くと、進行コンソールに注意が出る');
   await shot(con, 'console-after-close');
   await con.click('[data-cmd="stream_stop"]');
+  await con.waitForSelector('#dlg[open]');
+  check((await con.textContent('#dlgBody')).includes('全員の映像'), '「配信を停止」は、全員の映像が止まることを書いて確かめる');
+  await con.click('#dlgOk');
   await con.waitForFunction(() => document.getElementById('s_obs').textContent === '停止', null, { timeout: 10000 });
   await con.waitForFunction(() => document.getElementById('idleWarn').textContent === '', null, { timeout: 5000 });
   check(true, '「配信を停止」で止まり、注意も消える');

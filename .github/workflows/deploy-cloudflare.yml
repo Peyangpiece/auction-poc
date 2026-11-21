@@ -30,12 +30,18 @@ jobs:
       # 公開しているサイトの URL（例: https://<名前>.<アカウント>.workers.dev）。入れておくと、競りの最中には配らない
       SITE_URL: ${{ secrets.SITE_URL }}
       FORCE: ${{ inputs.force }}
+      # 請求書の発行者の情報と印鑑（原本の値。JSON）。公開のリポジトリに入れないため、秘密の値で渡す
+      INVOICE_ORIGINAL: ${{ secrets.INVOICE_ORIGINAL }}
+      INVOICE_SEAL_1: ${{ secrets.INVOICE_SEAL_1 }}
+      INVOICE_SEAL_2: ${{ secrets.INVOICE_SEAL_2 }}
       # 映像（Amazon IVS）。5つとも入っているときだけ、つなぐ
       IVS_CHANNEL_ARN: ${{ secrets.IVS_CHANNEL_ARN }}
       IVS_PLAYBACK_URL: ${{ secrets.IVS_PLAYBACK_URL }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       EVENTBRIDGE_SECRET: ${{ secrets.EVENTBRIDGE_SECRET }}
+      # 配信用PCの配信エージェントの合言葉（32文字以上の乱数。報告書 94 章）。映像をつなぐときに入れる
+      AGENT_TOKEN: ${{ secrets.AGENT_TOKEN }}
       WRANGLER: npx --yes wrangler@4.163.0
     steps:
       - uses: actions/checkout@v4
@@ -47,38 +53,94 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN が入っていません"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID が入っていません"; exit 1; }
           test "${#ADMIN_PASSWORD}" -ge 12 || { echo "ADMIN_PASSWORD を、12文字以上で入れてください"; exit 1; }
-      - name: 競りの最中でないことを確かめる（SITE_URL があるときだけ）
-        if: env.SITE_URL != '' && env.FORCE != 'true'
+      # 競りの最中（品の受付中・中断中、または開催が「進行中」「休憩中」）は配らない（本番運用の評価 A2）。
+      # SITE_URL が無いときは、Cloudflare のアカウントの workers.dev のアドレスを、API で求める
+      - name: 公開しているアドレスを決める
         run: |
-          body="$(curl -fsS --max-time 60 "$SITE_URL/healthz" || true)"
+          url="$SITE_URL"
+          if [ -z "$url" ]; then
+            sub="$(curl -fsS --max-time 30 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" | jq -r '.result.subdomain // empty' || true)"
+            if [ -n "$sub" ]; then url="https://reiwa-no-seri.$sub.workers.dev"; fi
+          fi
+          echo "公開しているアドレス: ${url:-（分かりません）}"
+          echo "LIVE_URL=$url" >> "$GITHUB_ENV"
+      - name: 競りの最中でないことを確かめる
+        if: env.LIVE_URL != '' && env.FORCE != 'true'
+        run: |
+          # 取れないときは、3回やり直す。それでも取れなければ、配らない（競りの最中かどうかを確かめられないまま、配らないため）。
+          # サイトが止まっていて、直すために配るときは、手動の実行で force を選ぶ
+          body=""
+          for i in 1 2 3; do body="$(curl -fsS --max-time 60 "$LIVE_URL/healthz" || true)"; [ -n "$body" ] && break; sleep 10; done
           echo "$body"
+          if [ -z "$body" ]; then
+            echo "公開しているサイトの状態を、確かめられません。競りの最中かどうかが分からないので、配りません（それでも配るときは、手動の実行で force を選ぶ）"
+            exit 1
+          fi
           if echo "$body" | grep -q '"busy":true'; then
-            echo "競りが進行中です。配ると、全員の接続が切れ、進行中の品が中断になります。終わってから、やり直してください（手動の実行で force を選ぶと、それでも配ります）"
+            echo "競りが進行中です（品の受付中・中断中、または開催の進行中・休憩中）。配ると、全員の接続が切れます。開催を終えてから、やり直してください（手動の実行で force を選ぶと、それでも配ります）"
             exit 1
           fi
       - name: データの保存先（R2 のバケット）を作る（すでにあれば、そのまま）
         run: $WRANGLER r2 bucket create reiwa-no-seri-data || echo "すでにあるか、作れませんでした（次の段で分かる）"
-      - name: メールの送信（Resend）の API キーと、送り元を入れる（GitHub にあるときだけ。配る前に入れて、新しいコンテナが最初から使えるようにする）
-        if: env.RESEND_API_KEY != '' && env.MAIL_FROM != ''
+      # メール（Resend）と映像（IVS）の秘密の値を、1回でまとめて入れる（1つずつ入れると、そのたびに Worker の版が替わる。本番運用の評価 A2）
+      - name: メールと映像の秘密の値を入れる（GitHub にあるものだけ）
         run: |
-          printf '%s' "$RESEND_API_KEY" | $WRANGLER secret put RESEND_API_KEY
-          printf '%s' "$MAIL_FROM" | $WRANGLER secret put MAIL_FROM
-      - name: 映像（Amazon IVS）の設定を入れる（GitHub にあるときだけ）
-        if: env.IVS_CHANNEL_ARN != '' && env.IVS_PLAYBACK_URL != '' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+          if [ -n "$AGENT_TOKEN" ] && [ "${#AGENT_TOKEN}" -lt 32 ]; then echo "AGENT_TOKEN は、32文字以上にしてください"; exit 1; fi
+          names=""
+          if [ -n "$RESEND_API_KEY" ] && [ -n "$MAIL_FROM" ]; then names="RESEND_API_KEY MAIL_FROM"; fi
+          if [ -n "$IVS_CHANNEL_ARN" ] && [ -n "$IVS_PLAYBACK_URL" ] && [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+            names="$names IVS_CHANNEL_ARN IVS_PLAYBACK_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY EVENTBRIDGE_SECRET AGENT_TOKEN"
+          fi
+          if [ -z "$names" ]; then echo "入れる値はありません"; exit 0; fi
+          f="$RUNNER_TEMP/secrets.json"
+          node -e 'const o={};for(const n of process.argv.slice(2)){const v=process.env[n];if(v)o[n]=v}require("fs").writeFileSync(process.argv[1],JSON.stringify(o),{mode:0o600})' -- "$f" $names
+          $WRANGLER secret bulk "$f"
+          rm -f "$f"
+      - name: 請求書の発行者の情報と印鑑を、原本の値で置く（INVOICE_ORIGINAL があるときだけ。値は公開のリポジトリには入れない）
+        # INVOICE_ORIGINAL は JSON: org_name・org_address（改行は \n）・org_tel・org_email・invoice_reg_no・bank_account
+        # 印鑑の画像（JPEG か PNG）は、base64 にして2つに分けて INVOICE_SEAL_1・INVOICE_SEAL_2 に入れる（秘密の値は1つ 48KB まで）。つないで、そのまま置く
+        if: env.INVOICE_ORIGINAL != ''
         run: |
-          for name in IVS_CHANNEL_ARN IVS_PLAYBACK_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY EVENTBRIDGE_SECRET; do
-            value="$(printenv "$name" || true)"
-            if [ -n "$value" ]; then printf '%s' "$value" | $WRANGLER secret put "$name"; fi
-          done
+          f="$RUNNER_TEMP/original.json"
+          printf '%s' "$INVOICE_ORIGINAL" > "$f"
+          node -e 'const o=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const k=["org_name","org_address","org_tel","org_email","invoice_reg_no","bank_account"];const miss=k.filter(x=>typeof o[x]!=="string"||!o[x]);if(miss.length){console.error("INVOICE_ORIGINAL に、次の項目がありません: "+miss.join(", "));process.exit(1)}console.log("原本の項目: "+k.join(", "))' "$f"
+          $WRANGLER r2 object put reiwa-no-seri-data/data/brand/original.json --file "$f" --content-type application/json --remote
+          rm -f "$f"
+          if [ -n "$INVOICE_SEAL_1" ]; then
+            s="$RUNNER_TEMP/seal"
+            printf '%s%s' "$INVOICE_SEAL_1" "$INVOICE_SEAL_2" | tr -d ' \n\r' | base64 -d > "$s"
+            if head -c 3 "$s" | od -An -tx1 | grep -q 'ff d8 ff'; then name=original-seal.jpg; type=image/jpeg
+            elif head -c 8 "$s" | od -An -tx1 | grep -q '89 50 4e 47'; then name=original-seal.png; type=image/png
+            else echo "INVOICE_SEAL_1・2 が、JPEG でも PNG でもありません"; exit 1; fi
+            echo "印鑑: $name（$(wc -c < "$s") バイト）"
+            $WRANGLER r2 object put "reiwa-no-seri-data/data/brand/$name" --file "$s" --content-type "$type" --remote
+            rm -f "$s"
+          fi
       - name: コンテナを組み立てて、配る
         # BUILD（この版の印）が変わると、入口の Worker が、動いているコンテナを新しい版に入れ替える
+        # 印には、実行の番号も入れる（同じ版を配り直したときも入れ替える。秘密の値を足したあと、起動のときに読み直させるため）
         run: |
+          # 組み立てのあいだに競りが始まっていないかを、配る直前にもう一度確かめる（本番運用の評価 A2）
+          if [ -n "$LIVE_URL" ] && [ "$FORCE" != "true" ] && curl -fsS --max-time 30 "$LIVE_URL/healthz" 2>/dev/null | grep -q '"busy":true'; then
+            echo "競りが始まりました。配るのをやめます。開催を終えてから、やり直してください"; exit 1
+          fi
           if [ "$PRODUCTION" = "1" ]; then
             if [ -z "$RESEND_API_KEY" ] || [ -z "$MAIL_FROM" ]; then echo "本番の設定（PRODUCTION=1）には、RESEND_API_KEY と MAIL_FROM が要ります"; exit 1; fi
-            $WRANGLER deploy --var BUILD:${{ github.sha }} --var DEMO:0
+            demo=0
           else
-            $WRANGLER deploy --var BUILD:${{ github.sha }}
+            demo=1   # お試し用（認証番号を画面に出す）。本番の設定（PRODUCTION=1）でないときだけ
           fi
+          # 前の配りの反映が Cloudflare の側で終わっていないと、「設定が完全には反映されなかった」と言われて失敗することがある。
+          # そのときは、間をあけて、同じ配りをやり直す（3回まで）
+          for attempt in 1 2 3; do
+            set +e
+            $WRANGLER deploy --var BUILD:${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }} --var DEMO:$demo 2>&1 | tee deploy.log
+            rc=${PIPESTATUS[0]}
+            set -e
+            if [ "$rc" = 0 ] && ! grep -q "not fully applied" deploy.log; then break; fi
+            if ! grep -q "not fully applied" deploy.log || [ "$attempt" = 3 ]; then echo "配りに失敗しました"; exit 1; fi
+            echo "Cloudflare の側の反映が終わっていません。90秒待って、やり直します（$attempt 回目）"; sleep 90
+          done
       - name: 管理者の最初のパスワードを入れる
         run: printf '%s' "$ADMIN_PASSWORD" | $WRANGLER secret put ADMIN_PASSWORD
       - name: 最初の主催者管理者のメールアドレスを入れる（GitHub に ADMIN_EMAIL があるときだけ）

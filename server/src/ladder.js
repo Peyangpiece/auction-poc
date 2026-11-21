@@ -15,11 +15,26 @@ export function nextStep(amount, table, unitOverride = null) {
   return amount + unitFor(amount, table, unitOverride);
 }
 
-/** 最低入札額: 入札がまだなければ開始価格。入札があれば、現在価格の次の段。 */
+/**
+ * 次の入札額の目安: 入札がまだなければ開始価格。入札があれば、現在価格より高い、いちばん近い段。
+ * 1円単位の入札（段に乗らない現在価格）があっても、目安は段の上にそろえる（例: 段が 9,500・10,000 のとき、9,600 の次は 10,000）。
+ */
 export function minimumBid(startPrice, currentPrice, table, unitOverride = null) {
-  return currentPrice === null || currentPrice === undefined
-    ? startPrice
-    : nextStep(currentPrice, table, unitOverride);
+  if (currentPrice === null || currentPrice === undefined) return startPrice;
+  if (currentPrice < startPrice) return startPrice;
+  let step = startPrice;
+  // 上限つきで進める（1段は必ず1円以上増えるので必ず終わる）
+  for (let i = 0; step <= currentPrice && i < 1_000_000; i++) step = nextStep(step, table, unitOverride);
+  return step > currentPrice ? step : nextStep(currentPrice, table, unitOverride);
+}
+
+/**
+ * 入札できる最も低い額（発注者の決定: 開始価格以上なら、1円単位で入札できる）。
+ * 入札がまだなければ開始価格。入札があれば、現在価格より1円高い額。
+ * 価格の段（minimumBid）は、入札の欄に最初に入れておく「次の入札額」の目安としてだけ使う。
+ */
+export function minimumAllowed(startPrice, currentPrice) {
+  return currentPrice === null || currentPrice === undefined ? startPrice : currentPrice + 1;
 }
 
 /**

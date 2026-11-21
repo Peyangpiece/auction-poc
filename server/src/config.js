@@ -43,6 +43,8 @@ export function loadConfig(env = process.env) {
       env.IVS_PLAYER_SCRIPT_URL || 'https://player.live-video.net/1.58.0/amazon-ivs-player.min.js',
     // EventBridge の API destination から届く POST を確かめる合言葉（秘密。環境変数だけに置く）
     eventbridgeSecret: env.POC_EVENTBRIDGE_SECRET || '',
+    // 配信エージェントの合言葉（秘密。報告書 94 章）。入っていれば、起動のときに、この合言葉だけを配信エージェントとして登録する
+    agentToken: env.POC_AGENT_TOKEN || '',
 
     // 障害の模擬（P2-3、P2-5、進行コンソールの「サーバーの再起動」）を許すか。本番では必ず 0 にする。
     allowCrash: env.POC_ALLOW_CRASH === '1',
@@ -65,7 +67,7 @@ export function loadConfig(env = process.env) {
     streamIdleWarnMs: num(env.POC_STREAM_IDLE_WARN_MS, 600000),
 
     // ---- 守り（不正な連打・大量の接続・よそのサイトからの接続への備え）。0 を指定すると、その制限を外す
-    maxConnections: num(env.POC_MAX_CONNECTIONS, 500),        // 同時接続の上限（想定の上限 100 人の5倍）
+    maxConnections: num(env.POC_MAX_CONNECTIONS, 1500),       // 同時接続の上限（300 人が2台ずつ開き、切れた接続が少し残っても足りるように。本番運用の評価 B12）
     maxConnectionsPerUser: num(env.POC_MAX_CONNECTIONS_PER_USER, 5), // 同じ会員・スタッフの同時接続（複数の端末やタブ）
     helloTimeoutMs: num(env.POC_HELLO_TIMEOUT_MS, 10000),     // つないでから、この時間内に名乗らない接続は切る
     messageRate: num(env.POC_MESSAGE_RATE, 100),              // 1接続あたりの受信の上限（1秒あたり。瞬間的にはこの2倍まで）
@@ -83,6 +85,10 @@ export function loadConfig(env = process.env) {
     devShowCodes: env.POC_DEV_SHOW_CODES === '1',
     // メールの送信の取り次ぎ先（POST <ここ>/send に { to, subject, text }）。空なら、送らずに data/outbox に書き出すだけ（開発用）
     mailUrl: (env.POC_MAIL_URL || '').replace(/\/$/, ''),
+    // メールの間をあける時間（ミリ秒）。開催のお知らせのように、たくさんの会員へ続けて送るときに使う（送信サービスの速さの上限に当たらないように）
+    mailIntervalMs: num(env.POC_MAIL_INTERVAL_MS, 600),
+    // メールに載せるサイトの URL（例: https://seri.example.co.jp）。空なら、主催者管理者が開催を公開したときのページの URL を使う
+    siteUrl: (env.POC_SITE_URL || '').replace(/\/$/, ''),
     // 合言葉（検証用のトークン）での入札画面・進行コンソールへの接続を許すか。本番では 0（ログインだけで入る）
     tokenLogin: env.POC_TOKEN_LOGIN !== '0',
     // SMS（電話番号への認証番号）を使うか。0 なら、会員登録と「パスワードを忘れた方」は、メールアドレスだけ（発注者の決定: 本番では SMS を使わない）
@@ -90,13 +96,24 @@ export function loadConfig(env = process.env) {
     // データの置き場が消える環境（Cloudflare のコンテナなど）で、外の保存先へ保存・復元する（server/src/persist.js）。空なら使わない
     persistUrl: (env.POC_PERSIST_URL || '').replace(/\/$/, ''),
     // 保存の間隔。書き込みがあったときだけ送る
+    // 書き込みの控え（受理した入札を、返事の前に、外の保存先へ書く）。0 で止める。保存先に届かないとき、返事を待たせる上限（ミリ秒）
+    // 開いたままの画面の、ログインの確かめ直しの間隔（ミリ秒）
+    sessionRecheckMs: num(env.POC_SESSION_RECHECK_MS, 10000),
+    // 公開の前に入れておく項目（規約・振込先など）がそろうまで、開催を公開させない。本番の設定では 1
+    requireSetup: env.POC_REQUIRE_SETUP === '1',
+    journal: env.POC_JOURNAL !== '0',
+    // 起動のときに、書き込みの控えをやり直すか。手で古い写しへ戻すときだけ 0 にする（戻した時点より後の書き込みを、やり直させない。報告書 118 章）
+    journalReplay: env.POC_JOURNAL_REPLAY !== '0',
+    journalMaxWaitMs: num(env.POC_JOURNAL_MAX_WAIT_MS, 3000),
     persistIntervalMs: num(env.POC_PERSIST_INTERVAL_MS, 2000),
 
     // ---- 会員・スタッフ（MVP の 1・2）
     // クッキーに Secure を付ける（HTTPS だけで送る）。本番は必ず 1。手前のプロキシが x-forwarded-proto: https を付ける場合は自動で付く
     cookieSecure: env.POC_COOKIE_SECURE === '1',
     // 認証の試行（認証番号の送信・照合、スタッフのログイン）の上限。同じ接続元から1分あたり。0 で外す
-    authRatePerMin: num(env.POC_AUTH_RATE, 20),
+    // 接続元ごとの、認証の試行の上限（1分あたり）。会場の Wi-Fi や携帯の回線では、多くの人が同じ接続元になるので、大きめにする
+    // （20 では、開場のとき21人目からログインできなかった。本番運用の評価 B10）。総当たりは、アカウントごとの締め出しと、認証番号の回数の上限で防ぐ
+    authRatePerMin: num(env.POC_AUTH_RATE, 150),
     // 最初の主催者管理者のメールアドレスの、SHA-256（16進）。メールアドレスそのものは、ソースに書かない。
     // このメールアドレスで「はじめての方」から進むと、主催者管理者として登録される（まだ登録が無いときの、1回だけ）
     adminEmailHash: (env.POC_ADMIN_EMAIL_SHA256 || '').trim().toLowerCase(),

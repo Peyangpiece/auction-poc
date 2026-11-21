@@ -22,12 +22,10 @@ test('P2-4 価格帯をまたぐ入札: 9,500 → 10,000 → 11,000 円と受理
   assert.equal(r.code, 'ALREADY_HIGHEST');
   r = await m[1].bid(lot.id, 10000);
   assert.deepEqual([r.accepted, r.minBid], [true, 11000]);
-  r = await m[2].bid(lot.id, 10500); // 1万円以上は単位1,000円なので、10,500円は段に乗っていない
-  assert.equal(r.code, 'OFF_LADDER');
   r = await m[2].bid(lot.id, 11000);
-  assert.deepEqual([r.accepted, r.minBid], [true, 12000]);
+  assert.deepEqual([r.accepted, r.minBid, r.minAllowed], [true, 12000, 11001]);
   r = await m[0].bid(lot.id, 11000); // 古い価格での入札（AC-FR-BID-003-1）
-  assert.deepEqual([r.code, r.currentPrice, r.minBid], ['BELOW_MINIMUM', 11000, 12000]);
+  assert.deepEqual([r.code, r.currentPrice, r.minAllowed], ['BELOW_MINIMUM', 11000, 11001]);
   r = await m[0].bid(lot.id, 12000); // まだ有効な入札（AC-FR-BID-003-3）
   assert.equal(r.accepted, true);
 
@@ -36,6 +34,41 @@ test('P2-4 価格帯をまたぐ入札: 9,500 → 10,000 → 11,000 円と受理
   assert.equal((await m[1].bid(lot.id, 13000)).code, 'AFTER_CLOSE');
   const log = await lotLog(A, lot.id);
   assert.deepEqual(log.bids.filter((b) => b.result === 'ACCEPTED').map((b) => b.amount), [9500, 10000, 11000, 12000]);
+});
+
+test('開始価格以上なら、1円単位で入札できる（価格の段に合わせなくてよい。発注者の決定）', async () => {
+  const lot = await createLot(A, 9500);
+  assert.equal((await A.cmd('start', { lotId: lot.id })).ok, true);
+  let r = await m[0].bid(lot.id, 9499); // 開始価格より低い
+  assert.deepEqual([r.code, r.minAllowed], ['BELOW_MINIMUM', 9500]);
+  r = await m[0].bid(lot.id, 9501); // 段（500円）に乗っていなくても、開始価格以上なら受理
+  assert.deepEqual([r.accepted, r.currentPrice, r.minAllowed, r.minBid], [true, 9501, 9502, 10000]); // 目安は、段の上にそろえる
+  r = await m[1].bid(lot.id, 9501); // 同じ額は、上回っていないので断る
+  assert.equal(r.code, 'BELOW_MINIMUM');
+  r = await m[1].bid(lot.id, 9502); // 1円だけ上
+  assert.deepEqual([r.accepted, r.currentPrice], [true, 9502]);
+  r = await m[2].bid(lot.id, 10500); // 1万円以上の帯でも、段の 1,000円単位でなくてよい
+  assert.deepEqual([r.accepted, r.currentPrice], [true, 10500]);
+  r = await m[0].bid(lot.id, 10500.5); // 1円未満は入札できない
+  assert.equal(r.code, 'OFF_LADDER');
+  await A.cmd('close', { lotId: lot.id });
+  const log = await lotLog(A, lot.id);
+  assert.deepEqual(log.bids.filter((b) => b.result === 'ACCEPTED').map((b) => b.amount), [9501, 9502, 10500]);
+});
+
+test('けた外れの入札は断る（1人の入札で、ほかの人が入札できなくなるのを防ぐ）', async () => {
+  const lot = await createLot(A, 1000);
+  assert.equal((await A.cmd('start', { lotId: lot.id })).ok, true);
+  // 入札が無いときは、開始価格（1,000円）の10倍まで（発注者の決定。報告書 123 章）
+  assert.equal((await m[0].bid(lot.id, Number.MAX_SAFE_INTEGER)).code, 'TOO_HIGH');
+  assert.equal((await m[0].bid(lot.id, 1e10 + 1)).code, 'TOO_HIGH');
+  assert.equal((await m[0].bid(lot.id, 10001)).code, 'TOO_HIGH');
+  assert.equal((await m[0].bid(lot.id, 10000)).accepted, true);
+  // 次は、現在の価格（10,000円）の10倍まで
+  assert.equal((await m[1].bid(lot.id, 100001)).code, 'TOO_HIGH');
+  const r = await m[1].bid(lot.id, 100000);
+  assert.deepEqual([r.accepted, r.currentPrice], [true, 100000]);
+  await A.cmd('close', { lotId: lot.id });
 });
 
 test('入札が1件もないまま締めると流札（AC-FR-CLS-002-2）', async () => {

@@ -6,7 +6,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { boot, chromium, devices, check, ROOT } from './lib.mjs';
-import { totp } from '../../server/src/mvp/security.js';
+import Database from 'better-sqlite3';
+import QRCode from 'qrcode';
+
+// QR コードを映した疑似のカメラ映像（Chromium の --use-file-for-fake-video-capture が読む Y4M 形式。白地に黒の1枚）
+function writeQrVideo(file, text) {
+  const W = 640, H = 480, mods = QRCode.create(text, { errorCorrectionLevel: 'M' }).modules;
+  const cell = Math.floor(Math.min(W, H) * 0.7 / mods.size), x0 = (W - cell * mods.size) >> 1, y0 = (H - cell * mods.size) >> 1;
+  const y = Buffer.alloc(W * H, 235);
+  for (let r = 0; r < mods.size; r++) for (let c = 0; c < mods.size; c++) {
+    if (!mods.get(r, c)) continue;
+    for (let dy = 0; dy < cell; dy++) y.fill(16, (y0 + r * cell + dy) * W + x0 + c * cell, (y0 + r * cell + dy) * W + x0 + (c + 1) * cell);
+  }
+  const uv = Buffer.alloc((W / 2) * (H / 2), 128);
+  fs.writeFileSync(file, Buffer.concat([Buffer.from(`YUV4MPEG2 W${W} H${H} F10:1 Ip A1:1 C420jpeg\n`), Buffer.from('FRAME\n'), y, uv, uv]));
+}
 
 const shotsArg = process.argv.indexOf('--shots');
 const shots = shotsArg > 0 ? path.resolve(process.argv[shotsArg + 1]) : null;
@@ -21,6 +35,15 @@ const makeStaff = (id, name, role) => {
   return { id, password: /仮のパスワード: (\S+)/.exec(text)[1], secret: /認証アプリの鍵: (\S+)/.exec(text)[1] };
 };
 const outbox = () => fs.readFileSync(path.join(dataDir, 'outbox', 'outbox.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+// 一覧の行の操作を押す。見えていなければ、その行の「⋯」を開いてから押す
+const rowAction = async (page, rowText, label) => {
+  const row = page.locator(`#panel tr:has-text("${rowText}")`);
+  await row.first().locator('td.act').waitFor();
+  const direct = row.locator(`td.act > button:has-text("${label}")`);
+  if (await direct.count()) return direct.first().click();
+  await row.locator('td.act .more__btn').click();
+  await page.locator(`.more:popover-open >> text=${label}`).click();
+};
 const lastCode = () => /認証番号は (\d{6})/.exec(outbox().filter((m) => m.channel === 'sms').at(-1).body)[1];
 
 // 参加できるのは開催の当日だけなので、開催日は今日（日本時間）にする
@@ -52,7 +75,7 @@ try {
   await shot(admin, 'mvp-01-staff-login');
   await admin.waitForSelector('#tabs button');
   check((await admin.textContent('#who')).includes('主催者管理者'), '主催者管理者としてログインできる');
-  check((await admin.locator('#tabs button').count()) === 10, '主催者管理者には、10 の画面が出る');
+  check((await admin.locator('#tabs button').count()) === 10, '主催者管理者には、10 の区分が出る（配送を含む）');
 
   // 設定
   await admin.click('#tabs [data-key=settings]');
@@ -65,9 +88,8 @@ try {
   // トップページは、ログインした人にだけ出る（ログインしていない人は、ログインの画面へ送られる）。ここでは、主催者管理者として開く
   const quiet = await admin.context().newPage();
   await quiet.goto(sys.base + '/');
-  await quiet.waitForSelector('#calBody td');
-  check((await quiet.isHidden('#today')) && (await quiet.locator('#calBody td.is-event').count()) === 0, '開催のない日は、カレンダーだけを出す');
-  check((await quiet.locator('#calBody td.is-today').count()) === 1, 'カレンダーに、今日の印が出る');
+  await quiet.waitForSelector('#nextList li');
+  check((await quiet.isHidden('#today')) && (await quiet.textContent('#nextList')).includes('次の開催は、まだ決まっていません'), '開催のない日は、次の開催の一覧だけを出す（決まっていなければ、そう知らせる）');
   await shot(quiet, 'mvp-05-top-no-event');
 
   // 開催
@@ -82,21 +104,26 @@ try {
   await admin.click('#dlg button[type=submit]');
   await admin.waitForSelector('#panel table');
   await admin.click('#panel >> text=公開する');
-  await admin.waitForFunction(() => document.querySelector('#line')?.textContent.includes('届出済み'));
+  await admin.waitForSelector('#dlg[open]');
+  check((await admin.textContent('#dlg')).includes('取り消せません') && await admin.evaluate(() => document.activeElement?.textContent === 'やめる'), '開催の公開は、取り消せないことを書いて確かめる（最初のフォーカスは「やめる」）');
+  await admin.click('#dlg >> text=公開する');
+  await admin.waitForFunction(() => document.querySelector('#dlg .msg')?.textContent.includes('届出済み'));
   check(true, '届出済みの印がない開催は、公開できない（理由が画面に出る）');
+  await admin.click('#dlg >> text=やめる');
   await admin.click('#panel >> text=編集');
   await admin.check('#dlg [name=notified]');
   await admin.click('#dlg button[type=submit]');
   await admin.waitForFunction(() => !document.querySelector('#dlg').open);
   await admin.click('#panel >> text=公開する');
+  await admin.click('#dlg >> text=公開する');
   await admin.waitForSelector('#panel .state[data-on="1"]');
   check(true, '届出済みにすると、公開できる');
   await shot(admin, 'mvp-02-events');
 
-  // 進行役には、SMS の制限だけ（商品は、進行コンソールでその場で登録する）
+  // 進行役には、受付と未引き取りだけ（商品は、進行コンソールでその場で登録する）
   const auct = await staffLogin(auctAcc);
   await auct.waitForSelector('#tabs button');
-  check((await auct.locator('#tabs button').count()) === 3, '進行役の管理画面には、受付・未引き取り・SMS の制限だけが出る');
+  check((await auct.locator('#tabs button').count()) === 2, '進行役の管理画面には、受付・未引き取りだけが出る');
 
   console.log('その場での登録（進行コンソール）');
   // 進行コンソールは、スタッフのログインで入る（合言葉つきの URL は使わない）
@@ -108,7 +135,7 @@ try {
   await con.setViewportSize({ width: 1280, height: 1100 });
   await con.goto(sys.base + '/console.html');
   await con.waitForSelector('#eventBar:not([hidden])');
-  check((await con.textContent('#evTitle')).includes('12月の競り') && (await con.textContent('#evPhase')) === '開始前', '進行役がログインで入れる。開催の名前と「開始前」が出る');
+  check((await con.textContent('#evTitle')).includes('12月の競り') && (await con.textContent('#evPhase')).startsWith('開始前（予定 '), '進行役がログインで入れる。開催の名前と「開始前」が出る');
   await con.fill('#newTitle', '防水シート（検証）'); await con.fill('#newPrice', '9500');
   await con.click('#addLot button[type=submit]');
   await con.waitForFunction(() => document.body.textContent.includes('防水シート（検証）'));
@@ -131,13 +158,11 @@ try {
   check(hero.includes('本日開催') && hero.includes('12月の競り（検証）') && hero.includes('9:00 〜 18:00'), '開催の当日は、開催の名前と時間を大きく出す');
   check(hero.includes('本日の目玉商品') && hero.includes('防水シート') && hero.includes('寝袋'), '本日の目玉商品を出す');
   const go = await top.locator('.today__go').boundingBox();
-  check(go.height >= 72 && go.width >= 300, `「参加する」ボタンが大きい（${Math.round(go.width)}×${Math.round(go.height)}px）`);
-  const order = await top.evaluate(() => document.querySelector('#today').compareDocumentPosition(document.querySelector('.cal')) & Node.DOCUMENT_POSITION_FOLLOWING);
-  check(!!order, 'カレンダーは、当日の案内の下に出る');
-  check((await top.locator('#calBody td.is-event.is-today').count()) === 1, 'カレンダーの今日に、開催日の印が付く');
-  if (later.slice(0, 7) !== today.slice(0, 7)) await top.click('#calNext');
-  await top.waitForFunction(() => document.querySelector('#calList').textContent.includes('次回の競り（検証）'));
-  check(true, '2週間後の開催も、カレンダーに出る');
+  check(go.height >= 52 && go.width >= 300, `「参加する」ボタンが大きい（${Math.round(go.width)}×${Math.round(go.height)}px）`);
+  const order = await top.evaluate(() => document.querySelector('#today').compareDocumentPosition(document.querySelector('.next')) & Node.DOCUMENT_POSITION_FOLLOWING);
+  check(!!order, '次の開催の一覧は、当日の案内の下に出る');
+  await top.waitForFunction(() => document.querySelector('#nextList').textContent.includes('次回の競り（検証）'));
+  check(!(await top.textContent('#nextList')).includes('12月の競り（検証）'), '2週間後の開催が、次の開催の一覧に出る（今日の開催は、上の案内にだけ出す）');
   await shot(top, 'mvp-06-top-event-day', { fullPage: true });
   await top.setViewportSize({ width: 390, height: 844 });
   await top.waitForSelector('#terms:not([hidden])');
@@ -179,6 +204,10 @@ try {
   await shot(phone, 'mvp-09-register-profile', { fullPage: true });
   await phone.check('[name=adult]');
   await phone.click('#stepProfile button[type=submit]');
+  await phone.waitForSelector('#agreeRow [aria-invalid=true]');
+  check(true, '規約に同意しないと、登録できない');
+  await phone.check('[name=agreed]');
+  await phone.click('#stepProfile button[type=submit]');
   await phone.waitForURL(/mypage\.html/);
   await phone.waitForSelector('#facts dd');
   check((await phone.textContent('#facts')).includes('090-0000-1111'), '登録が済み、マイページに内容が出る');
@@ -216,7 +245,7 @@ try {
   await phone.fill('#pwForm [name=password]', 'kensho-pass-01');
   await phone.click('#pwForm button[type=submit]');
   await phone.waitForURL(sys.base + '/');
-  check(await phone.isVisible('#calBody'), 'ログイン ID とパスワードでログインでき、トップページが開く');
+  check(await phone.isVisible('#nextList'), 'ログイン ID とパスワードでログインでき、トップページが開く');
   await phone.goto(sys.base + '/mypage.html');
 
   console.log('参加手続きと入札');
@@ -226,6 +255,7 @@ try {
   await phone.click('[data-pick=venue]');
   await phone.waitForSelector('#join:not([hidden])');
   check(await phone.isEnabled('#join [name=payment][value=cash]'), '会場を選ぶと、当日現金が選べる');
+  check(await phone.isEnabled('#join [name=payment][value=card]'), '会場を選ぶと、当日クレジットも選べる（報告書 133 章）');
   await phone.click('#backToMode');
   await phone.click('[data-pick=online]');
   await phone.waitForSelector('#join:not([hidden])');
@@ -236,16 +266,32 @@ try {
   check(true, '参加手続きの画面に、買歩銭がかかることを表示する');
   await phone.check('#join [name=receive][value=ship]');
   await phone.click('#join button[type=submit]');
-  await phone.waitForFunction(() => document.getElementById('gateMsg').textContent.includes('両方'));
-  check(true, '片方だけでは進めない（理由を出す）');
+  await phone.waitForFunction(() => document.querySelector('#join .pickerr')?.textContent.includes('支払方法を選んでください'));
+  check((await phone.$$('#join .pickerr')).length === 1, '片方だけでは進めない（選んでいない欄のすぐ下に、理由を出す）');
   await shot(phone, 'mvp-13-join');
   await phone.check('#join [name=payment][value=transfer]');
   await phone.click('#join button[type=submit]');
   await phone.waitForFunction(() => document.getElementById('gate').style.display === 'none');
   check((await phone.textContent('#gateEvent')).includes('参加番号1'), '手続きが済むと、参加番号 1 が振られ、そのまま入札画面に入る');
+  // 開催を始める前は、品を開始できない（発注者の決定。報告書 124 章）
+  check(await con.isVisible('#b_evstart') && await con.isHidden('#b_break') && await con.isHidden('#b_end'), '始める前の進行コンソールには、「開催を始める」だけが出る（休憩・終了は出ない）');
+  check(await con.isDisabled('#b_next'), '開催を始める前は、品を開始するボタンが押せない');
+  // 待機中の画面（発注者の指示。報告書 126 章）: 開催を始める前は、映像の枠に「まもなく始まります」。カウントダウンは出さない
+  const standby = (p) => p.evaluate(() => { const e = document.getElementById('standby'); return e.hidden ? '' : e.innerText.replace(/\s+/g, ' '); });
+  { const t = await con.evaluate(() => { const e = document.getElementById('viewStandby'); return e.hidden ? '' : e.innerText.replace(/\s+/g, ' '); });
+    check(t.includes('まもなく始まります') && t.includes('開始の予定') && await con.isVisible('#viewStandby'), '開催を始める前は、進行コンソールにも、待機中の画面が出る'); }
+  { const t = await standby(phone); check(t.includes('まもなく始まります') && t.includes('開始の予定') && !/あと|残り|\d+:\d\d:\d\d/.test(t) && await phone.isVisible('#standby'), '開催を始める前は、待機中の画面が出る（開催の名前と、開始の予定。カウントダウンは無い）'); }
+  await con.click('#b_evstart'); await con.click('#dlgOk');
+  await con.waitForFunction(() => !document.getElementById('b_next').disabled && !document.getElementById('elapsed').hidden);
+  check(await con.isHidden('#b_evstart') && await con.isVisible('#b_end') && await con.isVisible('#elapsed'), '始めると、休憩・終了が出て、右上に、開始からの経過時間が出る');
+  // 進行中でも、映像が届いていないあいだは、待機中の画面を出しつづける（発注者の指示。報告書 132 章。この検証は、映像をつないでいない設定）
+  await phone.waitForFunction(() => document.getElementById('standby').dataset.kind === 'nolive');
+  { const t = await standby(phone); check(t.includes('映像の配信をお待ちください') && t.includes('競りは進行中です') && await phone.isVisible('#standby'), '開催を始めても、映像が届いていないあいだは、待機中の画面が出つづける（ことばは「映像の配信をお待ちください」に変わる）'); }
+  { const t = await con.evaluate(() => { const e = document.getElementById('viewStandby'); return e.hidden ? '' : e.innerText.replace(/\s+/g, ' '); });
+    check(t.includes('映像の配信をお待ちください') && await con.isVisible('#viewStandby') && await con.isHidden('#viewOff'), '進行コンソールにも、参加者と同じ待機中の画面が出る'); }
   await con.click('#b_next');
   await con.waitForFunction(() => document.getElementById('status').textContent.includes('受付中'), null, { timeout: 15000 });
-  await phone.waitForFunction(() => document.getElementById('bid').textContent === '入札');
+  await phone.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');
   await phone.click('#bid');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('9,500'));
   check((await phone.textContent('#priceTotal')).includes('買歩銭（10%）込み ¥10,450'), '入札画面の価格の下に、買歩銭を足した金額を出す');
@@ -278,6 +324,7 @@ try {
   await guest.type('[name=address1]', '4-5-6');
   await guest.fill('[name=email]', 'hanako@example.com');
   await guest.check('[name=adult]');
+  await guest.check('[name=agreed]');
   await guest.click('#stepProfile button[type=submit]');
   await guest.waitForSelector('#join:not([hidden])');
   check(!new URL(guest.url()).search, '登録のあと、入札画面の参加手続きに進む（URL に合言葉を残さない）');
@@ -288,16 +335,42 @@ try {
   await guest.click('#join button[type=submit]');
   await guest.waitForFunction(() => document.getElementById('gateWait').textContent.includes('札'));
   check((await guest.textContent('#gateEvent')).includes('参加番号2') && (await guest.isHidden('#enter')), '参加番号 2 が振られ、来場確認までは入れない');
+  await guest.waitForFunction(() => { const i = document.getElementById('checkinQr'); return !i.hidden && i.complete && i.naturalWidth > 0; });
+  check(true, '来場確認を待つ画面に、受付で見せる QR コードが出る');
   await shot(guest, 'mvp-18-venue-wait');
-  await admin.click('#panel >> text=更新');
+  await admin.click('#tabs [data-key=reception]'); // 受付は、ひらき直すか 15 秒ごとに読み直す（「更新」のボタンはなくした）
   await admin.waitForSelector('#panel >> text=確認待ち 1 人');
   await shot(admin, 'mvp-19-reception');
-  await admin.click('#panel td.act >> text=来場を確認');
-  await admin.waitForSelector('#panel >> text=確認待ち 0 人');
+  // 受付係のスマホで、参加者の QR コードを読み取る（カメラは、QR コードを映した疑似の映像。報告書 91 章）
+  const camFile = path.join(sys.dir, 'checkin.y4m');
+  const db = new Database(path.join(sys.dir, 'data', 'auction.db'), { readonly: true });
+  writeQrVideo(camFile, 'reiwa-checkin:' + db.prepare('SELECT checkin_code FROM members WHERE paddle_no = 2 AND account_id IS NOT NULL ORDER BY id DESC').get().checkin_code);
+  db.close();
+  const camBrowser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-video-capture=${camFile}`] });
+  try {
+    const desk = await (await camBrowser.newContext(devices['Pixel 7'])).newPage();
+    desk.on('pageerror', (e) => errors.push(`scan: ${e.message}`));
+    await desk.goto(sys.base + '/staff.html');
+    await desk.fill('#loginForm [name=email]', adminAcc.id);
+    await desk.fill('#loginForm [name=password]', adminAcc.password);
+    await desk.click('#loginForm button[type=submit]');
+    await desk.click('#tabs [data-key=reception]');
+    await desk.click('#panel >> text=QR コードを読み取る');
+    await desk.waitForSelector('#dlg .scanwho', { timeout: 15000 });
+    check((await desk.textContent('#dlg .scanwho')).includes('参加番号 2') && (await desk.textContent('#dlg .scanwho')).includes('会場 花子'), '受付のスマホで QR コードを読み取ると、参加番号と名前が出る');
+    check((await guest.isHidden('#enter')), '読み取っただけでは、来場確認にしない（受付係が本人と見比べてから押す）');
+    await shot(desk, 'mvp-19b-reception-scan');
+    await desk.click('#dlg >> text=来場を確認');
+    await desk.waitForSelector('#dlg .scandone');
+    check((await desk.textContent('#dlg .scandone')).includes('札を渡して'), '来場を確認すると、札を渡すよう出る');
+    await desk.click('#dlg >> text=閉じる');
+    await desk.waitForSelector('#panel >> text=確認待ち 0 人');
+    check(await desk.evaluate(() => !document.querySelector('video')?.srcObject?.active), '閉じると、カメラを止める');
+  } finally { await camBrowser.close(); }
   await guest.waitForSelector('#enter:not([hidden])', { timeout: 15000 });
-  check(true, '受付係が来場を確認すると、本人の画面が自動で進めるようになる');
+  check(await guest.isHidden('#checkinQr'), '受付係が来場を確認すると、本人の画面が自動で進めるようになる（QR コードは消える）');
   await guest.click('#enter');
-  await guest.waitForFunction(() => document.getElementById('bid').textContent === '入札');
+  await guest.waitForFunction(() => document.getElementById('bid').dataset.ready === '1');
   check(await guest.isDisabled('#showVideo'), '会場参加の画面には、映像を出さない');
   await guest.click('#bid');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('10,000'));
@@ -306,8 +379,8 @@ try {
   check(true, '進行コンソールに、会場とオンラインの人数が出る');
   await shot(guest, 'mvp-20-venue-bidder', { fullPage: true });
   // オンライン参加の人を、受付で会場参加に切り替える
-  await admin.click('#panel >> text=更新');
-  await admin.click('#panel td.act >> text=会場参加に切り替え');
+  await admin.click('#tabs [data-key=reception]');
+  await admin.click('#panel td.act >> text=会場参加にする');
   await admin.click('#dlg button[type=submit]');
   await admin.waitForFunction(() => document.querySelector('#dlg .msg')?.textContent.includes('支払方法'));
   await admin.check('#dlg [name=payment][value=cash]');
@@ -334,8 +407,8 @@ try {
   await con.fill('#pxPaddle', '1');
   await con.fill('#pxAmount', '11000');
   await con.click('#proxyForm button[type=submit]');
-  await con.waitForFunction(() => document.getElementById('cmdMsg').textContent.includes('札を確認'));
-  check(true, '札の確認のチェックがないと、代理入札できない');
+  await con.waitForFunction(() => document.getElementById('pxMsg').textContent.includes('札を確認'));
+  check(true, '札の確認のチェックがないと、代理入札できない（理由は、代理入札の欄のすぐ下に出る）');
   await con.check('#pxCard');
   await con.click('#proxyForm button[type=submit]');
   await con.waitForFunction(() => document.getElementById('history').textContent.includes('1番（代理）'));
@@ -349,17 +422,27 @@ try {
   await guest.waitForFunction(() => document.querySelector('#right')?.classList.contains('on'));
   check(!(await guest.evaluate(() => document.body.classList.contains('outbid'))) && (await guest.textContent('#msg')).includes('最高入札者に戻りました'), '権利が戻った人の画面から、上回られた警告が消える');
   check(true, '代理入札を取り消すと、現在価格が1つ前に戻り、前の最高入札者に権利表示が戻る');
-  await con.click('#b_close');
+  if (await con.isVisible('#b_urikiri')) { await con.click('#b_urikiri'); await con.click('#dlgOk'); await con.waitForTimeout(300); } // 最低落札額のない品は、うりきりを押してから締める（報告書 89 章）
+  await con.click('#b_close'); await con.click('#dlgOk'); // 締めは確かめてから
   await con.waitForFunction(() => document.getElementById('sold').textContent.includes('10,000'));
   const soldRow = await con.textContent('#sold');
   check(soldRow.includes('2番') && soldRow.includes('現地受け取り') && soldRow.includes('当日現金'), '落札一覧に、参加番号・落札額・受け取り方法・支払方法が出る');
   // 当日現金の精算（受付）→ 請求書（領収書を兼ねる）→ 引き渡し
   await admin.click('#tabs [data-key=billing]');
   await admin.waitForFunction(() => { const t = document.querySelector('#panel table')?.textContent ?? ''; return t.includes('未精算') && t.includes('当日現金'); });
+  // 会員1人につき1行（発注者の指示。報告書 128 章）: 会員番号・名前・点数と合計・未入金が出る。品ごとの明細は、開くと出る
+  check(await admin.locator('#panel .memberrow').count() === 1 && (await admin.textContent('#panel .memberrow')).includes('1点') && (await admin.textContent('#panel .memberrow')).includes('未入金 ¥11,000') && await admin.locator('#panel .linerow').count() === 0, '請求の一覧は、会員1人につき1行（点数・合計・未入金）。品ごとの明細は、開くまで出ない');
+  await admin.click('#panel .memberrow .expander');
+  await admin.waitForSelector('#panel .linerow');
   check((await admin.textContent('#panel table')).includes('¥11,000') && (await admin.textContent('#panel table')).includes('落札 ¥10,000＋買歩銭 ¥1,000'), '落札すると、請求の画面に「未精算」の明細が出る。金額は、落札額＋買歩銭10%');
-  await admin.check('#panel table input[type=checkbox]');
+  // 会場での精算は、会員の行の「精算」から（報告書 134 章）。その人の未精算の品と金額が出て、当日現金か当日クレジットかを選ぶ
+  await admin.click('#panel .memberrow td.act >> text=精算');
+  await admin.waitForSelector('#dlg[open] .settle');
   await shot(admin, 'mvp-24-billing-settle');
-  await admin.click('#panel >> text=選んだ明細を、当日現金で精算');
+  { const t = (await admin.textContent('#dlg')).replace(/\s+/g, ' '); check(t.includes('¥11,000') && t.includes('当日現金で精算') && t.includes('当日クレジットで精算'), '会員の行の「精算」で、その人の未精算の品と金額が出て、当日現金・当日クレジットを選べる'); }
+  { const t = (await admin.textContent('#panel .paysum')).replace(/\s+/g, ' '); check(t.includes('すべて') && t.includes('銀行振込') && t.includes('当日現金') && t.includes('当日クレジット') && t.includes('未入金 ¥11,000'), '請求の画面に、支払方法ごとの集計（すべて・銀行振込・当日現金・当日クレジット）が出る'); }
+  await admin.click('#dlg >> text=当日現金で精算');
+  await admin.waitForFunction(() => document.getElementById('dlg').textContent.includes('発行しました'));
   await admin.waitForSelector('#dlg[open]');
   check(/請求書（領収書を兼ねる）\d{8}-0001 を発行しました/.test(await admin.textContent('#dlg')), '精算すると、請求書（領収書を兼ねる）を発行する');
   const pdfUrl = await admin.getAttribute('#dlg a', 'href');
@@ -368,16 +451,56 @@ try {
   await admin.click('#dlg >> text=閉じる');
   await admin.waitForSelector('#panel td.act >> text=引き渡し');
   await admin.click('#panel td.act >> text=引き渡し');
-  await admin.waitForSelector('#panel >> text=引き渡し済み');
+  await admin.waitForSelector('#dlg[open] >> text=引き渡しますか');
+  check(await admin.evaluate(() => document.activeElement?.textContent === 'やめる'), '引き渡しは、だれに何を渡すかを書いて確かめる（最初のフォーカスは「やめる」）');
+  await admin.click('#dlg >> button:has-text("引き渡す")');
+  await admin.waitForSelector('#panel td >> text=引き渡し済み');
   check(true, '消し込みのあとに、引き渡しを記録できる');
+  // 請求書は、別の表にせず、会員の行に出す（報告書 128 章）
+  check(/\d{8}-0001/.test(await admin.textContent('#panel .memberrow')) && (await admin.textContent('#panel .memberrow')).includes('会場での精算') && !(await admin.textContent('#panel')).includes('請求番号'), '請求書の番号・種類は、会員の行に出る（請求書だけの表は、無い）');
+  if (shots) { await admin.waitForTimeout(700); await admin.mouse.move(5, 5); }
+  await shot(admin, 'mvp-25b-billing-member', { fullPage: true });
+  // 配送の画面（報告書 130 章）: 区分に「配送」があり、開ける
+  await admin.click('#tabs [data-key=shipping]');
+  await admin.waitForSelector('#panel [aria-label="配送の絞り込み"]');
+  check(await admin.locator('#panel select[aria-label="開催"]').count() === 1 && (await admin.locator('#panel .shiprow').count() > 0 || (await admin.textContent('#panel .empty')).includes('配送の品')), '管理画面に「配送」の区分があり、開催を選ぶ欄と、顧客の行（無ければ、案内）が出る');
+  // 印刷のページ（報告書 131 章）: 宛名ラベル・納品書・作業票。開けて、画面のエラーが出ない（顧客がいなければ、その案内）
+  for (const doc of ['labels', 'slips', 'sheet']) {
+    const pp = await admin.context().newPage();
+    const perr = []; pp.on('pageerror', (e) => perr.push(e.message));
+    await pp.goto(`${sys.base}/print.html?doc=${doc}&event=1`);
+    await pp.waitForFunction(() => document.querySelector('#sheet').children.length > 0 || document.querySelector('#msg').textContent !== '');
+    check(perr.length === 0 && (await pp.title()).includes('令和の競り'), `印刷のページ（${doc}）が開ける`);
+    await pp.close();
+  }
+  await admin.click('#tabs [data-key=billing]');
+  await admin.waitForSelector('#panel .memberrow');
+  // スマートフォンの幅の管理画面（報告書 129 章）: 表はカードに並べ替わり、ページが横に広がらない（これまでは、表の幅に引かれて、900px ほどに広がっていた）
+  {
+    const mob = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await admin.context().storageState() });
+    const mp = await mob.newPage();
+    await mp.goto(sys.base + '/staff.html');
+    await mp.waitForSelector('#tabs [data-key=billing]');
+    const wide = [];
+    for (const key of ['billing', 'shipping', 'members', 'events', 'staff']) {
+      await mp.click(`#tabs [data-key=${key}]`); await mp.waitForTimeout(500);
+      if (key === 'billing') { await mp.waitForSelector('.memberrow'); await mp.click('.memberrow .expander'); await mp.waitForSelector('.linerow'); }
+      const w = await mp.evaluate(() => [innerWidth, document.documentElement.scrollWidth]);
+      if (w[0] !== 390 || w[1] > 391) wide.push(`${key}: ${w.join('/')}`);
+    }
+    check(wide.length === 0, `スマートフォンの幅（390px）で、管理画面の請求・会員・開催・スタッフが、横に広がらない${wide.length ? '（' + wide.join('、') + '）' : ''}`);
+    await shot(mp, 'mvp-25c-staff-phone', { fullPage: true });
+    await mob.close();
+  }
   await shot(admin, 'mvp-25-billing', { fullPage: true });
   await guest.goto(sys.base + '/mypage.html');
-  await guest.waitForSelector('#billing:not([hidden])');
-  const mine = await guest.textContent('#myLines');
-  check(mine.includes('¥11,000') && mine.includes('買歩銭 ¥1,000'), 'マイページに、買歩銭を含めた金額と内訳が出る');
-  check(mine.includes('防水シート') && mine.includes('お渡し済み'), '落札者のマイページに、品・状態が出る');
+  await guest.waitForSelector('#invoices .invitems');
+  const mine = await guest.textContent('#invoices .invitems');
+  check(mine.includes('¥11,000') && mine.includes('買歩銭 ¥1,000'), 'マイページの請求書の中に、買歩銭を含めた金額と内訳が出る');
+  check(mine.includes('防水シート') && mine.includes('お渡し済み'), '落札者のマイページに、品・状態が出る（請求書の中に）');
+  check(await guest.isHidden('#billing'), '請求書になった品は、「落札した品」に二度出さない');
   const invs = await guest.textContent('#invoices');
-  check(/\d{8}-0001/.test(invs) && invs.includes('¥11,000') && invs.includes('お支払い済み') && invs.includes('請求書を開く'), 'マイページの「請求書」に、請求番号・金額・状態と、PDF を開くボタンが出る');
+  check(/\d{8}-0001/.test(invs) && invs.includes('¥11,000') && invs.includes('お支払い済み') && invs.includes('請求書 兼 領収書を開く'), 'マイページの「請求書」に、請求番号・金額・状態と、PDF を開くボタンが出る');
   await guest.evaluate(() => { location.hash = '#profile'; });
   check(await guest.isVisible('#facts') && await guest.isHidden('#invoices'), '「個人情報の設定」のタブに切り替えられる');
   await guest.evaluate(() => { location.hash = '#bills'; });
@@ -393,11 +516,13 @@ try {
   check(true, '手数料の集計: 対象 10,000円 → 手数料 500円 ＋ 消費税 50円');
   await shot(admin, 'mvp-27-fees', { fullPage: true });
 
-  await con.fill('#resumeAt', '13:00');
-  await con.click('#breakForm button[type=submit]');
+  await con.click('#b_break'); // 次の開始予定の時刻は、押したときのダイアログで聞く
+  await con.fill('#dlgReason', '13:00');
+  await con.click('#dlgOk');
   await guest.waitForFunction(() => document.getElementById('eventNote').textContent.includes('13:00'));
   await con.waitForFunction(() => document.getElementById('evPhase').textContent.includes('休憩中'));
   check(true, '休憩に入ると、参加者の画面に再開の予定時刻が出る');
+  { const t = await standby(guest); check(t.includes('休憩中') && t.includes('再開の予定 13:00'), '休憩中は、待機中の画面に「休憩中」と再開の予定が出る'); }
   await shot(guest, 'mvp-22-bidder-break');
   await shot(con, 'mvp-23-console-event', { fullPage: true });
   await con.click('#b_end');
@@ -407,9 +532,10 @@ try {
   await guest.waitForFunction(() => document.getElementById('eventNote').textContent.includes('終了しました'));
   await con.waitForSelector('#eventBar', { state: 'hidden' });
   check(true, '開催を終了すると、参加者の画面に終了の知らせが出る');
+  check((await standby(guest)).includes('本日の競りは終了しました'), '終了後は、待機中の画面に「本日の競りは終了しました」が出る');
   const after = await admin.context().newPage();
   await after.goto(sys.base + '/');
-  await after.waitForSelector('#calBody td');
+  await after.waitForSelector('#nextList li');
   check(await after.isHidden('#today'), '終了した開催は、トップページの「本日開催」に出ない');
   check(await after.isHidden('#wins'), '落札していない人（スタッフ）には、落札の結果を出さない');
   await guest.goto(sys.base + '/');
@@ -420,7 +546,7 @@ try {
 
   // 会員の停止と、記録
   await admin.click('#tabs [data-key=members]');
-  await admin.click('#panel tr:has-text("検証 太郎") td.act >> text=停止');
+  await rowAction(admin, '検証 太郎', '停止'); // 操作が3つ以上の行では「⋯」の中
   await admin.fill('#dlg [name=reason]', '検証のための停止');
   await admin.click('#dlg button[type=submit]');
   await admin.waitForSelector('#panel .warn');
@@ -446,7 +572,7 @@ try {
   const reg = await open('/register.html', devices['iPhone 13']);
   await reg.waitForSelector('#agreeRow', { state: 'attached' });
   await reg.waitForFunction(() => !document.getElementById('agreeRow').hidden);
-  check(true, '利用規約を入れると、会員登録に同意の欄が出る');
+  check(true, '会員登録には、いつも同意の欄が出る');
   // 退会していない方の会員（会場 花子）が、登録内容を変える
   await guest.goto(sys.base + '/mypage.html');
   await guest.evaluate(() => { location.hash = '#profile'; });
@@ -457,8 +583,11 @@ try {
   await guest.waitForFunction(() => document.getElementById('facts')?.textContent.includes('7-8-9'));
   check(true, '会員が、登録内容を変えられる');
   await admin.click('#tabs [data-key=staff]');
-  await admin.waitForSelector('#panel td.act >> text=再発行');
-  await admin.click('#panel tr:has-text("shinko") td.act >> text=再発行');
+  await rowAction(admin, 'shinko', '再発行'); // 操作が3つ以上の行では「⋯」の中
+  // 再発行は、本人のログインを切るので、確かめてから（報告書 80 章）。最初のフォーカスは「やめる」
+  await admin.waitForSelector('#dlg[open] >> text=再発行しますか');
+  check(await admin.evaluate(() => document.activeElement?.textContent === 'やめる'), 'スタッフの再発行は、何が無効になるかを書いて確かめる（最初のフォーカスは「やめる」）');
+  await admin.click('#dlg >> button:has-text("再発行する")');
   await admin.waitForFunction(() => { const i = document.querySelector('#dlg img.qr'); return i && i.complete && i.naturalWidth > 0; });
   check((await admin.textContent('#dlg')).includes('認証アプリの鍵'), 'スタッフの認証アプリを再発行でき、QR コードが出る');
   await admin.click('#dlg >> text=渡したので閉じる');

@@ -3,10 +3,9 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, startServer, connectAll, createLot, lotLog, cleanup } from './helpers.js';
-import { minimumBid, isOnLadder } from '../src/ladder.js';
+import { minimumAllowed } from '../src/ladder.js';
 
 const ROUNDS = Number(process.env.P2_ROUNDS ?? 1000);
-const TABLE = [{ lt: 10000, unit: 500 }, { unit: 1000 }];
 let ctx, srv, A, m;
 before(async () => {
   ctx = makeEnv();
@@ -16,7 +15,7 @@ before(async () => {
 after(async () => { await srv.stop(); cleanup(ctx); });
 
 /** 記録された入札と締めを、仕様の規則だけで受付連番の順にたどり直し、サーバーの結果と突き合わせる */
-function replay(log, startPrice, unit) {
+function replay(log, startPrice) {
   const close = log.events.find((e) => e.type === 'close');
   let price = null, highest = null, winner = null;
   const problems = [];
@@ -25,9 +24,8 @@ function replay(log, startPrice, unit) {
     if (close && b.seq > close.seq) expect = 'AFTER_CLOSE';
     else if (highest === b.paddle) expect = 'ALREADY_HIGHEST';
     else {
-      const min = minimumBid(startPrice, price, TABLE, unit);
-      if (!isOnLadder(b.amount, startPrice, TABLE, unit)) expect = 'OFF_LADDER';
-      else if (b.amount < min) expect = 'BELOW_MINIMUM';
+      // 開始価格以上なら1円単位（入札があれば、現在価格より高い額だけ）
+      if (b.amount < minimumAllowed(startPrice, price)) expect = 'BELOW_MINIMUM';
       else { expect = 'ACCEPTED'; price = b.amount; highest = b.paddle; winner = b.seq; }
     }
     if (expect !== b.result) problems.push({ seq: b.seq, expect, got: b.result });
@@ -57,7 +55,7 @@ test(`P2-1 同じ最低入札額の入札を2つの端末から同時に送る�
   }
   const log = await lotLog(A, lot.id);
   assert.equal(log.bids.length, ROUNDS * 2);
-  assert.deepEqual(replay(log, 1000, 1000).problems, []);
+  assert.deepEqual(replay(log, 1000).problems, []);
   assert.equal(log.lot.currentPrice, ROUNDS * 1000);
   assert.equal((await A.cmd('close', { lotId: lot.id })).status, 'sold');
   console.log(`# P2-1: ${ROUNDS} 回すべて期待どおり（後から送り出した側が先に受け付けられた回: ${firstSenderLost}）`);
@@ -80,7 +78,7 @@ test(`P2-2 「締め」と入札を複数の端末から同時に送る（${ROUN
     assert.equal(closeRes.ok, true);
 
     const log = await lotLog(A, lot.id);
-    const rp = replay(log, 9500, null);
+    const rp = replay(log, 9500);
     assert.deepEqual(rp.problems, [], `round ${i}: 結果が受付連番の順と一致する`);
     assert.equal(rp.closeSeq, closeRes.seq);
     assert.equal(log.lot.closeSeq, closeRes.seq);

@@ -181,3 +181,130 @@ test('競りがない状態が始まった時刻を進行コンソールに伝�
   const again = await A.waitFor((x) => x.type === 'snapshot');
   assert.ok(again.stream.idleSince >= idle.stream.idleSince);
 });
+
+test('カメラの切り替え: OBS の「カメラ」で始まるシーンを一覧にし、進行役が配信を止めずに切り替える（報告書 92 章）', async () => {
+  // 前のテストで OBS を止めているので、別のサーバー・OBS・エージェントで確かめる
+  const ctx3 = makeEnv(T);
+  const srv3 = await startServer(ctx3);
+  const obs3 = startMockObs({ port: 0, startDelayMs: 100, stopDelayMs: 100 });
+  await new Promise((r) => obs3.wss.on('listening', r));
+  const port3 = obs3.wss.address().port;
+  const { auctioneer: A3 } = await connectAll(srv3, ctx3, 0);
+  const is = (pred, ms = 5000) => A3.waitFor((x) => x.type === 'stream' && pred(x.stream), ms);
+  const listedP = is((s) => s.cameras.length === 3);
+  const agent3 = spawn('node', ['src/agent.js'], {
+    cwd: path.join(ROOT, 'agent'), stdio: 'ignore',
+    env: { ...process.env, AGENT_SERVER_URL: srv3.agentUrl, AGENT_TOKEN: ctx3.tokens.agent, OBS_URL: `ws://127.0.0.1:${port3}`, AGENT_LOG_DIR: path.join(ctx3.dataDir, 'agent-logs') },
+  });
+  try {
+    const listed = await listedP;
+    assert.deepEqual(listed.stream.cameras, ['カメラ: スマホ', 'カメラ: 無線', 'カメラ: USB'], 'OBS の画面と同じ並び。「カメラ」で始まらないシーンは出さない');
+    assert.equal(listed.stream.camera, 'カメラ: スマホ');
+    // 配信中に切り替えても、配信は止まらない
+    const on = is((s) => s.obsActive === true);
+    await A3.cmd('stream_start');
+    await on;
+    const switched = is((s) => s.camera === 'カメラ: USB');
+    assert.equal((await A3.cmd('camera', { camera: 'カメラ: USB' })).ok, true);
+    await switched;
+    assert.equal(obs3.state.current, 'カメラ: USB');
+    assert.equal(obs3.state.active, true, '切り替えても、配信は続く');
+    const bad = await A3.cmd('camera', { camera: '休憩の画面' });
+    assert.equal(bad.ok, false, '「カメラ」で始まらないシーンには、切り替えない');
+    assert.match(bad.message, /OBS にありません/);
+    assert.equal(obs3.state.current, 'カメラ: USB');
+    // OBS の画面で、手で切り替えた場合も、進行コンソールに伝わる
+    const manual = is((s) => s.camera === 'カメラ: スマホ');
+    const c = new (await import('ws')).WebSocket(`ws://127.0.0.1:${port3}`);
+    await new Promise((r) => c.on('open', r));
+    c.send(JSON.stringify({ op: 6, d: { requestType: 'SetCurrentProgramScene', requestId: 'x', requestData: { sceneName: 'カメラ: スマホ' } } }));
+    await manual;
+    c.close();
+    // OBS が止まったら、カメラの一覧を消す（切り替えられないため）
+    const cleared = is((s) => s.cameras.length === 0);
+    await obs3.close();
+    await cleared;
+  } finally { agent3.kill(); await obs3.close().catch(() => {}); await srv3.stop(); cleanup(ctx3); }
+});
+
+test('OBS の出力解像度を 960×720 にそろえる。配信中は止まってから。基本解像度の比が違えば変えずに知らせる（報告書 93 章）', async () => {
+  const run = async (video, check) => {
+    const ctx4 = makeEnv(T);
+    const srv4 = await startServer(ctx4);
+    const obs4 = startMockObs({ port: 0, startDelayMs: 100, stopDelayMs: 100, video });
+    await new Promise((r) => obs4.wss.on('listening', r));
+    const { auctioneer: A4 } = await connectAll(srv4, ctx4, 0);
+    const is = (pred, ms = 5000) => A4.waitFor((x) => x.type === 'stream' && x.stream.video && pred(x.stream.video), ms);
+    const agent4 = spawn('node', ['src/agent.js'], {
+      cwd: path.join(ROOT, 'agent'), stdio: 'ignore',
+      env: { ...process.env, AGENT_SERVER_URL: srv4.agentUrl, AGENT_TOKEN: ctx4.tokens.agent, OBS_URL: `ws://127.0.0.1:${obs4.wss.address().port}`, AGENT_LOG_DIR: path.join(ctx4.dataDir, 'agent-logs'), AGENT_VIDEO_POLL_MS: '200' },
+    });
+    try { await check({ A4, obs4, is }); } finally { agent4.kill(); await obs4.close(); await srv4.stop(); cleanup(ctx4); }
+  };
+  // 基本 1440×1080・出力 1440×1080 → 出力を 960×720 にする
+  await run({}, async ({ obs4, is }) => {
+    const v = await is((x) => x.output[0] === 960);
+    assert.deepEqual([v.stream.video.output, v.stream.video.base, v.stream.video.state], [[960, 720], [1440, 1080], 'ok']);
+    assert.deepEqual([obs4.state.video.outputWidth, obs4.state.video.outputHeight, obs4.state.video.baseWidth], [960, 720, 1440], '基本解像度は変えない');
+  });
+  // 配信中につながった → 止まるまで待って、止まったらそろえる
+  await run({}, async ({ A4, obs4, is }) => {
+    obs4.state.active = true;
+    await is((x) => x.state === 'streaming');
+    assert.equal(obs4.state.video.outputWidth, 1440, '配信中は変えない');
+    const done = is((x) => x.output[0] === 960);
+    await A4.cmd('stream_stop');
+    await done;
+  });
+  // 基本解像度が 16:9 → 変えずに知らせる
+  await run({ baseWidth: 1920, baseHeight: 1080, outputWidth: 1280, outputHeight: 720 }, async ({ obs4, is }) => {
+    const v = await is((x) => x.state === 'base_aspect');
+    assert.deepEqual(v.stream.video.output, [1280, 720]);
+    assert.equal(obs4.state.video.outputWidth, 1280, 'ゆがむので、変えない');
+  });
+  // つないだあとで、OBS の画面で映像の設定が手で変えられた（OBS は、そのことを知らせない）→ 読みにいって気づく
+  await run({}, async ({ obs4, is }) => {
+    await is((x) => x.output[0] === 960 && x.state === 'ok');
+    Object.assign(obs4.state.video, { baseWidth: 1920, baseHeight: 1080, outputWidth: 1096, outputHeight: 616 });
+    const v = await is((x) => x.state === 'base_aspect');
+    assert.deepEqual([v.stream.video.base, v.stream.video.output], [[1920, 1080], [1096, 616]]);
+    assert.equal(obs4.state.video.outputWidth, 1096, 'ゆがむので、変えない');
+    // 基本解像度を 4:3 に戻すと、出力をそろえ直す
+    Object.assign(obs4.state.video, { baseWidth: 1440, baseHeight: 1080 });
+    const v2 = await is((x) => x.state === 'ok' && x.output[0] === 960);
+    assert.deepEqual(v2.stream.video.output, [960, 720]);
+    assert.deepEqual([obs4.state.video.outputWidth, obs4.state.video.outputHeight], [960, 720]);
+  });
+});
+
+test('配信エージェントの合言葉を、設定（POC_AGENT_TOKEN）から登録する。ほかの合言葉は使えなくなる（報告書 94 章）', async () => {
+  const { WebSocket } = await import('ws');
+  const tryAgent = (url, token) => new Promise((resolve) => {
+    const ws = new WebSocket(url, { headers: { authorization: `Bearer ${token}` } });
+    ws.on('open', () => { ws.close(); resolve('open'); });
+    ws.on('unexpected-response', (_, res) => resolve(res.statusCode));
+    ws.on('error', () => resolve('error'));
+  });
+  const token = 'x'.repeat(16) + Math.random().toString(36).slice(2) + 'y'.repeat(16);
+  const ctx5 = makeEnv({ ...T, POC_AGENT_TOKEN: token });
+  const srv5 = await startServer(ctx5);
+  try {
+    assert.equal(await tryAgent(srv5.agentUrl, token), 'open', '設定の合言葉で、つながる');
+    assert.equal(await tryAgent(srv5.agentUrl, ctx5.tokens.agent), 401, '開発用の合言葉は、使えなくなる');
+    assert.equal(await tryAgent(srv5.agentUrl, 'wrong'), 401);
+  } finally { await srv5.stop(); }
+  // 合言葉を変えて起動し直すと、前の合言葉は使えない。短すぎる値は登録しない
+  const token2 = token.replace(/x/g, 'z');
+  ctx5.env.POC_AGENT_TOKEN = token2;
+  const srv6 = await startServer(ctx5);
+  try {
+    assert.equal(await tryAgent(srv6.agentUrl, token2), 'open');
+    assert.equal(await tryAgent(srv6.agentUrl, token), 401, '前の合言葉は、使えなくなる');
+  } finally { await srv6.stop(); }
+  ctx5.env.POC_AGENT_TOKEN = 'short';
+  const srv7 = await startServer(ctx5);
+  try {
+    assert.equal(await tryAgent(srv7.agentUrl, 'short'), 401, '32文字に満たない合言葉は、登録しない');
+    assert.equal(await tryAgent(srv7.agentUrl, token2), 'open', 'その場合は、前の登録のまま');
+  } finally { await srv7.stop(); cleanup(ctx5); }
+});

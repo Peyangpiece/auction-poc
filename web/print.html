@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>印刷｜令和の競り</title>
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<link rel="stylesheet" href="print.css">
+</head>
+<body>
+<!-- 配送の印刷（発注者の指示。報告書 131 章）: 宛名ラベル・同梱する納品書・梱包の作業票。管理画面の「配送」から開く。
+     運送会社の正式な送り状は、運送会社のシステムから印刷する（ここで刷るものは、その代わりにはならない） -->
+<header class="bar" id="bar">
+  <div>
+    <b id="docName">印刷</b>
+    <span id="docInfo"></span>
+  </div>
+  <div class="bar__acts">
+    <button class="btn" id="doPrint" type="button">印刷する</button>
+    <button class="btn btn--plain" id="doClose" type="button">閉じる</button>
+  </div>
+</header>
+<p class="msg" id="msg" role="alert"></p>
+<main id="sheet"></main>
+<script src="site.js"></script>
+<script src="print.js"></script>
+</body>
+</html>

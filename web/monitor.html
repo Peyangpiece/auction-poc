@@ -4,15 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<meta name="theme-color" content="#00013a">
+<meta name="theme-color" content="#000000">
 <meta name="color-scheme" content="dark">
 <title>会場モニター｜令和の競り</title>
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-title" content="令和の競り">
-<!-- impeccable-disable overused-font: Inter は、数字と英字のために決めてある書体 -->
-<link rel="preload" href="inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="monitor.css">
 </head>
@@ -24,7 +22,13 @@
 </header>
 <main>
   <h1 class="sr-only">会場モニター</h1>
-  <section class="now" aria-live="polite">
+  <!-- 待機・休憩・終了のあいだは、画面の中央に大きく出す（前の品の結果や、空の履歴を残さない） -->
+  <section class="idle" id="idle" hidden aria-live="polite">
+    <p class="idle__title" id="idleTitle"></p>
+    <p class="idle__sub dyn" id="idleSub"></p>
+  </section>
+  <section class="now" id="now" aria-live="polite">
+    <p class="state" id="state"></p>
     <p class="lot"><span class="digits" id="lotNo"></span><span class="dyn" id="title">次の品をお待ちください</span></p>
     <p class="label" id="priceLabel">現在価格</p>
     <p class="price digits" id="price"></p>
