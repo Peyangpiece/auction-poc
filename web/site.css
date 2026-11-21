@@ -679,5 +679,8 @@ body.staffpage #login { margin-inline: auto; }
 .paycard b { font-size: 0.9375rem; }
 .paycard__n { font-size: 0.8125rem; color: var(--ink-2); }
 .paycard__sum { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-.paycard .btn { margin-top: 6px; justify-self: start; }
+.paycard > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.paycard .btn { margin-top: 6px; justify-self: start; white-space: normal; }
+/* せまい画面では、2列に固定する（文字の幅で、カードが画面からはみ出さないように） */
+@media (max-width: 700px) { .paysum { grid-template-columns: repeat(2, minmax(0, 1fr)); } .paycard { padding: 10px; } .paycard[data-on="1"] { padding: 9px; } }
 #billing .paysum + .note { margin-bottom: 16px; }

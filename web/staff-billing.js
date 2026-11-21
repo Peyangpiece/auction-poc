@@ -136,7 +136,7 @@ async function billingPanel() {
     pick('状態', 'state', [['', 'すべて'], ['open', '未入金（未精算・請求済み・未払い）'], ...Object.entries(LINE_STATE)]));
   const summary = el('p', { class: 'note', role: 'status' });
   // 支払方法ごとの集計（発注者の指示。報告書 133 章）: 上で選んだ開催の、銀行振込・当日現金・当日クレジットごとの、人数・点数・金額・入金済み・未入金。
-  // ほかの絞り込み（会員・受け取り・状態）には左右されない。「見る」を押すと、その支払方法で絞り込む
+  // ほかの絞り込み（会員・受け取り・状態）には左右されない。「絞り込む」を押すと、その支払方法で絞り込む
   const paySummary = (() => {
     const live = res.lines.filter((l) => l.state !== 'cancelled');
     if (!live.length) return null;
@@ -152,7 +152,7 @@ async function billingPanel() {
         el('span', { class: 'paycard__sum', text: yen(sum(ls)) }),
         el('span', { class: 'note', text: `入金済み ${yen(sum(ls.filter(paid)))}` }),
         el('span', { class: open ? 'warn' : 'note', text: `未入金 ${yen(open)}` }),
-        key === undefined ? null : smallBtn(key === '' ? 'すべて見る' : on ? '絞り込み中' : 'この方法だけ見る', () => { billingFilter.payment = key; show('billing'); }));
+        key === undefined ? null : smallBtn(key === '' ? 'すべて' : on ? '絞り込み中' : '絞り込む', () => { billingFilter.payment = key; show('billing'); }));
     };
     const t = el('div', { class: 'paysum', role: 'list' },
       ...Object.entries(PAY).map(([k, label]) => card(label, live.filter((l) => l.payMethod === k), k)),
