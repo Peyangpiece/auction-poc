@@ -28,7 +28,8 @@ section > h2 { margin-bottom: 8px; }
 #title { color: var(--board-ink); font-weight: 700; font-size: 1.125rem; overflow-wrap: anywhere; }
 .board .state { color: var(--board-ink); }
 .plabel { font-size: 0.8125rem; color: var(--board-ink-2); margin-bottom: 4px; }
-.price { font-size: 5.75rem; }
+/* 現在価格は小さめに（映像の枠を大きく保つため。発注者の指示。報告書 132 章） */
+.price { font-size: 3.5rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
 .actions [hidden] { display: none; }
 /* 進行役の主な操作（締め・次を開始）は、板の幅いっぱいの大きなボタン */
@@ -172,8 +173,8 @@ section[aria-labelledby="histTitle"]:has(tbody:empty), section[aria-labelledby="
 /* オンライン参加者と同じ映像（報告書 101 章）。参加者の画面と同じ 4:3 */
 .viewbox[hidden] { display: none; }
 .viewsound { position: absolute; right: 10px; bottom: 10px; min-height: 36px; padding: 4px 12px; font-size: 0.875rem; background: rgb(0 0 0 / .55); color: #fff; }
-/* 映像は板の上に置くので、板と操作のボタン（締め・うりきり）がスクロールなしで見えるよう、残りの高さで大きさを決める（約 525px が、上の帯・板・ボタンの分） */
-.viewframe { position: relative; aspect-ratio: 4 / 3; width: min(100%, max(240px, calc((100dvh - 525px) * 4 / 3))); margin-inline: auto; border-radius: var(--r, 12px); overflow: hidden; background: #000; }
+/* 映像は板の上に置くので、板と操作のボタン（締め・うりきり）がスクロールなしで見えるよう、残りの高さで大きさを決める（約 488px が、上の帯・板・ボタンの分） */
+.viewframe { position: relative; aspect-ratio: 4 / 3; width: min(100%, max(240px, calc((100dvh - 488px) * 4 / 3))); margin-inline: auto; border-radius: var(--r, 12px); overflow: hidden; background: #000; }
 .viewframe video { display: block; width: 100%; height: 100%; object-fit: contain; }
 .viewoff { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: #fff; font-size: 0.9375rem; background: #000; }
 .viewoff[hidden] { display: none; }
