@@ -33,7 +33,7 @@ export function createInvoiceRoutes(deps) {
     needStaff(ctx, 'admin');
     const i = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
     if (!i) throw new HttpError(404, '請求書が見つかりません');
-    if (i.kind === 'cash') throw new HttpError(409, '当日現金の精算の請求書は、その場で渡すので、送付の記録はありません');
+    if (i.kind === 'cash') throw new HttpError(409, '会場での精算の請求書は、その場で渡すので、送付の記録はありません');
     if (i.sent_at) return { ok: true, dueDate: i.due_date };
     // 送ったことを記録する（FR-INV-008）。支払期限は、発行したときに決まっている（発行日の5日後）。
     // ただし、送るのが遅れて、期限が今日より前になっている請求書は、今日の発行として期限を決め直し、作り直す（本番運用の評価 B2）

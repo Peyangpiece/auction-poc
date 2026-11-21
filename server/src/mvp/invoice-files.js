@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PAY_SHORT } from './shared.js';
 import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
 
@@ -41,8 +42,8 @@ function content({ invoice, lines, shipping = [], org: rawOrg, to: rawTo, issued
     // 無効にした領収書（精算をすべて取り消したもの）: 大きく「無効」と入れる（発注者の決定）
     voided: voidedOn ? `この領収書は、${jpDate(voidedOn)}に精算を取り消したため、無効です。` : null,
     // 支払期限は、発行日の5日後（違約金などは7日後）の日付だけを書く（発注者の指示）
-    due: receipt ? `領収日 : ${jpDate(receipt.paidOn)}（${receipt.method === 'cash' ? '現金' : '銀行振込'}にて領収しました）`
-      : invoice.kind === 'cash' ? `領収日 : ${jpDate(paidOn)}（現金にて領収しました）` : `お支払い期限 : ${jpDate(invoice.due_date)}`,
+    due: receipt ? `領収日 : ${jpDate(receipt.paidOn)}（${PAY_SHORT[receipt.method] ?? '銀行振込'}にて領収しました）`
+      : invoice.kind === 'cash' ? `領収日 : ${jpDate(paidOn)}（${PAY_SHORT[invoice.paidMethod] ?? '現金'}にて領収しました）` : `お支払い期限 : ${jpDate(invoice.due_date)}`,
     // 発行者: 住所（郵便番号から。改行できる）のあと、1行あけて、電話・メール・登録番号（原本と同じ並び）
     issuer: { name: org.org_name, address: String(org.org_address ?? '').split('\n').filter(Boolean), contact: [org.org_tel && `TEL: ${org.org_tel}`, org.org_email, `登録番号: ${org.invoice_reg_no || '（未設定）'}`].filter(Boolean) },
     // 落札した品を1行ずつ。そのあとに、買歩銭を1行（発注者から示された見本と同じ並び）

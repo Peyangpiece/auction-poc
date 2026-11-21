@@ -172,7 +172,7 @@ const AUDIT_TEXT = {
 };
 // 記録の「前」「後」（機械向けの形）を、読める言葉にする
 const AUDIT_KEY = { mode: '参加', payment: '支払', receive: '受け取り', checkedIn: '来場確認', paddle: '参加番号', kind: '区分', fields: '変えた項目', loginId: 'ログイン ID', role: '役割', by: '登録元', amount: '金額', title: '名前', status: '状態', reason: '理由', memo: 'メモ', shipping: '送料', dueDate: '期限', number: '請求番号' };
-const AUDIT_VALUE = { venue: '会場', online: 'オンライン', cash: '当日現金', transfer: '銀行振込', pickup: '現地受け取り', ship: '配送', b2c: '個人', b2b: '法人', true: 'はい', false: 'いいえ', admin: '主催者管理者', auctioneer: '進行役', caller: 'オークショニア', reception: '受付係', operator: '開発運営者' };
+const AUDIT_VALUE = { venue: '会場', online: 'オンライン', cash: '当日現金', card: '当日クレジット', transfer: '銀行振込', pickup: '現地受け取り', ship: '配送', b2c: '個人', b2b: '法人', true: 'はい', false: 'いいえ', admin: '主催者管理者', auctioneer: '進行役', caller: 'オークショニア', reception: '受付係', operator: '開発運営者' };
 // 記録の「対象」を、読める形にする（member:12 → 会員 12。報告書 81 章）
 const TARGET_KIND = { member: '会員', staff: 'スタッフ', event: '開催', lot: '品', line: '明細', offer: '繰り上げ', participant: '参加者', invoice: '請求書', account: '会員' };
 const targetText = (t) => String(t ?? '').replace(/\b([a-z]+):(\d+)\b/g, (m, k, id) => (TARGET_KIND[k] ? `${TARGET_KIND[k]} ${id}` : m));

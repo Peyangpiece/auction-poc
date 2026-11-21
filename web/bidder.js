@@ -703,12 +703,13 @@ if (!token) (async () => {
   // 参加手続き: 受け取り方法と支払方法を、どちらも選ばれていない状態で聞く（FR-MODE-005）
   const showJoin = () => {
     $('gateEvent').textContent = `${p.event.title}　${asVenue ? '会場参加' : 'オンライン参加'}`;
-    // 当日現金は、会場参加の人だけが選べる（FR-PAY-002）
-    const cash = $('join').elements.payment[1];
-    cash.disabled = !asVenue;
-    if (!asVenue) cash.checked = false;
-    cash.closest('label').classList.toggle('off', !asVenue);
-    $('cashNote').hidden = asVenue;
+    // 当日現金・当日クレジットは、会場参加の人だけが選べる（FR-PAY-002。報告書 133 章）
+    for (const onsite of [...$('join').elements.payment].filter((i) => i.value !== 'transfer')) {
+      onsite.disabled = !asVenue;
+      if (!asVenue) onsite.checked = false;
+      onsite.closest('label').classList.toggle('off', !asVenue);
+      onsite.closest('label').querySelector('small').hidden = asVenue;
+    }
     $('modePick').hidden = true;
     $('join').hidden = false;
     $('backToMode').hidden = p.venue;
@@ -754,7 +755,7 @@ const SWITCH = {
   toVenue: { now: '参加のしかた: オンライン参加', button: '会場参加に切り替える', title: '会場参加に切り替えますか？', url: '/api/my/participation/venue',
     text: '切り替えると、会場の受付で来場の確認を受けるまで、入札できなくなります。会場にいない場合は、切り替えないでください。' },
   toOnline: { now: '参加のしかた: 会場参加', button: 'オンライン参加に切り替える', title: 'オンライン参加に切り替えますか？', url: '/api/my/participation/online',
-    text: '切り替えると、お支払いは銀行振込になります（すでに当日現金で精算した分は、そのままです）。会場参加に戻すときは、もう一度、受付で来場の確認を受けてください。' },
+    text: '切り替えると、お支払いは銀行振込になります（すでに会場で精算した分は、そのままです）。会場参加に戻すときは、もう一度、受付で来場の確認を受けてください。' },
 };
 const switchPlan = () => (venue ? SWITCH.toOnline : SWITCH.toVenue);
 $('toVenue').addEventListener('click', () => {

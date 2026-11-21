@@ -32,7 +32,11 @@ export const bad = (message, extra) => new HttpError(400, message, extra);
 export const parseJson = (text) => JSON.parse(text, (key, value) => (key === 'toString' || key === 'valueOf' ? undefined : value));
 
 // ---- 請求まわり（billing.js と、そこから分けたファイルが使う）
-export const PAY = { transfer: '銀行振込', cash: '当日現金' };
+// 支払方法は3つ（発注者の決定。報告書 133 章）: 銀行振込・当日現金・当日クレジット。当日現金と当日クレジットは、会場で払う方法（会場参加の人だけ）
+export const PAY = { transfer: '銀行振込', cash: '当日現金', card: '当日クレジット' };
+export const ONSITE = ['cash', 'card'];
+/** 領収書などに書く、短い呼び名 */
+export const PAY_SHORT = { transfer: '銀行振込', cash: '現金', card: 'クレジット' };
 export const RECV = { pickup: '現地受け取り', ship: '配送' };
 export const FEE_RATE = 5; // 手数料 5%（FR-FEE-001。決定）
 

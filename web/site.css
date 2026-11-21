@@ -672,3 +672,12 @@ body.staffpage #login { margin-inline: auto; }
   .shiprow td:nth-child(5) > div { flex-basis: 100%; margin-left: 0; width: auto; text-align: left; }
   .shiprow td:nth-child(4) > div { margin-left: auto; }
 }
+/* 請求: 支払方法ごとの集計（報告書 133 章）。銀行振込・当日現金・当日クレジット・合計を、カードで横に並べる */
+.paysum { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 8px; }
+.paycard { display: grid; gap: 2px; align-content: start; padding: 12px 14px; border: 1px solid var(--edge); border-radius: var(--r); background: var(--ground); min-width: 0; }
+.paycard[data-on="1"] { border-color: var(--action); border-width: 2px; padding: 11px 13px; }
+.paycard b { font-size: 0.9375rem; }
+.paycard__n { font-size: 0.8125rem; color: var(--ink-2); }
+.paycard__sum { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.paycard .btn { margin-top: 6px; justify-self: start; }
+#billing .paysum + .note { margin-bottom: 16px; }

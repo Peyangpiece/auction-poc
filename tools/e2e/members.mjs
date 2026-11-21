@@ -255,6 +255,7 @@ try {
   await phone.click('[data-pick=venue]');
   await phone.waitForSelector('#join:not([hidden])');
   check(await phone.isEnabled('#join [name=payment][value=cash]'), '会場を選ぶと、当日現金が選べる');
+  check(await phone.isEnabled('#join [name=payment][value=card]'), '会場を選ぶと、当日クレジットも選べる（報告書 133 章）');
   await phone.click('#backToMode');
   await phone.click('[data-pick=online]');
   await phone.waitForSelector('#join:not([hidden])');
@@ -436,6 +437,8 @@ try {
   check((await admin.textContent('#panel table')).includes('¥11,000') && (await admin.textContent('#panel table')).includes('落札 ¥10,000＋買歩銭 ¥1,000'), '落札すると、請求の画面に「未精算」の明細が出る。金額は、落札額＋買歩銭10%');
   await admin.check('#panel table input[type=checkbox]');
   await shot(admin, 'mvp-24-billing-settle');
+  check(await admin.isVisible('#panel >> text=1件を、当日クレジットで精算'), '明細を選ぶと、当日現金と当日クレジットの、精算のボタンが出る');
+  { const t = (await admin.textContent('#panel .paysum')).replace(/\s+/g, ' '); check(t.includes('銀行振込') && t.includes('当日現金') && t.includes('当日クレジット') && t.includes('合計'), '請求の画面に、支払方法ごとの集計（銀行振込・当日現金・当日クレジット）が出る'); }
   await admin.click('#panel >> text=1件を、当日現金で精算');
   await admin.waitForSelector('#dlg[open]');
   check(/請求書（領収書を兼ねる）\d{8}-0001 を発行しました/.test(await admin.textContent('#dlg')), '精算すると、請求書（領収書を兼ねる）を発行する');
@@ -451,7 +454,7 @@ try {
   await admin.waitForSelector('#panel td >> text=引き渡し済み');
   check(true, '消し込みのあとに、引き渡しを記録できる');
   // 請求書は、別の表にせず、会員の行に出す（報告書 128 章）
-  check(/\d{8}-0001/.test(await admin.textContent('#panel .memberrow')) && (await admin.textContent('#panel .memberrow')).includes('現金の精算') && !(await admin.textContent('#panel')).includes('請求番号'), '請求書の番号・種類は、会員の行に出る（請求書だけの表は、無い）');
+  check(/\d{8}-0001/.test(await admin.textContent('#panel .memberrow')) && (await admin.textContent('#panel .memberrow')).includes('会場での精算') && !(await admin.textContent('#panel')).includes('請求番号'), '請求書の番号・種類は、会員の行に出る（請求書だけの表は、無い）');
   if (shots) { await admin.waitForTimeout(700); await admin.mouse.move(5, 5); }
   await shot(admin, 'mvp-25b-billing-member', { fullPage: true });
   // 配送の画面（報告書 130 章）: 区分に「配送」があり、開ける

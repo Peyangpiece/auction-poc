@@ -372,7 +372,7 @@ function onMessage(msg, at) {
   }
 }
 // ---- 開催（休憩・開催終了）と、落札一覧、代理入札
-const PAYMENT = { transfer: '銀行振込', cash: '当日現金' };
+const PAYMENT = { transfer: '銀行振込', cash: '当日現金', card: '当日クレジット' };
 const RECEIVE = { pickup: '現地受け取り', ship: '配送' };
 // 競りの時間外: 本日の開催がない、または終わったうえで、進行中・待機の品がないとき。進行の操作は出さない（発注者の指示）
 const WORKING = ['waiting', 'preparing', 'preparing_warn', 'open', 'suspended'];

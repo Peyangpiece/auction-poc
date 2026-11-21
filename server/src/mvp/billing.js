@@ -340,7 +340,8 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   }
   /** 請求書・領収書のファイルに書く中身（発行者・宛先・件名・印鑑） */
   const fileArgs = (inv, lines, shipping, a, org) => ({
-    dir: invoiceDir, invoice: inv, lines, shipping, org, to: { name: displayName(a), address: a.kind === 'b2b' && a.billing ? a.billing : a.address },
+    // 会場で精算した請求書（領収書を兼ねる）には、受け取った方法（現金・クレジット）を書く（報告書 133 章）
+    dir: invoiceDir, invoice: { ...inv, paidMethod: lines.length && lines.every((l) => l.cleared_method === 'card') ? 'card' : 'cash' }, lines, shipping, org, to: { name: displayName(a), address: a.kind === 'b2b' && a.billing ? a.billing : a.address },
     seal: sealFile(),
     premium: { total: lines.reduce((s, l) => s + (l.premium ?? 0), 0), rate: premiumRate() },
     issuedOn: jst(inv.issued_at), paidOn: inv.kind === 'cash' ? jst(inv.issued_at) : null,
@@ -355,7 +356,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   function renderReceipt(inv) {
     const running = receiptJobs.get(inv.id);
     if (running) return running;
-    if (inv.kind === 'cash') throw new HttpError(409, '当日現金の精算は、請求書が領収書を兼ねています');
+    if (inv.kind === 'cash') throw new HttpError(409, '会場での精算（当日現金・当日クレジット）は、請求書が領収書を兼ねています');
     const all = db.prepare('SELECT * FROM bill_lines WHERE invoice_id = ? AND cancelled_at IS NULL ORDER BY id').all(inv.id);
     if (!all.length || all.some((l) => !l.cleared_at)) throw new HttpError(409, 'お支払いの確認が済んでいないので、領収書は、まだ発行できません');
     const lines = all.filter((l) => l.kind !== 'shipping'), shipping = all.filter((l) => l.kind === 'shipping');
@@ -363,7 +364,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
     const org = Object.fromEntries(['org_name', 'org_address', 'org_tel', 'org_email', 'invoice_reg_no', 'bank_account'].map((k) => [k, setting(k)]));
     const last = all.reduce((x, l) => (l.cleared_at > x.cleared_at ? l : x));
     // 領収の日は、入金の日（消し込みに記録した日）のうち、いちばん新しい日
-    const files = makeFiles({ ...fileArgs(inv, lines, shipping, a, org), receipt: { paidOn: jst(last.cleared_at), method: all.every((l) => l.cleared_method === 'cash') ? 'cash' : 'transfer', total: all.reduce((s, l) => s + payable(l), 0) } });
+    const files = makeFiles({ ...fileArgs(inv, lines, shipping, a, org), receipt: { paidOn: jst(last.cleared_at), method: ['cash', 'card'].find((m) => all.every((l) => l.cleared_method === m)) ?? 'transfer', total: all.reduce((s, l) => s + payable(l), 0) } });
     track(files.done);
     receiptJobs.set(inv.id, files);
     files.done.catch(() => {}).finally(() => receiptJobs.delete(inv.id));
@@ -450,8 +451,12 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   const staffLineView = (l) => {
     const a = account(l.account_id);
     const p = l.participant_id ? db.prepare('SELECT paddle_no, payment, mode FROM members WHERE id = ?').get(l.participant_id) : null;
+    const v = lineView(l);
     return {
-      ...lineView(l), name: displayName(a), accountId: a.id, paddle: p?.paddle_no ?? null, payment: p?.payment ?? null,
+      ...v, name: displayName(a), accountId: a.id, paddle: p?.paddle_no ?? null, payment: p?.payment ?? null,
+      // 請求の管理で使う支払方法（報告書 133 章）: 入金が済んでいれば、実際に受け取った方法。まだなら、振込の請求書を出していれば銀行振込、
+      // 出していなければ、本人が参加手続きで選んだ方法（当日現金・当日クレジットを選んで、会場で精算しなかった人は、開催終了のあと、銀行振込になる）
+      payMethod: l.cleared_method ?? (v.invoice && v.invoice.kind !== 'cash' ? 'transfer' : p?.payment ?? null),
       dunning: db.prepare('SELECT at, method, body FROM dunning WHERE line_id = ? ORDER BY id').all(l.id),
       refunds: db.prepare('SELECT amount, refunded_on AS refundedOn, method, reason FROM refunds WHERE line_id = ? ORDER BY id').all(l.id),
       offer: db.prepare('SELECT state, amount, deadline FROM offers WHERE line_id = ?').get(l.id) ?? null,

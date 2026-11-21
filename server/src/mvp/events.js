@@ -1,5 +1,5 @@
 // 開催・参加手続き・開催のお知らせメール（報告書 119 章で、api.js から分けた。中身は、分ける前と同じ）
-import { DAY, HOUR, HttpError, bad } from './shared.js';
+import { DAY, HOUR, HttpError, ONSITE, PAY, bad } from './shared.js';
 import { isEmail, randomToken, safeEqual, sha256 } from './security.js';
 import { compose, jpDay, subjectOf } from './mails.js';
 
@@ -206,7 +206,7 @@ export function createEvents(deps) {
   });
   const participant = (accountId, eventId) => db.prepare('SELECT id, paddle_no, name, account_id, event_id, receive, payment, mode, checked_in_at, checkin_code FROM members WHERE account_id = ? AND event_id = ?').get(accountId, eventId) ?? null;
   const RECEIVE = { pickup: '現地受け取り', ship: '配送' };
-  const PAYMENT = { transfer: '銀行振込', cash: '当日現金' };
+  const PAYMENT = PAY;
   /** 会場の QR コードの合言葉が、いまの開催のものか（FR-MODE-002） */
   const venueMatches = (event, code) => !!event?.venue_code && !!code && safeEqual(event.venue_code, String(code));
   route('GET', '/api/participation', (ctx) => {
@@ -228,14 +228,14 @@ export function createEvents(deps) {
   // 受け取り方法と支払方法の変更（参加者本人。開催終了まで。FR-PAY-009、FR-SHIP-008）
   // 会場参加を選んだ人が、自分でオンライン参加に直す（発注者の指示。まちがえて選んだ人が、入れないままにならないように）。
   // 来場確認が済んだあとでも、直せる（発注者の決定）。来場確認は取り消すので、会場参加に戻すときは、もう一度受付で確認を受ける。
-  // 当日現金を選んでいた場合は、銀行振込にする（すでに当日現金で精算した分は、そのまま）
+  // 当日現金・当日クレジットを選んでいた場合は、銀行振込にする（すでに会場で精算した分は、そのまま）
   route('POST', '/api/my/participation/online', (ctx) => {
     const member = needMember(ctx);
     const event = activeEvent();
     const p = event ? participant(member.id, event.id) : null;
     if (!p) throw new HttpError(409, '参加手続きが済んでいません');
     if (p.mode !== 'venue') return { ok: true, paddle: p.paddle_no, mode: p.mode, checkedIn: true, payment: p.payment };
-    const payment = p.payment === 'cash' ? 'transfer' : p.payment;
+    const payment = ONSITE.includes(p.payment) ? 'transfer' : p.payment;
     db.prepare("UPDATE members SET mode = 'online', payment = ?, checked_in_at = NULL WHERE id = ?").run(payment, p.id);
     audit(ctx, 'participation.change', { target: `participant:${p.id}`, before: { mode: 'venue', payment: p.payment, checkedIn: !!p.checked_in_at }, after: { mode: 'online', payment } });
     return { ok: true, paddle: p.paddle_no, mode: 'online', checkedIn: true, payment, paymentChanged: payment !== p.payment };
@@ -259,7 +259,7 @@ export function createEvents(deps) {
     if (!p) throw new HttpError(409, '開催が終了したため、ここでは変更できません。変更は主催者に連絡してください');
     const next = { receive: body.receive ?? p.receive, payment: body.payment ?? p.payment };
     if (!Object.hasOwn(RECEIVE, next.receive) || !Object.hasOwn(PAYMENT, next.payment)) throw bad('受け取り方法と支払方法を選んでください');
-    if (p.mode === 'online' && next.payment === 'cash') throw bad('当日現金は、会場で参加する方だけが選べます');
+    if (p.mode === 'online' && ONSITE.includes(next.payment)) throw bad(`${PAY[next.payment]}は、会場で参加する方だけが選べます`);
     db.transaction(() => {
       db.prepare('UPDATE members SET receive = ?, payment = ? WHERE id = ?').run(next.receive, next.payment, p.id);
       // 受け取り方法は、その開催で落札したすべての明細に使う。発行済みの請求書は出し直さない（FR-INV-006）
@@ -278,9 +278,9 @@ export function createEvents(deps) {
     const mode = body.venueCode || body.mode === 'venue' ? 'venue' : 'online';
     const errors = {};
     if (!Object.hasOwn(RECEIVE, body.receive)) errors.receive = '受け取り方法を選んでください';
-    // オンライン参加の人は、銀行振込だけを選べる。会場参加の人は、当日現金と銀行振込のどちらも選べる（FR-PAY-002）
+    // オンライン参加の人は、銀行振込だけを選べる。会場参加の人は、当日現金・当日クレジット・銀行振込のどれも選べる（FR-PAY-002。報告書 133 章）
     if (!Object.hasOwn(PAYMENT, body.payment)) errors.payment = '支払方法を選んでください';
-    else if (mode === 'online' && body.payment === 'cash') errors.payment = '当日現金は、会場で参加する方だけが選べます';
+    else if (mode === 'online' && ONSITE.includes(body.payment)) errors.payment = `${PAY[body.payment]}は、会場で参加する方だけが選べます`;
     if (Object.keys(errors).length) throw bad('受け取り方法と支払方法の両方に、お答えください', { errors });
     const existing = participant(member.id, event.id);
     // 1回の開催の中では、参加モードは変えられない（FR-MODE-004）。オンラインから会場への変更は、受付係の来場確認で行う

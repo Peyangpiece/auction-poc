@@ -115,10 +115,10 @@ export function createUnpaid(deps) {
   route('POST', '/api/billing/lines/:id/refund', (ctx, body, id) => {
     const me = needStaff(ctx, 'admin');
     const l = getLine(id);
-    const amount = Number(body.amount), on = text(body.date, 10), method = body.method === 'cash' ? 'cash' : body.method === 'transfer' ? 'transfer' : null, reason = text(body.reason);
+    const amount = Number(body.amount), on = text(body.date, 10), method = ['cash', 'transfer', 'card'].includes(body.method) ? body.method : null, reason = text(body.reason);
     if (!Number.isSafeInteger(amount) || amount < 1) throw bad('返金額を、1円以上の整数で入力してください');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(on)) throw bad('返金日を入力してください');
-    if (!method) throw bad('返金の方法（現金・振込）を選んでください');
+    if (!method) throw bad('返金の方法（現金・振込・クレジット）を選んでください');
     if (!reason) throw bad('返金の理由を入力してください');
     // 返金日は、未来の日にしない。手数料を確認済みにした月にもしない（確認済みの金額が、あとから変わらないように。本番運用の評価 B1）
     if (on > today()) throw bad('返金日に、未来の日は入れられません');

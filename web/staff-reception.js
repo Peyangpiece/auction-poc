@@ -2,7 +2,7 @@
 'use strict';
 
 // ------------------------------------------------------------ 受付: 来場確認（FR-MODE-002・004）と、会場の QR コード
-const PAY = { transfer: '銀行振込', cash: '当日現金' };
+const PAY = { transfer: '銀行振込', cash: '当日現金', card: '当日クレジット' };
 const RECV = { pickup: '現地受け取り', ship: '配送' };
 async function receptionPanel() {
   const res = await api('GET', '/api/reception');
@@ -31,7 +31,7 @@ async function receptionPanel() {
         smallBtn('参加手続きを代わりに行う', () => askForm('参加手続きを、代わりに行う', '',
           [field('会員の電話番号', 'phone', { type: 'tel', inputMode: 'tel', required: true }),
             field('受け取り方法', 'receive', { options: [['', '選んでください'], ['pickup', '現地受け取り'], ['ship', '配送']] }),
-            field('支払方法', 'payment', { options: [['', '選んでください'], ['cash', '当日現金'], ['transfer', '銀行振込']] })],
+            field('支払方法', 'payment', { options: [['', '選んでください'], ['cash', '当日現金'], ['card', '当日クレジット'], ['transfer', '銀行振込']] })],
           async (d) => { const r = await api('POST', '/api/reception/join', d); if (r.ok) alertLine(`参加番号 ${r.paddle} を振りました。この番号の札を渡してください。`); return r; }, '参加番号を振る')), ' ',
         smallBtn('会場の QR コード', () => qrDialog(res.event)), ' ',
         smallBtn('QR コードを読み取る', scanDialog, 'btn-primary'))),
@@ -44,6 +44,7 @@ function switchDialog(p) {
     el('p', { text: `参加番号 ${p.paddle} を、オンライン参加から会場参加に切り替えます。支払方法を、本人に聞いて選んでください。` }),
     el('fieldset', { class: 'choice' }, el('legend', { text: '支払方法' }),
       el('label', {}, el('input', { type: 'radio', name: 'payment', value: 'cash' }), '当日現金'),
+      el('label', {}, el('input', { type: 'radio', name: 'payment', value: 'card' }), '当日クレジット'),
       el('label', {}, el('input', { type: 'radio', name: 'payment', value: 'transfer' }), '銀行振込')),
     msgLine(),
     el('div', { class: 'actions' }, el('button', { class: 'btn btn-primary', type: 'submit', text: '切り替えて、来場を確認' }), closeBtn('やめる')));

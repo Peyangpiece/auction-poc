@@ -154,6 +154,47 @@ test('当日現金の精算と、開催終了の請求書（AC-FR-PAY-010-1、AC
   } finally { await t.close(); }
 });
 
+test('当日クレジット: 会場参加の人だけが選べる。会場で精算すると、クレジットで受け取った記録になる。支払方法ごとに管理できる（報告書 133 章）', async () => {
+  const t = await setup();
+  try {
+    const reception = await t.staffLogin('reception', 'uketsuke');
+    const a = await t.member(1, { venue: true, payment: 'card' });   // 会場参加・当日クレジット
+    const b = await t.member(2);                                      // オンライン参加・銀行振込
+    const c = await t.member(3, { venue: true });                     // 会場参加・当日現金
+    assert.equal((await b.post('/api/my/participation', { payment: 'card' })).status, 400, 'オンライン参加は、当日クレジットに変えられない');
+    // まちがえて会場参加を選んだ人が、オンライン参加に直すと、当日クレジットは銀行振込になる
+    const d = await t.member(4, { venue: true, payment: 'card' });
+    const sw = await d.post('/api/my/participation/online');
+    assert.deepEqual([sw.status, sw.json.mode, sw.json.payment, sw.json.paymentChanged], [200, 'online', 'transfer', true]);
+    t.sold('飯ごう', [[b, 1000], [a, 2000]]);
+    t.sold('寝袋', [[a, 1000], [b, 3000]]);
+    t.sold('水筒', [[a, 1000], [c, 4000]]);
+    t.sold('ランタン', [[b, 1000], [a, 5000]]);
+    const first = await t.line('飯ごう');
+    assert.deepEqual([first.payment, first.payMethod, first.state], ['card', 'card', 'unsettled'], '未精算のあいだは、本人が選んだ方法');
+    assert.equal((await reception.post('/api/billing/settle', { lineIds: [first.id], method: 'transfer' })).status, 400, '会場での精算は、当日現金か当日クレジットだけ');
+    const settled = await reception.post('/api/billing/settle', { lineIds: [first.id], method: 'card' });
+    assert.deepEqual([settled.status, settled.json.method, settled.json.methodLabel], [200, 'card', '当日クレジット']);
+    const after = await t.line('飯ごう');
+    assert.deepEqual([after.state, after.clearedMethod, after.payMethod, after.invoice.kind], ['cleared', 'card', 'card', 'cash'], '請求書は、会場での精算（領収書を兼ねる）');
+    const pdfFile = t.store.db.prepare('SELECT pdf_file FROM invoices WHERE id = ?').get(settled.json.invoice.id).pdf_file;
+    const txt = pdfText(pdfFile);
+    if (txt !== null) assert.match(txt, /クレジットにて領収しました/);
+    assert.equal(t.store.db.prepare('SELECT method FROM clearings WHERE line_id = ?').get(first.id).method, 'card');
+    // 当日現金を選んだ人を、クレジットで精算してもよい（その場で変えた）: 実際に受け取った方法で数える
+    const w = await t.line('水筒');
+    assert.equal((await reception.post('/api/billing/settle', { lineIds: [w.id], method: 'card' })).status, 200);
+    assert.deepEqual([(await t.line('水筒')).payment, (await t.line('水筒')).payMethod], ['cash', 'card']);
+    // 当日クレジットを選んで、会場で精算しなかった品は、開催終了のあと、銀行振込の請求書になる
+    await t.endEvent();
+    const lantern = await t.line('ランタン');
+    assert.deepEqual([lantern.payment, lantern.payMethod, lantern.invoice.kind], ['card', 'transfer', 'transfer']);
+    // 開催終了のあとに会場・事務所で受け取ったクレジットの記録は、受付係もできる
+    assert.equal((await reception.post(`/api/billing/lines/${lantern.id}/clear`, { amount: lantern.payable, method: 'card' })).status, 200);
+    assert.equal((await t.line('ランタン')).payMethod, 'card');
+  } finally { await t.close(); }
+});
+
 test('支払期限は発行日の5日後の日付。送付済みの記録。消し込みは金額が一致するときだけ', async () => {
   const t = await setup();
   try {
