@@ -664,3 +664,11 @@ body.staffpage #login { margin-inline: auto; }
   .linerow td:nth-child(3)::before { content: none; }
   .linerow td:nth-child(3) > div { font-size: 0.9375rem; font-weight: 600; color: var(--ink); text-align: left; }
 }
+
+/* ---- 配送の画面（報告書 130 章）。行の形は、請求の一覧（会員1人につき1行）と同じ */
+@media (min-width: 701px) { .shiprow .btn, .shiprow + .linerow .btn, .linerow .btn { white-space: nowrap; } }
+@media (max-width: 700px) {
+  .shiprow td:nth-child(5) { flex-wrap: wrap; row-gap: 4px; }
+  .shiprow td:nth-child(5) > div { flex-basis: 100%; margin-left: 0; width: auto; text-align: left; }
+  .shiprow td:nth-child(4) > div { margin-left: auto; }
+}

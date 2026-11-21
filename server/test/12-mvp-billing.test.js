@@ -810,3 +810,50 @@ test('精算の取り消し（報告書 118 章）: 開催が終わったあと�
     await new Promise((r) => setTimeout(r, 500));
   } finally { await t.close(); }
 });
+
+test('配送の管理（報告書 130 章）: 開催ごと・顧客ごとに、配送済みと未配送を管理する。品ごとにも記録できる。お支払いの確認の前は、配送済みにできない', async () => {
+  const t = await setup();
+  try {
+    const a = await t.member(1, { receive: 'ship' }), b = await t.member(2), c = await t.member(3, { receive: 'ship' });
+    t.sold('飯ごう', [[a, 2000]]); t.sold('寝袋', [[a, 3000]]); t.sold('水筒', [[b, 500]]); t.sold('ランタン', [[c, 1000]]);
+    await t.endEvent();
+    const get = async () => (await t.admin.get('/api/billing/shipping')).json;
+    let s = await get();
+    assert.equal(s.event, t.eventId);
+    assert.deepEqual(s.events.map((e) => [e.id, e.lines, e.open]), [[t.eventId, 3, 3]], '配送の品のある開催だけ。点数と、未配送の点数');
+    assert.deepEqual(s.customers.map((x) => [x.name, x.lines.length, x.state]), [['検証 1郎', 2, 'unpaid'], ['検証 3郎', 1, 'unpaid']], '顧客ごとに1件。現地受け取りの人（2郎）は、出ない');
+    assert.match(s.customers[0].address, /東京都千代田区1/);
+    const [l1, l2] = s.customers[0].lines, l3 = s.customers[1].lines[0];
+    // お支払いの確認の前は、配送済みにできない（1件でも混ざっていれば、何も記録しない）
+    const early = await t.admin.post('/api/billing/shipping/ship', { lineIds: [l1.id, l2.id] });
+    assert.equal(early.status, 409);
+    assert.match(early.json.message, /お支払いの確認/);
+    for (const l of [l1, l2, l3]) { const line = (await t.lines()).find((x) => x.id === l.id); assert.equal((await t.admin.post(`/api/billing/lines/${l.id}/clear`, { amount: line.payable })).status, 200); }
+    assert.deepEqual((await get()).customers.map((x) => x.state), ['ready', 'ready']);
+    // 品ごとに記録する → その顧客は「一部」
+    assert.deepEqual((await t.admin.post('/api/billing/shipping/ship', { lineIds: [l1.id], memo: '（例）伝票 1234' })).json, { ok: true, shipped: 1 });
+    s = await get();
+    assert.deepEqual([s.customers[0].state, s.customers[0].lines.map((x) => [x.state, x.memo])], ['partial', [['shipped', '（例）伝票 1234'], ['ready', '']]]);
+    assert.equal(s.events[0].open, 2);
+    // 顧客ごとに、残りをまとめて記録する（済んでいるものは、そのまま）
+    assert.equal((await t.admin.post('/api/billing/shipping/ship', { lineIds: [l1.id, l2.id], memo: '（例）伝票 5678' })).json.shipped, 1);
+    s = await get();
+    assert.deepEqual([s.customers[0].state, s.customers[0].lines.map((x) => x.memo)], ['shipped', ['（例）伝票 1234', '（例）伝票 5678']], '先に記録した品のメモは、書き換えない');
+    assert.equal((await t.line('飯ごう')).state, 'delivered', '配送済みは、引き渡しの記録と同じ');
+    // 配送の品でないもの・現地受け取りの品は、断る
+    assert.equal((await t.admin.post('/api/billing/shipping/ship', { lineIds: [(await t.line('水筒')).id] })).status, 409);
+    // 受付係: 記録はできる。取り消しは、主催者管理者だけ（理由が要る）
+    const reception = await t.staffLogin('reception', 'uketsuke2');
+    assert.equal((await reception.post('/api/billing/shipping/ship', { lineIds: [l3.id] })).status, 200);
+    assert.equal((await reception.post('/api/billing/shipping/unship', { lineIds: [l3.id], reason: 'x' })).status, 403);
+    assert.equal((await t.admin.post('/api/billing/shipping/unship', { lineIds: [l3.id] })).status, 400, '理由が要る');
+    assert.deepEqual((await t.admin.post('/api/billing/shipping/unship', { lineIds: [l3.id], reason: 'まちがえた' })).json, { ok: true, unshipped: 1 });
+    assert.equal((await get()).customers[1].state, 'ready');
+    assert.equal((await t.admin.post('/api/billing/shipping/memo', { lineIds: [l1.id], memo: '（例）直した番号' })).status, 200);
+    assert.equal((await get()).customers[0].lines[0].memo, '（例）直した番号');
+    const types = t.store.db.prepare('SELECT type FROM audit_log').all().map((r) => r.type);
+    for (const type of ['view.shipping', 'billing.deliver', 'billing.undeliver', 'billing.ship_memo']) assert.ok(types.includes(type), type);
+    assert.equal((await a.get('/api/billing/shipping')).status, 401, '会員は、開けない');
+    await new Promise((r) => setTimeout(r, 300));
+  } finally { await t.close(); }
+});

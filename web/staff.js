@@ -5,6 +5,7 @@
 const PANELS = {
   reception: ['受付', receptionPanel, ['admin', 'auctioneer', 'reception']],
   billing: ['請求', billingPanel, ['admin', 'reception']],
+  shipping: ['配送', shippingPanel, ['admin', 'reception']],
   pickup: ['未引き取り', pickupPanel, ['admin', 'auctioneer', 'reception']],
   events: ['開催', eventsPanel, ['admin']],
   members: ['会員', membersPanel, ['admin']],

@@ -75,7 +75,7 @@ try {
   await shot(admin, 'mvp-01-staff-login');
   await admin.waitForSelector('#tabs button');
   check((await admin.textContent('#who')).includes('主催者管理者'), '主催者管理者としてログインできる');
-  check((await admin.locator('#tabs button').count()) === 9, '主催者管理者には、9 の区分が出る');
+  check((await admin.locator('#tabs button').count()) === 10, '主催者管理者には、10 の区分が出る（配送を含む）');
 
   // 設定
   await admin.click('#tabs [data-key=settings]');
@@ -449,6 +449,12 @@ try {
   check(/\d{8}-0001/.test(await admin.textContent('#panel .memberrow')) && (await admin.textContent('#panel .memberrow')).includes('現金の精算') && !(await admin.textContent('#panel')).includes('請求番号'), '請求書の番号・種類は、会員の行に出る（請求書だけの表は、無い）');
   if (shots) { await admin.waitForTimeout(700); await admin.mouse.move(5, 5); }
   await shot(admin, 'mvp-25b-billing-member', { fullPage: true });
+  // 配送の画面（報告書 130 章）: 区分に「配送」があり、開ける
+  await admin.click('#tabs [data-key=shipping]');
+  await admin.waitForSelector('#panel [aria-label="配送の絞り込み"]');
+  check(await admin.locator('#panel select[aria-label="開催"]').count() === 1 && (await admin.locator('#panel .shiprow').count() > 0 || (await admin.textContent('#panel .empty')).includes('配送の品')), '管理画面に「配送」の区分があり、開催を選ぶ欄と、顧客の行（無ければ、案内）が出る');
+  await admin.click('#tabs [data-key=billing]');
+  await admin.waitForSelector('#panel .memberrow');
   // スマートフォンの幅の管理画面（報告書 129 章）: 表はカードに並べ替わり、ページが横に広がらない（これまでは、表の幅に引かれて、900px ほどに広がっていた）
   {
     const mob = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await admin.context().storageState() });
@@ -456,7 +462,7 @@ try {
     await mp.goto(sys.base + '/staff.html');
     await mp.waitForSelector('#tabs [data-key=billing]');
     const wide = [];
-    for (const key of ['billing', 'members', 'events', 'staff']) {
+    for (const key of ['billing', 'shipping', 'members', 'events', 'staff']) {
       await mp.click(`#tabs [data-key=${key}]`); await mp.waitForTimeout(500);
       if (key === 'billing') { await mp.waitForSelector('.memberrow'); await mp.click('.memberrow .expander'); await mp.waitForSelector('.linerow'); }
       const w = await mp.evaluate(() => [innerWidth, document.documentElement.scrollWidth]);

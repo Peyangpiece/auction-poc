@@ -83,6 +83,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   // 形の変更は、番号を付けて1回ずつ（migrate.js）
   migrate(db, 'billing', [
     { v: 1, name: '無効にした領収書（取り消した日と、取り消す前の明細）', up: (d) => { d.exec('ALTER TABLE invoices ADD COLUMN voided_at REAL'); d.exec('ALTER TABLE invoices ADD COLUMN void_lines TEXT'); } },
+    { v: 2, name: '配送のメモ（伝票番号など）', up: (d) => d.exec('ALTER TABLE bill_lines ADD COLUMN ship_memo TEXT') },
   ], { nowMs });
   if (!db.prepare("SELECT 1 FROM pragma_table_info('bill_lines') WHERE name = 'premium'").get()) db.exec('ALTER TABLE bill_lines ADD COLUMN premium INTEGER NOT NULL DEFAULT 0');
   // 繰り上げの打診のときの買歩銭（打診のあとに割合を変えても、案内した金額のまま請求する。本番運用の評価 C）
@@ -504,7 +505,7 @@ export function createBilling({ db, config, nowMs, audit, notifier, setting, rou
   }
 
   // ------------------------------------------------------------ 未引き取り（pickup.js）
-  createPickup({ account, audit, bad, db, displayName, invoiceAmounts, jst, needStaff, route, staffLineView, today });
+  createPickup({ account, audit, bad, db, displayName, invoiceAmounts, jst, needStaff, route, staffLineView, today, nowMs, getLine });
 
   // ------------------------------------------------------------ 手数料の集計（fees.js）
   const { feeSummary } = createFees({ HttpError, audit, bad, db, jst, needStaff, nowMs, route, setting, staffLineView, today });
