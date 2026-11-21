@@ -17,8 +17,14 @@ function openDialog(title, ...body) {
 }
 const closeBtn = (text = '閉じる') => el('button', { class: 'btn', type: 'button', text, onclick: () => dlg.close() });
 const msgLine = () => el('p', { class: 'msg', role: 'alert', tabIndex: -1 });
+// 狭い画面では、表を、1件ずつのカードに並べ替える（報告書 129 章）。そのとき、値の左に出す見出しを、各マスに持たせる
+function labelCells(heads, rows) {
+  for (const tr of rows) [...(tr?.children ?? [])].forEach((td, i) => { if (td.colSpan === 1 && heads[i] && !td.dataset.label) td.dataset.label = heads[i]; });
+  return rows;
+}
 function table(heads, rows, empty) {
   if (!rows.length) return el('p', { class: 'empty', text: empty });
+  labelCells(heads, rows);
   return el('div', { class: 'tablewrap' }, el('table', {},
     // 見出しのない列（選ぶ印・操作のボタン）にも、読み上げ用の名前を付ける
     el('thead', {}, el('tr', {}, heads.map((h, i) => (h ? el('th', { scope: 'col', text: h }) : el('th', { scope: 'col' }, el('span', { class: 'sr-only', text: i === 0 ? '選択' : '操作' })))))),

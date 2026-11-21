@@ -609,3 +609,58 @@ body.staffpage #login { margin-inline: auto; }
 .memberrow td:not(.act) > div { display: block; width: fit-content; margin-top: 4px; }
 .memberrow td.n > div { margin-left: 0; }
 .invline { white-space: nowrap; }
+
+/* ==== スマートフォンの幅の管理画面（報告書 129 章） ====
+   これまでは、表の幅に引かれて、ページ全体が横に広がっていた（請求の画面は、幅 390px の画面で 900px ほど）。 */
+@media (max-width: 899px) {
+  #app:not([hidden]) { grid-template-columns: minmax(0, 1fr); }
+  #panel { min-width: 0; }
+  /* 区分の札は、折り返して、全部を見せる（横に流すと、右の札に気づけない） */
+  .side #tabs { flex-wrap: wrap; overflow: visible; }
+  #releaseWarn .textbtn { min-height: 44px; padding: 0 4px; }
+}
+@media (max-width: 700px) {
+  /* 表は、1件ずつのカードに並べ替える: 見出しの行はしまい、各マスの左に、見出しを小さく出す */
+  .tablewrap { overflow: visible; }
+  .tablewrap table, .tablewrap tbody { display: block; width: 100%; }
+  .tablewrap thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .tablewrap tr { display: grid; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .tablewrap td { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 0; border: 0; text-align: right; min-width: 0; }
+  .tablewrap td::before { content: attr(data-label); flex: none; color: var(--ink-2); font-size: 0.8125rem; font-weight: 400; text-align: left; }
+  .tablewrap td:not([data-label])::before, .tablewrap td[data-label=""]::before { content: none; }
+  .tablewrap td:empty { display: none; }
+  .tablewrap th, .tablewrap td { word-break: normal; overflow-wrap: anywhere; }
+  .tablewrap td > div { text-align: right; }
+  .tablewrap td.act { justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+  .tablewrap td.dyn, .tablewrap td .dyn { overflow-wrap: anywhere; }
+  /* 絞り込みは、2列に並べる。探す欄と、開催は、1列ぶん全部 */
+  .filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .filters .filter { min-width: 0; }
+  .filters .filter--wide, .filters .filter:first-child { grid-column: 1 / -1; }
+  .filters .filter:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  /* 請求: 会員のカード。左の印（開く）と、名前を、いちばん上に。開いた明細は、内側に下げる */
+  .memberrow { position: relative; padding: 16px 0 14px; }
+  .memberrow td:first-child { position: absolute; right: 0; top: 10px; }
+  .memberrow td:nth-child(2) { justify-content: flex-start; font-size: 0.8125rem; }
+  .memberrow td:nth-child(2)::before { content: '会員番号'; }
+  .memberrow td:nth-child(3) { justify-content: flex-start; padding-right: 52px; font-size: 1.0625rem; }
+  .memberrow td:nth-child(3)::before { content: none; }
+  .memberrow td:nth-child(3) { display: block; text-align: left; }
+  .memberrow td:not(.act) > div { margin-left: auto; }
+  .memberrow td:nth-child(3) > div { margin-left: 0; text-align: left; }
+  .invline { white-space: normal; text-align: right; }
+  .tablewrap tr.linerow { padding: 12px 12px 12px 16px; border-left: 3px solid var(--line); }
+  .linerow td { background: none; }
+  .linerow td:first-child { padding-left: 0; justify-content: flex-start; }
+  .tablewrap tr.linerow { background: var(--ground-alt); }
+  .toolbar { gap: 8px; }
+}
+@media (max-width: 700px) {
+  /* 会員のカード: 状態の下に、請求書を、1通ずつ左から */
+  .memberrow td:nth-child(6) { flex-wrap: wrap; row-gap: 6px; }
+  .memberrow td:nth-child(6) .invline { flex-basis: 100%; margin-left: 0; width: auto; text-align: left; }
+  /* 開いた明細: 名前は、上の会員のカードにあるので出さない。品名を、左から */
+  .linerow td:nth-child(3) { display: block; font-size: 0; text-align: left; }
+  .linerow td:nth-child(3)::before { content: none; }
+  .linerow td:nth-child(3) > div { font-size: 0.9375rem; font-weight: 600; color: var(--ink); text-align: left; }
+}

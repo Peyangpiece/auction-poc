@@ -136,6 +136,8 @@ async function billingPanel() {
   const empty = el('p', { class: 'empty' });
   const linesTable = el('div', {}, el('div', { class: 'tablewrap' }, el('table', {},
     el('thead', {}, el('tr', {}, HEADS.map((h, i) => (h ? el('th', { scope: 'col', text: h }) : el('th', { scope: 'col' }, el('span', { class: 'sr-only', text: i === 0 ? '選択' : '操作' })))))), body)), empty);
+  // 開いた明細の行（品ごと）の見出し。狭い画面のカードで使う
+  labelCells(['', '', '品', '金額', '受け取り・支払', '状態', ''], rows);
   const items = res.lines.map((l, i) => ({ l, tr: rows[i] }));
   const OPEN = ['unsettled', 'billed', 'unpaid'];
   function applyFilter() {
@@ -194,6 +196,7 @@ async function billingPanel() {
       // 開いた明細の行: 2列目は、会員番号の列なので、空にする（参加番号は、会員の行に出している）
       if (isOpen) out.push(...list.map((it) => { it.tr.classList.add('linerow'); it.tr.children[1].textContent = ''; return it.tr; }));
     }
+    labelCells(HEADS, out.filter((tr) => tr.classList.contains('memberrow')));
     body.replaceChildren(...out);
     linesTable.firstChild.hidden = !hit.length;
     empty.hidden = !!hit.length;

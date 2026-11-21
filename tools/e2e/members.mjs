@@ -449,6 +449,23 @@ try {
   check(/\d{8}-0001/.test(await admin.textContent('#panel .memberrow')) && (await admin.textContent('#panel .memberrow')).includes('現金の精算') && !(await admin.textContent('#panel')).includes('請求番号'), '請求書の番号・種類は、会員の行に出る（請求書だけの表は、無い）');
   if (shots) { await admin.waitForTimeout(700); await admin.mouse.move(5, 5); }
   await shot(admin, 'mvp-25b-billing-member', { fullPage: true });
+  // スマートフォンの幅の管理画面（報告書 129 章）: 表はカードに並べ替わり、ページが横に広がらない（これまでは、表の幅に引かれて、900px ほどに広がっていた）
+  {
+    const mob = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await admin.context().storageState() });
+    const mp = await mob.newPage();
+    await mp.goto(sys.base + '/staff.html');
+    await mp.waitForSelector('#tabs [data-key=billing]');
+    const wide = [];
+    for (const key of ['billing', 'members', 'events', 'staff']) {
+      await mp.click(`#tabs [data-key=${key}]`); await mp.waitForTimeout(500);
+      if (key === 'billing') { await mp.waitForSelector('.memberrow'); await mp.click('.memberrow .expander'); await mp.waitForSelector('.linerow'); }
+      const w = await mp.evaluate(() => [innerWidth, document.documentElement.scrollWidth]);
+      if (w[0] !== 390 || w[1] > 391) wide.push(`${key}: ${w.join('/')}`);
+    }
+    check(wide.length === 0, `スマートフォンの幅（390px）で、管理画面の請求・会員・開催・スタッフが、横に広がらない${wide.length ? '（' + wide.join('、') + '）' : ''}`);
+    await shot(mp, 'mvp-25c-staff-phone', { fullPage: true });
+    await mob.close();
+  }
   await shot(admin, 'mvp-25-billing', { fullPage: true });
   await guest.goto(sys.base + '/mypage.html');
   await guest.waitForSelector('#invoices .invitems');

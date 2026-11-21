@@ -197,3 +197,11 @@ section[aria-labelledby="histTitle"]:has(tbody:empty), section[aria-labelledby="
 
 /* ==== 画面の幅いっぱいに使う（発注者の指示。報告書 127 章） ==== */
 .brandbar > div, main { max-width: none; }
+
+/* スマートフォンの幅: 板の下のボタン（うりきり・中断など）の高さを、そろえる（報告書 129 章） */
+@media (max-width: 700px) {
+  #b_urikiri, #b_suspend, #b_resume, #b_back, #b_nv, #b_pass, #b_cancel { min-height: 56px; padding-inline: 20px; flex: 1 1 auto; }
+}
+/* 落札一覧の表は、枠の中で横に動かす（ページごと横に広がらないように） */
+.tablewrap { overflow-x: auto; max-width: 100%; }
+main > *, .col, .col > section { min-width: 0; }
