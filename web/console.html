@@ -46,20 +46,6 @@
 </section>
 <main id="consoleMain">
   <div class="col">
-    <section class="eventbar" id="eventBar" aria-label="開催" hidden>
-      <div>
-        <b class="dyn" id="evTitle"></b>
-        <span class="state" id="evPhase"></span>
-        <span id="evWarn" role="status"></span>
-      </div>
-      <!-- 次の開始予定の時刻は、「休憩に入る」を押したときだけ聞く（ふだんは使わない欄を出さない）。開催終了は、離して置く（報告書 88 章） -->
-      <div class="evacts">
-        <!-- 開催を始める: 押すまでは、品を開始できない（発注者の決定。報告書 124 章）。始める前は、休憩・終了は出さない -->
-        <button class="btn btn-primary" id="b_evstart" type="button" hidden>開催を始める</button>
-        <button class="btn" id="b_break" type="button">休憩に入る…</button>
-        <button class="btn btn-danger" id="b_end" type="button">開催終了…</button>
-      </div>
-    </section>
     <!-- オンライン参加者と同じ映像（左の列のいちばん上、進行中の品（うりきり・最高入札者の板）の上。発注者の指示。IVS から再生。参加者と同じく数秒遅れて届く）。映像をつないでいる設定のときだけ出す（報告書 101 章） -->
     <section class="viewbox" id="viewBox" aria-labelledby="viewTitle" hidden>
       <!-- 見出しは画面に出さない（発注者の指示）。読み上げ用にだけ残す -->
@@ -141,6 +127,21 @@
   </div>
 
   <div class="col">
+    <!-- 開催の帯（開催を始める・休憩に入る・開催終了）は、右の列のいちばん上（発注者の指示。報告書 132 章）。左の列は、映像をいちばん上に -->
+    <section class="eventbar" id="eventBar" aria-label="開催" hidden>
+      <div>
+        <b class="dyn" id="evTitle"></b>
+        <span class="state" id="evPhase"></span>
+        <span id="evWarn" role="status"></span>
+      </div>
+      <!-- 次の開始予定の時刻は、「休憩に入る」を押したときだけ聞く（ふだんは使わない欄を出さない）。開催終了は、離して置く（報告書 88 章） -->
+      <div class="evacts">
+        <!-- 開催を始める: 押すまでは、品を開始できない（発注者の決定。報告書 124 章）。始める前は、休憩・終了は出さない -->
+        <button class="btn btn-primary" id="b_evstart" type="button" hidden>開催を始める</button>
+        <button class="btn" id="b_break" type="button">休憩に入る…</button>
+        <button class="btn btn-danger" id="b_end" type="button">開催終了…</button>
+      </div>
+    </section>
     <section aria-labelledby="lotsTitle">
       <div class="sechead"><h2 id="lotsTitle">出品一覧</h2><span class="count num" id="lotsCount"></span></div>
       <ul class="lotlist" id="lots"></ul>
