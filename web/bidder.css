@@ -407,3 +407,9 @@ body.ended #cmtForm, body.ended #cmtCount, body.ended #modeLine { display: none;
   #videoBox { max-height: calc(100dvh - 128px); }
 }
 @media (min-width: 960px) { .brandbar > div, .top, main { padding-left: 32px; padding-right: 32px; } }
+/* スマホ・縦向きのタブレット（1列）: 映像を、画面の幅いっぱい（左右の余白なし・角の丸みなし）に大きく出す（発注者の指示。報告書 132 章）。
+   2列の画面（パソコン・横向き）は、これまでどおり */
+@media (max-width: 699.98px), (max-width: 959.98px) and (orientation: portrait) {
+  html { overflow-x: clip; }
+  #videoBox { width: 100vw; margin-inline: calc(50% - 50vw); border-radius: 0; }
+}
